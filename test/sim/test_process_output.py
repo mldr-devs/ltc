@@ -82,7 +82,7 @@ class ProcessOutputTestCase(unittest.TestCase):
         ])
         expected_R_i = -1.0
 
-        result_buffer_states, result_obs_i_t, result_R_i = process_rl_output(
+        result_buffer_states, result_obs_i_t, result_R_i = process_output(
             buffer_states, actions, channel_state, obs_i_t_minus, i
         )
 

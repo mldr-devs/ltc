@@ -1,1 +1,2 @@
-jax~=0.4.38
+jax==0.4.35
+reinforced-lib==1.1.5

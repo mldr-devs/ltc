@@ -12,7 +12,7 @@ def no_transmission(args):
 
 def transmission(args):
     buffer_state, r, channel_state = args
-    return jax.lax.cond(channel_state == 0, transmission_without_collision, transmission_with_collision, args)
+    return jax.lax.cond(channel_state == 1, transmission_without_collision, transmission_with_collision, args)
 
 
 def transmission_with_collision(args):
@@ -20,8 +20,7 @@ def transmission_with_collision(args):
     return jax.lax.cond(r < MAX_RETRANSMISSION, retransmission, max_retransmission_collision, args)
 
 
-def max_retransmission_collision(args):
-    buffer_state, r, channel_state = args
+def max_retransmission_collision(_):
     buffer_state = 0
     r = 0
     reward = COLLISION_PENALTY
@@ -31,7 +30,6 @@ def max_retransmission_collision(args):
 def retransmission(args):
     buffer_state, r, channel_state = args
     reward = COLLISION_PENALTY
-    buffer_state = buffer_state
     r = r + 1
     return reward, buffer_state, r
 
@@ -55,20 +53,20 @@ def successful_transmission(args):
     return reward, buffer_state, r
 
 
-@jax.jit
-def process_rl_output(buffer_states, actions, channel_state, obs_i_t_minus, i):
+def process_output_i(buffer_state, action, channel_state, obs):
     # update buffer state
-    r = obs_i_t_minus[-1][2]
-    channel_state = jnp.where(channel_state == -1, 1, channel_state)
-    action = actions[i]
-    buffer_state = buffer_states[i]
+    r = obs[-1, 2]
     args = (buffer_state, r, channel_state)
     R_i, buffer_state, r = jax.lax.cond(action == 1, transmission, no_transmission, args)
-    buffer_states = buffer_states.at[i].set(buffer_state)
 
     # update history
-    obs_t = jnp.array([buffer_states[i], channel_state, r])
-    obs_i_t = jnp.roll(obs_i_t_minus, -1, axis=0)
-    obs_i_t = obs_i_t.at[-1].set(obs_t)
+    channel_state = jnp.abs(channel_state)
+    obs_t = jnp.array([buffer_state, channel_state, r])
+    obs = jnp.roll(obs, -1, axis=0)
+    obs = obs.at[-1].set(obs_t)
 
-    return buffer_states, obs_i_t, R_i
+    return buffer_state, obs, R_i
+
+
+def process_output(buffer_states, actions, channel_state, obs):
+    return jax.vmap(process_output_i, in_axes=(0, 0, None, 0))(buffer_states, actions, channel_state, obs)
