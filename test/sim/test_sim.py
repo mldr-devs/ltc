@@ -1,8 +1,11 @@
 import unittest
-from mldr_sim.sim import *
+
+import jax.numpy as jnp
+
+from ltc.sim.sim import *
 
 
-class TestSimulate(unittest.TestCase):
+class SimulateTestCase(unittest.TestCase):
     def test_channel_state_selector(self):
         # Test no actions
         actions = jnp.array([0, 0, 0, 0])
@@ -71,7 +74,7 @@ class TestSimulate(unittest.TestCase):
         self.assertTrue(jnp.array_equal(result_buffer_states, expected_buffer_states))
         self.assertEqual(result_channel_state, expected_channel_state)
 
-        # Test simulation with no actions
+        # Test simulation with multiple actions
         buffer_states = jnp.array([0, 0, 0, 0])
         new_frames = jnp.array([0, 1, 0, 1])
         actions = jnp.array([1, 0, 0, 1])

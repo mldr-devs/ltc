@@ -1,8 +1,12 @@
 import unittest
-from mldr_sim.process_rl_output import *
+
+import jax.numpy as jnp
+
+from ltc.sim.constants import *
+from ltc.sim.process_output import *
 
 
-class TestProcessRlOutput(unittest.TestCase):
+class ProcessOutputTestCase(unittest.TestCase):
     def test_no_transmission(self):
         args = (1, 5, 0)
         reward, buffer_state, r = no_transmission(args)
@@ -27,21 +31,21 @@ class TestProcessRlOutput(unittest.TestCase):
     def test_transmission_with_collision_retransmission(self):
         args = (1, 2, 1)
         reward, buffer_state, r = transmission_with_collision(args)
-        self.assertEqual(reward, COLISSION_PENALTY)
+        self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(buffer_state, 1)
         self.assertEqual(r, 3)
 
     def test_transmission_with_collision_max_retransmission(self):
         args = (1, MAX_RETRANSMISSION, 1)
         reward, buffer_state, r = transmission_with_collision(args)
-        self.assertEqual(reward, COLISSION_PENALTY)
+        self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(buffer_state, 0)
         self.assertEqual(r, 0)
 
     def test_transmission_collision_path(self):
         args = (1, 7, 1)
         reward, buffer_state, r = transmission(args)
-        self.assertEqual(reward, COLISSION_PENALTY)
+        self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(buffer_state, 1)
         self.assertEqual(r, 8)
 

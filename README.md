@@ -1,2 +1,1 @@
-# ltc
-Learning to communicate
+# Learning to communicate

@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
-from mldr_sim.constants import *
+
+from ltc.sim.constants import *
 
 
 def no_transmission(args):
@@ -23,13 +24,13 @@ def max_retransmission_collision(args):
     buffer_state, r, channel_state = args
     buffer_state = 0
     r = 0
-    reward = COLISSION_PENALTY
+    reward = COLLISION_PENALTY
     return reward, buffer_state, r
 
 
 def retransmission(args):
     buffer_state, r, channel_state = args
-    reward = COLISSION_PENALTY
+    reward = COLLISION_PENALTY
     buffer_state = buffer_state
     r = r + 1
     return reward, buffer_state, r
@@ -56,16 +57,7 @@ def successful_transmission(args):
 
 @jax.jit
 def process_rl_output(buffer_states, actions, channel_state, obs_i_t_minus, i):
-    """
-
-    :param buffer_states:
-    :param actions:
-    :param channel_state:
-    :param obs_i_t_minus:
-    :param i:
-    :return:
-    """
-
+    # update buffer state
     r = obs_i_t_minus[-1][2]
     channel_state = jnp.where(channel_state == -1, 1, channel_state)
     action = actions[i]
