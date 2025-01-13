@@ -12,7 +12,7 @@ def no_transmission(args):
 
 def transmission(args):
     buffer_state, r, channel_state = args
-    return jax.lax.cond(channel_state == 1, transmission_without_collision, transmission_with_collision, args)
+    return jax.lax.cond(channel_state == 0, transmission_without_collision, transmission_with_collision, args)
 
 
 def transmission_with_collision(args):
@@ -41,7 +41,7 @@ def transmission_without_collision(args):
 
 def empty_buffer_transmission(args):
     buffer_state, r, channel_state = args
-    reward = 0.0
+    reward = EMPTY_TX_PENALTY
     return reward, buffer_state, r
 
 

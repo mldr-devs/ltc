@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltc"
+version = "0.1.0"
+requires-python = ">=3.12, <4"
+
+description = "Learning to communicate"
+readme = "README.md"
+license = { file = "LICENSE" }
+keywords = ["machine-learning", "reinforcement-learning", "jax", "wireless-communication", "multi-agent-systems"]
+
+authors = [
+  {name = "Maksymilian Wojnar", email = "maksymilian.wojnar@agh.edu.pl"},
+  {name = "Kamil Szczęch", email = "kamil.szczech@agh.edu.pl"},
+  {name = "Krzysztof Rusek", email = "krzysztof.rusek@agh.edu.pl"},
+  {name = "Katarzyna Kosek-Szott", email = "katarzyna.kosek-szott@agh.edu.pl"},
+  {name = "Szymon Szott", email = "szymon.szott@agh.edu.pl"}
+]
+
+dependencies = [
+    "reinforced-lib==1.2.0",
+]
