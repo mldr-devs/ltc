@@ -35,10 +35,11 @@ def add_new_frames(buffer_states, new_frames):
     """
     Updates the buffer_states by adding new frames from generator.
     :param buffer_states: vector with binary value of STAs' buffer occupation.
-    :param new_frames: vector with binary value which STA generates new frames.
+    :param new_frames: vector with new frames generated for each STA.
     :return:
         jnp.ndarray: updated buffer_states.
     """
+    new_frames = (new_frames > 0).astype(int)
     return jnp.bitwise_or(buffer_states, new_frames)
 
 

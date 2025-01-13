@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import optax
 from reinforced_lib.agents.deep import DDQN
 
-from ltc.sim import generate_frames, process_output, simulate
+from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.agents import DCF, QNetwork
 
 
@@ -23,22 +23,30 @@ def agent_step(agent, state, key, obs, action, reward, terminal):
     return state, action
 
 
-def rl_step(carry, step, *, drl_step, dcf_step, n, n_drl):
-    (drl_states, dcf_states), (buffer_states, channel_state), key, obs, actions, rewards, terminal = carry
+def init_traffic(traffic, key, n):
+    keys = jax.random.split(key, n)
+    states = jax.vmap(traffic.init)(keys)
+    step_fn = jax.vmap(traffic.sample, in_axes=(0, 0))
+    return states, step_fn
 
-    key, drl_keys, dcf_keys = jax.random.split(key, 3)
+
+def rl_step(carry, step, *, drl_step, dcf_step, traffic_step, n, n_drl):
+    (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal = carry
+
+    key, drl_keys, dcf_keys, traffic_key = jax.random.split(key, 4)
     drl_keys = jax.random.split(drl_keys, n_drl)
     dcf_keys = jax.random.split(dcf_keys, n - n_drl)
+    traffic_keys = jax.random.split(traffic_key, n)
 
     drl_states, drl_actions = drl_step(drl_states, drl_keys, obs[:n_drl], actions[:n_drl], rewards[:n_drl], terminal)
     dcf_states, dcf_actions = dcf_step(dcf_states, dcf_keys, obs[n_drl:], actions[n_drl:], rewards[n_drl:], terminal)
     actions = jnp.concatenate([drl_actions, dcf_actions])
 
-    new_frames = generate_frames(n, step)
+    traffic_states, new_frames = traffic_step(traffic_states, traffic_keys)
     buffer_states, channel_state = simulate(buffer_states, new_frames, actions)
     buffer_states, obs, rewards = process_output(buffer_states, actions, channel_state, obs)
 
-    carry = (drl_states, dcf_states), (buffer_states, channel_state), key, obs, actions, rewards, terminal
+    carry = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
     return carry, step + 1
 
 
@@ -77,6 +85,10 @@ if __name__ == '__main__':
     key, init_key = jax.random.split(key)
     dcf_states, dcf_step = init_agents(dcf, init_key, n - n_drl)
 
-    rl_step_fn = jax.jit(partial(rl_step, drl_step=drl_step, dcf_step=dcf_step, n=n, n_drl=n_drl))
-    init = (drl_states, dcf_states), (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    (states, *_), _ = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
+    key, init_key = jax.random.split(key)
+    traffic = cox_traffic(f3dB=1.0, loc=0.0, scale=0.0, initial_state=InitialStateConf.ZERO)
+    traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+
+    rl_step_fn = jax.jit(partial(rl_step, drl_step=drl_step, dcf_step=dcf_step, traffic_step=traffic_step, n=n, n_drl=n_drl))
+    init = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
+    (agent_states, *_), _ = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
