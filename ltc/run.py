@@ -3,6 +3,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import optax
+from jax_tqdm import scan_tqdm
 from reinforced_lib.agents.deep import DDQN
 
 from ltc.agents import DCF, QNetwork
@@ -92,6 +93,7 @@ if __name__ == '__main__':
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn = jax.jit(partial(rl_step, drl_step=drl_step, dcf_step=dcf_step, traffic_step=traffic_step, n=n, n_drl=n_drl))
+    rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
     init = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
     (agent_states, *_), agent_rewards = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
 
