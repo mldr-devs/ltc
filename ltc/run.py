@@ -5,8 +5,9 @@ import jax.numpy as jnp
 import optax
 from reinforced_lib.agents.deep import DDQN
 
-from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.agents import DCF, QNetwork
+from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
+from ltc.utils import plot_cumulative_rewards, plot_rewards
 
 
 def init_agents(agent, key, n):
@@ -30,7 +31,7 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(carry, step, *, drl_step, dcf_step, traffic_step, n, n_drl):
+def rl_step(carry, _, *, drl_step, dcf_step, traffic_step, n, n_drl):
     (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal = carry
 
     key, drl_keys, dcf_keys, traffic_key = jax.random.split(key, 4)
@@ -47,15 +48,16 @@ def rl_step(carry, step, *, drl_step, dcf_step, traffic_step, n, n_drl):
     buffer_states, obs, rewards = process_output(buffer_states, actions, channel_state, obs)
 
     carry = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    return carry, step + 1
+    return carry, rewards
 
 
 if __name__ == '__main__':
-    n, n_drl = 10, 2
-    n_steps = 1000
-    window_size = 5
-    key = jax.random.key(42)
+    n, n_drl = 5, 1
+    n_steps = 100000
+    window_size = 50
+    seed = 42
 
+    key = jax.random.key(seed)
     actions = jnp.zeros(n, dtype=int)
     buffer_states = jnp.zeros(n, dtype=int)
     channel_state = 0
@@ -91,4 +93,7 @@ if __name__ == '__main__':
 
     rl_step_fn = jax.jit(partial(rl_step, drl_step=drl_step, dcf_step=dcf_step, traffic_step=traffic_step, n=n, n_drl=n_drl))
     init = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    (agent_states, *_), _ = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
+    (agent_states, *_), agent_rewards = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
+
+    plot_rewards(agent_rewards, n, n_drl, seed)
+    plot_cumulative_rewards(agent_rewards, n, n_drl, seed)

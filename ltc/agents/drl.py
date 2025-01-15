@@ -10,8 +10,8 @@ def add_batch_dim(x):
 
 
 class QNetwork(nn.Module):
-    rnn_dim: int = 16
-    dense_dim: int = 32
+    rnn_dim: int = 32
+    dense_dim: int = 64
     num_layers: int = 4
     num_actions: int = 2
     dtype: jnp.dtype = jnp.bfloat16
