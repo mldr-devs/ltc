@@ -49,12 +49,12 @@ def rl_step(carry, _, *, drl_step, dcf_step, traffic_step, n, n_drl):
     buffer_states, obs, rewards = process_output(buffer_states, actions, channel_state, obs)
 
     carry = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    return carry, rewards
+    return carry, (actions, rewards, buffer_states, channel_state)
 
 
 if __name__ == '__main__':
     n, n_drl = 5, 1
-    n_steps = 100000
+    n_steps = 10000
     window_size = 50
     seed = 42
 
@@ -95,7 +95,6 @@ if __name__ == '__main__':
     rl_step_fn = jax.jit(partial(rl_step, drl_step=drl_step, dcf_step=dcf_step, traffic_step=traffic_step, n=n, n_drl=n_drl))
     rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
     init = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    (agent_states, *_), agent_rewards = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
+    (agent_states, *_), (actions, rewards, buffer_states, channel_states) = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
 
-    plot_rewards(agent_rewards, n, n_drl, seed)
-    plot_cumulative_rewards(agent_rewards, n, n_drl, seed)
+    jnp.savez(f'rewards_{n}_{n_drl}_{seed}.npz', actions=actions, rewards=rewards, buffer_states=buffer_states, channel_states=channel_states)
