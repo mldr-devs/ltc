@@ -80,3 +80,33 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.tight_layout()
     plt.savefig(f'cum_rewards_{n}_{n_drl}_{seed}.pdf')
     plt.show()
+
+
+def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggregation=100):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_steps = actions.shape[0]
+    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+
+    actions[np.where(channel_states != 1), :] = 0
+    actions = actions.reshape(-1, aggregation, n)
+    actions = actions.mean(axis=1)
+
+    for i in range(n - n_drl):
+        plt.plot(xs, actions[:, i], color='blue', linestyle='--')
+
+    for i in range(n - n_drl, n):
+        plt.plot(xs, actions[:, i], color='red')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Step')
+    plt.ylabel('Successful transmissions')
+    plt.xlim(0, n_steps)
+    plt.ylim(-1, 1)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'tx_{n}_{n_drl}_{seed}.pdf')
+    plt.show()

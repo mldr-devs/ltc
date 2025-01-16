@@ -8,7 +8,6 @@ from reinforced_lib.agents.deep import DDQN
 
 from ltc.agents import DCF, QNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
-from ltc.utils import plot_cumulative_rewards, plot_rewards
 
 
 def init_agents(agent, key, n):
@@ -97,4 +96,4 @@ if __name__ == '__main__':
     init = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
     (agent_states, *_), (actions, rewards, buffer_states, channel_states) = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
 
-    jnp.savez(f'rewards_{n}_{n_drl}_{seed}.npz', actions=actions, rewards=rewards, buffer_states=buffer_states, channel_states=channel_states)
+    jnp.savez(f'history_{n}_{n_drl}_{seed}.npz', actions=actions, rewards=rewards, buffer_states=buffer_states, channel_states=channel_states)
