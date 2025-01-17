@@ -89,6 +89,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
 
     actions[np.where(channel_states != 1), :] = 0
+    actions = actions.cumsum(axis=0)
     actions = actions.reshape(-1, aggregation, n)
     actions = actions.mean(axis=1)
 
@@ -104,7 +105,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     plt.xlabel('Step')
     plt.ylabel('Successful transmissions')
     plt.xlim(0, n_steps)
-    plt.ylim(-1, 1)
+    plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
     plt.tight_layout()

@@ -33,26 +33,27 @@ class DCF(BaseAgent):
             return state
 
         def countdown():
-            return DCFState(cw=state.cw, counter=state.counter - 1)
+            counter = jax.lax.max(state.counter - 1, 0)
+            return DCFState(cw=state.cw, counter=counter)
 
         def double_cw():
             cw = jax.lax.min(2 * state.cw, DCF.CW_MAX)
             backoff = jax.random.randint(key, (), 0, state.cw)
             return DCFState(cw=cw, counter=backoff)
 
-        buffer, _, ret_c = env_state[-1]
+        buffer, channel, ret_c = env_state[-1]
 
         return jax.lax.cond(
             jax.lax.bitwise_or(
-                jax.lax.bitwise_and(action == 1, reward > 0),
-                jax.lax.bitwise_or(buffer == 0, ret_c == 0)
+                jax.lax.bitwise_and(action == 1, ret_c == 0),  # successful transmission or max retransmission limit reached
+                buffer == 0                                    # empty buffer
             ),
             reset,
             lambda: jax.lax.cond(
-                jax.lax.bitwise_and(action == 1, reward < 0),
+                jax.lax.bitwise_and(action == 1, reward < 0),  # collision
                 double_cw,
                 lambda : jax.lax.cond(
-                    action == 0,
+                    channel == 0,                              # channel is idle and countdown in progress
                     countdown,
                     freeze
                 )
