@@ -33,11 +33,11 @@ def plot_rewards(rewards, n, n_drl, seed, aggregation=100):
     rewards = rewards.reshape(-1, aggregation, n)
     rewards = rewards.mean(axis=1)
 
-    for i in range(n - n_drl):
-        plt.plot(xs, rewards[:, i], color='blue', linestyle='--')
-
-    for i in range(n - n_drl, n):
+    for i in range(n_drl):
         plt.plot(xs, rewards[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, rewards[:, i], color='blue', linestyle='--')
 
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
@@ -63,11 +63,11 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
     cum_rewards = cum_rewards.reshape(-1, aggregation, n)
     cum_rewards = cum_rewards.mean(axis=1)
 
-    for i in range(n - n_drl):
-        plt.plot(xs, cum_rewards[:, i], color='blue', linestyle='--')
-
-    for i in range(n - n_drl, n):
+    for i in range(n_drl):
         plt.plot(xs, cum_rewards[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, cum_rewards[:, i], color='blue', linestyle='--')
 
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
@@ -93,11 +93,11 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     actions = actions.reshape(-1, aggregation, n)
     actions = actions.mean(axis=1)
 
-    for i in range(n - n_drl):
-        plt.plot(xs, actions[:, i], color='blue', linestyle='--')
-
-    for i in range(n - n_drl, n):
+    for i in range(n_drl):
         plt.plot(xs, actions[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, actions[:, i], color='blue', linestyle='--')
 
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
