@@ -21,7 +21,8 @@ class DCF(BaseAgent):
 
     @staticmethod
     def init(key):
-        return DCFState(cw=DCF.CW_MIN, counter=0)
+        backoff = jax.random.randint(key, (), 0, DCF.CW_MIN)
+        return DCFState(cw=DCF.CW_MIN, counter=backoff)
 
     @staticmethod
     def update(state, key, env_state, action, reward, terminal):
@@ -35,8 +36,8 @@ class DCF(BaseAgent):
             return DCFState(cw=state.cw, counter=state.counter - 1)
 
         def double_cw():
-            backoff = jax.random.randint(key, (), 0, state.cw)
             cw = jax.lax.min(2 * state.cw, DCF.CW_MAX)
+            backoff = jax.random.randint(key, (), 0, state.cw)
             return DCFState(cw=cw, counter=backoff)
 
         buffer, _, ret_c = env_state[-1]
