@@ -35,22 +35,25 @@ class DCF(BaseAgent):
             return DCFState(cw=state.cw, counter=state.counter - 1)
 
         def double_cw():
-            cw = jax.lax.min(2 * state.cw, DCF.CW_MAX)
             backoff = jax.random.randint(key, (), 0, state.cw)
+            cw = jax.lax.min(2 * state.cw, DCF.CW_MAX)
             return DCFState(cw=cw, counter=backoff)
 
-        buffer, channel, ret_c = env_state[-1]
+        buffer, _, ret_c = env_state[-1]
 
         return jax.lax.cond(
-            jax.lax.bitwise_or(jax.lax.bitwise_and(action == 1, ret_c == 0), buffer == 0),
+            jax.lax.bitwise_or(
+                jax.lax.bitwise_and(action == 1, reward > 0),
+                jax.lax.bitwise_or(buffer == 0, ret_c == 0)
+            ),
             reset,
             lambda: jax.lax.cond(
-                jax.lax.bitwise_and(action == 1, ret_c > 0),
+                jax.lax.bitwise_and(action == 1, reward < 0),
                 double_cw,
                 lambda : jax.lax.cond(
-                    channel == 1,
-                    freeze,
-                    countdown
+                    action == 0,
+                    countdown,
+                    freeze
                 )
             )
         )

@@ -44,11 +44,11 @@ def rl_step(carry, _, *, drl_step, dcf_step, traffic_step, n, n_drl):
     actions = jnp.concatenate([drl_actions, dcf_actions])
 
     traffic_states, new_frames = traffic_step(traffic_states, traffic_keys)
-    buffer_states, channel_state = simulate(buffer_states, new_frames, actions)
-    buffer_states, obs, rewards = process_output(buffer_states, actions, channel_state, obs)
+    new_buffer_states, channel_state = simulate(buffer_states, new_frames, actions)
+    obs, rewards = process_output(buffer_states, new_buffer_states, actions, channel_state, obs)
 
-    carry = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    return carry, (actions, rewards, buffer_states, channel_state)
+    carry = (drl_states, dcf_states), traffic_states, (new_buffer_states, channel_state), key, obs, actions, rewards, terminal
+    return carry, (actions, rewards, new_buffer_states, channel_state)
 
 
 if __name__ == '__main__':
