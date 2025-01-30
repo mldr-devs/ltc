@@ -7,7 +7,7 @@ from reinforced_lib.agents import BaseAgent, AgentState
 @dataclass
 class DCFState(AgentState):
     cw: int
-    counter: int
+    backoff: int
 
 
 class DCF(BaseAgent):
@@ -21,8 +21,9 @@ class DCF(BaseAgent):
 
     @staticmethod
     def init(key):
-        backoff = jax.random.randint(key, (), 0, DCF.CW_MIN)
-        return DCFState(cw=DCF.CW_MIN, counter=backoff)
+        cw = DCF.CW_MIN
+        backoff = jax.random.randint(key, (), 0, cw)
+        return DCFState(cw=cw, backoff=backoff)
 
     @staticmethod
     def update(state, key, env_state, action, reward, terminal):
@@ -33,13 +34,13 @@ class DCF(BaseAgent):
             return state
 
         def countdown():
-            counter = jax.lax.max(state.counter - 1, 0)
-            return DCFState(cw=state.cw, counter=counter)
+            backoff = jax.lax.max(state.backoff - 1, 0)
+            return DCFState(cw=state.cw, backoff=backoff)
 
         def double_cw():
             cw = jax.lax.min(2 * state.cw, DCF.CW_MAX)
             backoff = jax.random.randint(key, (), 0, state.cw)
-            return DCFState(cw=cw, counter=backoff)
+            return DCFState(cw=cw, backoff=backoff)
 
         buffer, channel, ret_c = env_state[-1]
 
@@ -63,4 +64,4 @@ class DCF(BaseAgent):
     @staticmethod
     def sample(state, key, env_state):
         buffer, channel, _ = env_state[-1]
-        return jnp.where(buffer == 0, 0, jax.lax.bitwise_and(state.counter == 0, channel == 0))
+        return jnp.where(buffer == 0, 0, jax.lax.bitwise_and(state.backoff == 0, channel == 0))
