@@ -85,7 +85,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
 if __name__ == '__main__':
     n, n_drl = 5, 1
     n_steps = 10000
-    window_size = 50
+    window_size = 5
     seed = 42
 
     key = jax.random.key(seed)
@@ -98,9 +98,9 @@ if __name__ == '__main__':
 
     drl = DDQN(
         q_network=QNetwork(),
-        obs_space_shape=(window_size, 3),
+        obs_space_shape=obs.shape[1:],
         act_space_size=2,
-        optimizer=optax.adam(3e-4),
+        optimizer=optax.adam(1e-3),
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,
         experience_replay_steps=5,

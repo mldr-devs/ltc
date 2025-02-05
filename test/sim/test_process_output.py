@@ -14,25 +14,25 @@ class ProcessOutputTestCase(unittest.TestCase):
         self.assertEqual(r, 5)
 
     def test_transmission_without_collision_empty_buffer(self):
-        args = (0, 3, 0)
+        args = (0, 3, 1)
         reward, r = transmission_without_collision(args)
         self.assertEqual(reward, EMPTY_TX_PENALTY)
         self.assertEqual(r, 3)
 
     def test_transmission_without_collision_successful(self):
-        args = (1, 2, 0)
+        args = (1, 2, 1)
         reward, r = transmission_without_collision(args)
         self.assertAlmostEqual(reward, TX_REWARD / (2 + 1) ** 2)
         self.assertEqual(r, 0)
 
     def test_transmission_with_collision_retransmission(self):
-        args = (1, 2, 1)
+        args = (1, 2, -1)
         reward, r = transmission_with_collision(args)
         self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(r, 3)
 
     def test_transmission_with_collision_max_retransmission(self):
-        args = (1, MAX_RETRANSMISSION, 1)
+        args = (1, MAX_RETRANSMISSION, -1)
         reward, r = transmission_with_collision(args)
         self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(r, 0)
@@ -61,14 +61,14 @@ class ProcessOutputTestCase(unittest.TestCase):
         actions = jnp.array([1, 0, 0, 1])
         channel_state = -1
         obs = jnp.array([[
-            [0, 0, 6],
-            [0, 0, 7],
-            [0, 0, 8]
+            [1, 1, 6],
+            [1, 1, 7],
+            [1, 1, 8]
         ]] * 4)
 
         expected_obs_0 = jnp.array([
-            [0, 0, 7],
-            [0, 0, 8],
+            [1, 1, 7],
+            [1, 1, 8],
             [0, 1, 0]
         ])
         expected_R_0 = -1.0
