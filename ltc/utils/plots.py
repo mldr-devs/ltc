@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ltc.sim.constants import NO_TX_REWARD
+
 COLUMN_WIDTH = 4.0
 COLUMN_HIGHT = COLUMN_WIDTH * 0.618
 
@@ -113,15 +115,15 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     plt.show()
 
 
-def plot_dcf_collision_probabilities(channel_states, seed):
+def plot_dcf_collision_probabilities(actions, rewards, seed):
     analytical = [0, 0.103, 0.176, 0.23, 0.268, 0.301, 0.328, 0.353, 0.368, 0.382]
 
-    n, vals = list(channel_states.keys()), []
+    n, vals = list(rewards.keys()), []
 
     for i in n:
-        tx_successful = (channel_states[i] == 1).sum()
-        tx_failed = (channel_states[i] == -1).sum()
-        vals.append(tx_failed / (tx_successful + tx_failed))
+        tx_successful = (rewards[i] > NO_TX_REWARD).sum(axis=0)
+        tx_all = (actions[i] == 1).sum(axis=0)
+        vals.append(1 - (tx_successful / tx_all).mean())
 
     plt.rcParams.update(PLOT_PARAMS)
     plt.plot(n, vals, marker='o', markersize=3, label='LTC DCF')
