@@ -1,13 +1,42 @@
+from dataclasses import dataclass
 from functools import partial
 
+import cloudpickle
 import jax
 import jax.numpy as jnp
+import lz4.frame
 import optax
 from jax_tqdm import scan_tqdm
+from reinforced_lib.agents import AgentState
 from reinforced_lib.agents.deep import DDQN
 
 from ltc.agents import DCF, QNetwork
-from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
+from ltc.sim import InitialStateConf, ModelState, cox_traffic, process_output, simulate
+
+
+@jax.tree_util.register_dataclass
+@dataclass
+class Carry:
+    drl_states: AgentState
+    dcf_states: AgentState
+    traffic_states: ModelState
+    buffer_states: jax.Array
+    channel_state: int
+    key: jax.random.PRNGKey
+    obs: jax.Array
+    actions: jax.Array
+    rewards: jax.Array
+    terminal: bool
+
+
+@jax.tree_util.register_dataclass
+@dataclass
+class Output:
+    dcf_states: AgentState
+    actions: jax.Array
+    rewards: jax.Array
+    buffer_states: jax.Array
+    channel_state: int
 
 
 def init_agents(agent, key, n):
@@ -31,24 +60,26 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(carry, _, *, drl_step, dcf_step, traffic_step, n, n_drl):
-    (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal = carry
+def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
+    def rl_step_fn(c, _):
+        key, drl_keys, dcf_keys, traffic_key = jax.random.split(c.key, 4)
+        drl_keys = jax.random.split(drl_keys, n_drl)
+        dcf_keys = jax.random.split(dcf_keys, n - n_drl)
+        traffic_keys = jax.random.split(traffic_key, n)
 
-    key, drl_keys, dcf_keys, traffic_key = jax.random.split(key, 4)
-    drl_keys = jax.random.split(drl_keys, n_drl)
-    dcf_keys = jax.random.split(dcf_keys, n - n_drl)
-    traffic_keys = jax.random.split(traffic_key, n)
+        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminal)
+        dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminal)
+        actions = jnp.concatenate([drl_actions, dcf_actions])
 
-    drl_states, drl_actions = drl_step(drl_states, drl_keys, obs[:n_drl], actions[:n_drl], rewards[:n_drl], terminal)
-    dcf_states, dcf_actions = dcf_step(dcf_states, dcf_keys, obs[n_drl:], actions[n_drl:], rewards[n_drl:], terminal)
-    actions = jnp.concatenate([drl_actions, dcf_actions])
+        traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
+        new_buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
+        obs, rewards = process_output(c.buffer_states, new_buffer_states, actions, channel_state, c.obs)
 
-    traffic_states, new_frames = traffic_step(traffic_states, traffic_keys)
-    new_buffer_states, channel_state = simulate(buffer_states, new_frames, actions)
-    obs, rewards = process_output(buffer_states, new_buffer_states, actions, channel_state, obs)
+        c = Carry(drl_states, dcf_states, traffic_states, new_buffer_states, channel_state, key, obs, actions, rewards, c.terminal)
+        o = Output(dcf_states, actions, rewards, new_buffer_states, channel_state)
+        return c, o
 
-    carry = (drl_states, dcf_states), traffic_states, (new_buffer_states, channel_state), key, obs, actions, rewards, terminal
-    return carry, (actions, rewards, new_buffer_states, channel_state)
+    return rl_step_fn
 
 
 if __name__ == '__main__':
@@ -91,9 +122,10 @@ if __name__ == '__main__':
     traffic = cox_traffic(f3dB=1.0, loc=0.0, scale=0.0, initial_state=InitialStateConf.ZERO)
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn = jax.jit(partial(rl_step, drl_step=drl_step, dcf_step=dcf_step, traffic_step=traffic_step, n=n, n_drl=n_drl))
+    rl_step_fn = jax.jit(rl_step(drl_step, dcf_step, traffic_step, n, n_drl))
     rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
-    init = (drl_states, dcf_states), traffic_states, (buffer_states, channel_state), key, obs, actions, rewards, terminal
-    (agent_states, *_), (actions, rewards, buffer_states, channel_states) = jax.lax.scan(rl_step_fn, init, jnp.arange(n_steps))
+    carry = Carry(drl_states, dcf_states, traffic_states, buffer_states, channel_state, key, obs, actions, rewards, terminal)
+    carry, output = jax.lax.scan(rl_step_fn, carry, jnp.arange(n_steps))
 
-    jnp.savez(f'history_{n}_{n_drl}_{seed}.npz', actions=actions, rewards=rewards, buffer_states=buffer_states, channel_states=channel_states)
+    with lz4.frame.open(f'history_{n}_{n_drl}_{seed}.pkl.lz4', 'wb') as f:
+        cloudpickle.dump((carry, output), f)
