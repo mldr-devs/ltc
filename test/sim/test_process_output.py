@@ -34,7 +34,7 @@ class ProcessOutputTestCase(unittest.TestCase):
     def test_transmission_with_collision_max_retransmission(self):
         args = (1, MAX_RETRANSMISSION, -1)
         reward, r = transmission_with_collision(args)
-        self.assertEqual(reward, COLLISION_PENALTY)
+        self.assertEqual(reward, MAX_RETRANSMISSION_PENALTY)
         self.assertEqual(r, 0)
 
     def test_transmission_collision_path(self):
