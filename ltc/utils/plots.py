@@ -1,3 +1,5 @@
+import cloudpickle
+import lz4.frame
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -90,7 +92,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     n_steps = actions.shape[0]
     xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
 
-    actions[np.where(channel_states != 1), :] = 0
+    actions = actions.at[np.where(channel_states != 1), :].set(0)
     actions = actions.cumsum(axis=0)
     actions = actions.reshape(-1, aggregation, n)
     actions = actions.mean(axis=1)
@@ -115,6 +117,80 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     plt.show()
 
 
+def plot_channel_states(channel_states, n, n_drl, seed, aggregation=100):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_steps = channel_states.shape[0]
+    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+
+    success = np.where(channel_states == 1, 1, 0).reshape(-1, aggregation)
+    success = success.mean(axis=1)
+
+    collision = np.where(channel_states == -1, 1, 0).reshape(-1, aggregation)
+    collision = collision.mean(axis=1)
+
+    idle = np.where(channel_states == 0, 1, 0).reshape(-1, aggregation)
+    idle = idle.mean(axis=1)
+
+    plt.plot(xs, success, color='green', label='Success')
+    plt.plot(xs, collision, color='red', label='Collision')
+    plt.plot(xs, idle, color='blue', label='Idle')
+
+    plt.xlabel('Step')
+    plt.ylabel('Channel state')
+    plt.xlim(0, n_steps)
+    plt.ylim(0, 1)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'channel_{n}_{n_drl}_{seed}.pdf')
+    plt.show()
+
+
+def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_steps = rewards.shape[0]
+    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+
+    throughput = (rewards > NO_TX_REWARD).reshape(-1, aggregation, n)
+    throughput = throughput.mean(axis=1)
+
+    for i in range(n_drl):
+        plt.plot(xs, throughput[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, throughput[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Step')
+    plt.ylabel('Throughput')
+    plt.xlim(0, n_steps)
+    plt.ylim(bottom=0)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'throughput_{n}_{n_drl}_{seed}.pdf')
+    plt.show()
+
+
+def plot_all(filename):
+    with lz4.frame.open(filename, 'rb') as f:
+        _, history = cloudpickle.load(f)
+
+    _, n, n_drl, seed_r = filename.split('_')
+    seed, *_ = seed_r.split('.')
+    n, n_drl, seed = int(n), int(n_drl), int(seed)
+
+    plot_rewards(history.rewards, n, n_drl, seed)
+    plot_cumulative_rewards(history.rewards, n, n_drl, seed)
+    plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed)
+    plot_channel_states(history.channel_state, n, n_drl, seed)
+    plot_throughput(history.rewards, n, n_drl, seed)
+
+
 def plot_dcf_collision_probabilities(actions, rewards, seed):
     analytical = [0, 0.103, 0.176, 0.23, 0.268, 0.301, 0.328, 0.353, 0.368, 0.382]
 
@@ -131,7 +207,7 @@ def plot_dcf_collision_probabilities(actions, rewards, seed):
 
     plt.xlabel('Number of DCF agents')
     plt.ylabel('Collision probability')
-    plt.ylim(0, 0.5)
+    plt.ylim(0, 1.0)
     plt.legend()
     plt.grid()
     plt.tight_layout()
