@@ -147,6 +147,42 @@ def plot_channel_states(channel_states, n, n_drl, seed, aggregation=100):
     plt.show()
 
 
+def plot_channel_states_fill(channel_states, n, n_drl, seed, aggregation=100):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_steps = channel_states.shape[0]
+    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+
+    collision = np.where(channel_states == -1, 1, 0).reshape(-1, aggregation)
+    collision = collision.mean(axis=1)
+
+    idle = np.where(channel_states == 0, 1, 0).reshape(-1, aggregation)
+    idle = idle.mean(axis=1) + collision
+
+    success = np.where(channel_states == 1, 1, 0).reshape(-1, aggregation)
+    success = success.mean(axis=1) + idle
+
+    all = [np.zeros_like(success), collision, idle, success, np.ones_like(success)]
+
+    plt.plot(xs, collision, color='k')
+    plt.plot(xs, idle, color='k')
+    plt.plot(xs, success, color='k')
+    plt.fill_between(xs, all[0], all[1], color='red', alpha=0.3, label='Collision', linewidth=0)
+    plt.fill_between(xs, all[1], all[2], color='blue', alpha=0.3, label='Idle', linewidth=0)
+    plt.fill_between(xs, all[2], all[3], color='green', alpha=0.3, label='Success', linewidth=0)
+
+    plt.xlabel('Step')
+    plt.ylabel('Channel state')
+    plt.xlim(0, n_steps)
+    plt.ylim(0, 1)
+    plt.yticks(np.linspace(0, 1, 6), [f'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'channel_fill_{n}_{n_drl}_{seed}.pdf')
+    plt.show()
+
+
 def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
     plt.rcParams.update(PLOT_PARAMS)
 
@@ -176,6 +212,37 @@ def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
     plt.show()
 
 
+def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_steps = rewards.shape[0]
+    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+
+    throughput = (rewards > NO_TX_REWARD).reshape(-1, aggregation, n)
+    throughput = throughput.mean(axis=1).cumsum(axis=1)
+    throughput = throughput / throughput[:, -1][:, None]
+
+    for i in range(n_drl):
+        plt.plot(xs, throughput[:, i], color='gray')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, throughput[:, i], color='gray')
+
+    plt.fill_between(xs, np.zeros_like(xs), throughput[:, n_drl - 1], color='red', alpha=0.3, label='DRL', linewidth=0)
+    plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='DCF', linewidth=0)
+
+    plt.xlabel('Step')
+    plt.ylabel('Throughput')
+    plt.xlim(0, n_steps)
+    plt.ylim(0, 1)
+    plt.yticks(np.linspace(0, 1, 6), [f'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'throughput_fill_{n}_{n_drl}_{seed}.pdf')
+    plt.show()
+
+
 def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
@@ -188,7 +255,9 @@ def plot_all(filename):
     plot_cumulative_rewards(history.rewards, n, n_drl, seed)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed)
     plot_channel_states(history.channel_state, n, n_drl, seed)
+    plot_channel_states_fill(history.channel_state, n, n_drl, seed)
     plot_throughput(history.rewards, n, n_drl, seed)
+    plot_throughput_fill(history.rewards, n, n_drl, seed)
 
 
 def plot_dcf_collision_probabilities(actions, rewards, seed):
