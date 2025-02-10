@@ -48,9 +48,9 @@ def init_agents(agent, key, n):
 
 def agent_step(agent, state, key, obs, action, reward, terminal):
     update_key, sample_key = jax.random.split(key)
-    state = agent.update(state, update_key, obs, action, reward, terminal)
-    action = agent.sample(state, sample_key, obs)
-    return state, action
+    state_new = agent.update(state, update_key, obs, action, reward, terminal)
+    action_new = agent.sample(state, sample_key, obs)
+    return state_new, action_new
 
 
 def init_traffic(traffic, key, n):
