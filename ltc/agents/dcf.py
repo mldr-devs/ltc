@@ -45,18 +45,23 @@ class DCF(BaseAgent):
         buffer, channel, ret_c = env_state[-1]
 
         return jax.lax.cond(
-            jax.lax.bitwise_or(
-                jax.lax.bitwise_and(action == 1, ret_c == 0),  # successful transmission or max retransmission limit reached
-                buffer == 0                                    # empty buffer
-            ),
+            buffer == 0,
             reset,
             lambda: jax.lax.cond(
-                jax.lax.bitwise_and(action == 1, reward < 0),  # collision
-                double_cw,
-                lambda : jax.lax.cond(
-                    channel == 0,                              # channel is idle and countdown in progress
-                    countdown,
-                    freeze
+                jax.lax.bitwise_and(state.backoff > 0, channel == 0),
+                countdown,
+                lambda: jax.lax.cond(
+                    jax.lax.bitwise_and(state.backoff > 0, channel != 0),
+                    freeze,
+                    lambda: jax.lax.cond(
+                        jax.lax.bitwise_or(reward > 0, ret_c == 0),
+                        reset,
+                        lambda: jax.lax.cond(
+                            reward < 0,
+                            double_cw,
+                            freeze
+                        )
+                    )
                 )
             )
         )
