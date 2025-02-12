@@ -243,6 +243,35 @@ def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
     plt.show()
 
 
+def plot_throughput_fill_nn(rewards, n, n_drl, seed, aggregation=200):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_steps = rewards.shape[0]
+    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+
+    throughput = (rewards > NO_TX_REWARD).reshape(-1, aggregation, n)
+    throughput = throughput.mean(axis=1).cumsum(axis=1)
+
+    for i in range(n_drl):
+        plt.plot(xs, throughput[:, i], color='gray')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, throughput[:, i], color='gray')
+
+    plt.fill_between(xs, np.zeros_like(xs), throughput[:, n_drl - 1], color='red', alpha=0.3, label='DRL', linewidth=0)
+    plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='DCF', linewidth=0)
+
+    plt.xlabel('Step')
+    plt.ylabel('Throughput')
+    plt.xlim(0, n_steps)
+    plt.ylim(bottom=0)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'throughput_fill_nn_{n}_{n_drl}_{seed}.pdf')
+    plt.show()
+
+
 def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
@@ -258,6 +287,7 @@ def plot_all(filename):
     plot_channel_states_fill(history.channel_state, n, n_drl, seed)
     plot_throughput(history.rewards, n, n_drl, seed)
     plot_throughput_fill(history.rewards, n, n_drl, seed)
+    plot_throughput_fill_nn(history.rewards, n, n_drl, seed)
 
 
 def plot_dcf_collision_probabilities(actions, rewards, seed):
