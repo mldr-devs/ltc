@@ -10,9 +10,9 @@ def no_transmission(args):
 
 
 def no_transmission_short(args):
-    _, ret_c, _, no_tx = args
+    buffer_state, ret_c, _, no_tx = args
     reward = NO_TX_REWARD
-    no_tx = no_tx + 1
+    no_tx = jax.lax.select(buffer_state == 0, 0, no_tx + 1)
     return reward, ret_c, no_tx
 
 
@@ -51,7 +51,7 @@ def retransmission(args):
 
 def transmission_without_collision(args):
     buffer_state, _, _, _ = args
-    return jax.lax.cond(buffer_state == 1, successful_transmission, empty_buffer_transmission, args)
+    return jax.lax.cond(buffer_state > 0, successful_transmission, empty_buffer_transmission, args)
 
 
 def empty_buffer_transmission(_):
