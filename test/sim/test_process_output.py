@@ -1,7 +1,6 @@
 import unittest
 
 import jax.numpy as jnp
-import jax
 
 from ltc.sim.constants import *
 from ltc.sim.process_output import *
@@ -10,51 +9,51 @@ from ltc.sim.process_output import *
 class ProcessOutputTestCase(unittest.TestCase):
     def test_no_transmission(self):
         args = (1, 5, 0, 1)
-        reward, r, noTx = no_transmission(args)
+        reward, r, no_tx = no_transmission(args)
         self.assertEqual(reward, 0.0)
         self.assertEqual(r, 5)
 
     def test_transmission_without_collision_empty_buffer(self):
         args = (0, 3, 1, 1)
-        reward, r, noTx = transmission_without_collision(args)
+        reward, r, no_tx = transmission_without_collision(args)
         self.assertEqual(reward, EMPTY_TX_PENALTY)
-        self.assertEqual(r, 3)
+        self.assertEqual(r, 0)
 
     def test_transmission_without_collision_successful(self):
         args = (1, 2, 1, 1)
-        reward, r, noTx = transmission_without_collision(args)
-        self.assertAlmostEqual(reward, TX_REWARD / (2 + 1) ** 2)
+        reward, r, no_tx = transmission_without_collision(args)
+        self.assertAlmostEqual(reward, TX_REWARD / (2 + 1))
         self.assertEqual(r, 0)
 
     def test_transmission_with_collision_retransmission(self):
         args = (1, 2, -1, 1)
-        reward, r, noTx = transmission_with_collision(args)
+        reward, r, no_tx = transmission_with_collision(args)
         self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(r, 3)
 
     def test_transmission_with_collision_max_retransmission(self):
         args = (1, MAX_RETRANSMISSION, -1, 1)
-        reward, r, noTx = transmission_with_collision(args)
+        reward, r, no_tx = transmission_with_collision(args)
         self.assertEqual(reward, MAX_RETRANSMISSION_PENALTY)
         self.assertEqual(r, 0)
 
     def test_transmission_collision_path(self):
         args = (1, 7, -1, 1)
-        reward, r, noTx = transmission(args)
+        reward, r, no_tx = transmission(args)
         self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(r, 8)
 
     def test_transmission_successful_path(self):
         args = (1, 1, 1, 1)
-        reward, r, noTx = transmission(args)
-        self.assertAlmostEqual(reward, TX_REWARD / (1 + 1) ** 2)
+        reward, r, no_tx = transmission(args)
+        self.assertAlmostEqual(reward, TX_REWARD / (1 + 1))
         self.assertEqual(r, 0)
 
     def test_transmission_empty_buffer(self):
         args = (0, 1, 1, 1)
-        reward, r, noTx = transmission(args)
+        reward, r, no_tx = transmission(args)
         self.assertEqual(reward, EMPTY_TX_PENALTY)
-        self.assertEqual(r, 1)
+        self.assertEqual(r, 0)
 
     def test_process_rl_output(self):
         buffer_states = jnp.array([0, 0, 1, 0])
