@@ -100,26 +100,3 @@ def process_output_i(buffer_state, new_buffer_state, action, channel_state, obs)
 
 def process_output(buffer_states, new_buffer_states, actions, channel_state, obs):
     return jax.vmap(process_output_i, in_axes=(0, 0, 0, None, 0))(buffer_states, new_buffer_states, actions, channel_state, obs)
-
-
-if __name__ == "__main__":
-    buffer_states = jnp.array([1, 0, 1, 0])
-    new_buffer_states = jnp.array([0, 0, 1, 0])
-    actions = jnp.array([0, 0, 0, 1])
-    channel_state = -1
-    obs = jnp.array([[
-        [1, 1, 4, MAX_NO_TX_WITHOUT_PENALTY-1],
-        [1, 1, 4, MAX_NO_TX_WITHOUT_PENALTY],
-        [1, 1, 4, MAX_NO_TX_WITHOUT_PENALTY + 1]
-    ]] * 4)
-
-    expected_obs_0 = jnp.array([
-        [1, 1, 4, 0],
-        [1, 1, 4, 0],
-        [0, 1, 4, 0]
-    ])
-    expected_R_0 = -1.0
-
-    result_obs, result_R = process_output(buffer_states, new_buffer_states, actions, channel_state, obs)
-    print(result_obs)
-    print(result_R)
