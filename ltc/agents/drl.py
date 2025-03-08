@@ -71,13 +71,13 @@ class Uncertainty(nn.Module):
         scale = jnp.exp(log_scale)
         posterior_sample = x + jax.random.normal(eps_key,
                                                  shape=x.shape) * scale
-        kl = jnp.mean(stats.norm.logpdf(posterior_sample, loc=x, scale=scale) -
+        kl = jnp.sum(stats.norm.logpdf(posterior_sample, loc=x, scale=scale) -
                       stats.norm.logpdf(posterior_sample, loc=0,
                                         scale=self.prior_scale), axis=0)
         loss_key = self.make_rng('rlib')
         loss = self.variable('loss', 'kl', nn.initializers.zeros, key=loss_key,
                              shape=(), dtype=x.dtype)
-        loss.value = kl.sum()
+        loss.value = kl
         return posterior_sample
 
 class StochasticVariationalQNetwork(nn.Module):
