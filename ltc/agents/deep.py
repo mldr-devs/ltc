@@ -30,7 +30,8 @@ class BayesianDDQN(DDQN):
         target = rewards + (1 - terminals) * discount * jnp.max(
             q_values_target, axis=-1, keepdims=True)
 
-        kl = sum(jax.tree.leaves(variables['loss']))
+        kl = sum(jax.tree.leaves(net_state['loss']))
+        assert len(kl.shape) == 0
 
         target = jax.lax.stop_gradient(target)
         loss = optax.l2_loss(q_values, target).mean() + kl
