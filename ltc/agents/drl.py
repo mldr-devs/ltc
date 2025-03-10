@@ -81,15 +81,7 @@ class Uncertainty(nn.Module):
         return posterior_sample
 
 class StochasticVariationalQNetwork(nn.Module):
-    rnn_dim: int = 32
-    dense_dim: int = 64
-    num_layers: int = 4
-    num_actions: int = 2
-
-    def setup(self):
-        self.model = QNetwork(rnn_dim=self.rnn_dim, dense_dim=self.dense_dim,
-                              num_layers=self.num_layers,
-                              num_actions=self.num_actions)
+    model: nn.Module
 
     @nn.compact
     def __call__(self, x):
