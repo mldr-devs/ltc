@@ -82,6 +82,7 @@ class Uncertainty(nn.Module):
 
 class StochasticVariationalQNetwork(nn.Module):
     model: nn.Module
+    prior_scale: float = 2.0
 
     @nn.compact
     def __call__(self, x):
@@ -91,7 +92,7 @@ class StochasticVariationalQNetwork(nn.Module):
 
         def add_noise(kp, x):
             name = '/'.join((k.key for k in kp))
-            return Uncertainty(name=name, prior_scale=2.0)(x)
+            return Uncertainty(name=name, prior_scale=self.prior_scale)(x)
 
         new_params = jax.tree.map_with_path(add_noise, old_params)
         vars = self.model.variables.copy()
