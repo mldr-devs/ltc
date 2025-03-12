@@ -25,5 +25,14 @@ dependencies = [
     "reinforced-lib==1.2.2",
 ]
 
+[project.optional-dependencies]
+gpu = [
+    "jax[cuda12_local]",
+]
+notebook = [
+    "jupyterlab~=4.3.5",
+    "seaborn~=0.13.2",
+]
+
 [tool.setuptools]
 packages = ["ltc"]
