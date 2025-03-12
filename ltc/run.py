@@ -8,10 +8,10 @@ import lz4.frame
 import optax
 from jax_tqdm import scan_tqdm
 from reinforced_lib.agents import AgentState
-from reinforced_lib.agents.deep import DDQN
 
-from ltc.agents import DCF, QNetwork
+from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, ModelState, cox_traffic, process_output, simulate
+from ltc.utils.plots import plot_all
 
 
 @jax.tree_util.register_dataclass
@@ -83,7 +83,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
 
 
 if __name__ == '__main__':
-    n, n_drl = 5, 1
+    n, n_drl = 10, 5
     n_steps = 10000
     window_size = 5
     seed = 42
@@ -96,8 +96,8 @@ if __name__ == '__main__':
     rewards = jnp.zeros(n)
     terminal = False
 
-    drl = DDQN(
-        q_network=QNetwork(),
+    drl = BayesianDDQN(
+        q_network=StochasticVariationalNetwork(QNetworkDropout()),
         obs_space_shape=obs.shape[1:],
         act_space_size=2,
         optimizer=optax.adam(1e-3),
@@ -105,9 +105,9 @@ if __name__ == '__main__':
         experience_replay_batch_size=128,
         experience_replay_steps=5,
         discount=0.99,
-        epsilon=1.0,
-        epsilon_decay=0.999,
-        epsilon_min=0.001,
+        epsilon=0.0,
+        epsilon_decay=0.0,
+        epsilon_min=0.0,
         tau=0.01
     )
     key, init_key = jax.random.split(key)
@@ -127,5 +127,8 @@ if __name__ == '__main__':
     carry = Carry(drl_states, dcf_states, traffic_states, buffer_states, channel_state, key, obs, actions, rewards, terminal)
     carry, output = jax.lax.scan(rl_step_fn, carry, jnp.arange(n_steps))
 
-    with lz4.frame.open(f'history_{n}_{n_drl}_{seed}.pkl.lz4', 'wb') as f:
+    filename = f'history_{n}_{n_drl}_{seed}.pkl.lz4'
+    with lz4.frame.open(filename, 'wb') as f:
         cloudpickle.dump((carry, output), f)
+
+    plot_all(filename)

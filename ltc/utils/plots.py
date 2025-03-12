@@ -1,3 +1,5 @@
+from argparse import ArgumentParser
+
 import cloudpickle
 import lz4.frame
 import matplotlib.pyplot as plt
@@ -53,8 +55,9 @@ def plot_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'rewards_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
@@ -82,8 +85,9 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'cum_rewards_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'cum_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'cum_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggregation=100):
@@ -113,8 +117,9 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'tx_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'tx_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'tx_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_channel_states(channel_states, n, n_drl, seed, aggregation=100):
@@ -143,8 +148,9 @@ def plot_channel_states(channel_states, n, n_drl, seed, aggregation=100):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'channel_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'channel_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'channel_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_channel_states_fill(channel_states, n, n_drl, seed, aggregation=100):
@@ -175,12 +181,13 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, aggregation=100):
     plt.ylabel('Channel state')
     plt.xlim(0, n_steps)
     plt.ylim(0, 1)
-    plt.yticks(np.linspace(0, 1, 6), [f'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'channel_fill_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'channel_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'channel_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
@@ -208,8 +215,9 @@ def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'throughput_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'throughput_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'throughput_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
@@ -235,12 +243,13 @@ def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
     plt.ylabel('Throughput')
     plt.xlim(0, n_steps)
     plt.ylim(0, 1)
-    plt.yticks(np.linspace(0, 1, 6), [f'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'throughput_fill_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'throughput_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'throughput_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_throughput_fill_nn(rewards, n, n_drl, seed, aggregation=200):
@@ -268,15 +277,16 @@ def plot_throughput_fill_nn(rewards, n, n_drl, seed, aggregation=200):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'throughput_fill_nn_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'throughput_fill_nn_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'throughput_fill_nn_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
 
-    _, n, n_drl, seed_r = filename.split('_')
+    _, n, n_drl, seed_r, *_ = filename.split('_')
     seed, *_ = seed_r.split('.')
     n, n_drl, seed = int(n), int(n_drl), int(seed)
 
@@ -310,8 +320,9 @@ def plot_dcf_collision_probabilities(actions, rewards, seed):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'collision_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'collision_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'collision_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_cw_values(backoff, actions, n, n_drl, seed):
@@ -329,5 +340,14 @@ def plot_cw_values(backoff, actions, n, n_drl, seed):
     plt.xticks(cw, fontsize=7)
     plt.grid(axis='y')
     plt.tight_layout()
-    plt.savefig(f'cw_{n}_{n_drl}_{seed}.pdf')
-    plt.show()
+    plt.savefig(f'cw_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'cw_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
+if __name__ == '__main__':
+    args = ArgumentParser()
+    args.add_argument('filename', type=str)
+    args = args.parse_args()
+
+    plot_all(args.filename)
