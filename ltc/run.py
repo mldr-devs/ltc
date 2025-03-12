@@ -36,6 +36,7 @@ class Output:
     actions: jax.Array
     rewards: jax.Array
     buffer_states: jax.Array
+    observations: jax.Array
     channel_state: int
 
 
@@ -76,14 +77,14 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
         obs, rewards = process_output(c.buffer_states, new_buffer_states, actions, channel_state, c.obs)
 
         c = Carry(drl_states, dcf_states, traffic_states, new_buffer_states, channel_state, key, obs, actions, rewards, c.terminal)
-        o = Output(dcf_states, actions, rewards, new_buffer_states, channel_state)
+        o = Output(dcf_states, actions, rewards, new_buffer_states, obs, channel_state)
         return c, o
 
     return rl_step_fn
 
 
 if __name__ == '__main__':
-    n, n_drl = 10, 5
+    n, n_drl = 10, 10
     n_steps = 10000
     window_size = 5
     seed = 42
@@ -105,9 +106,9 @@ if __name__ == '__main__':
         experience_replay_batch_size=128,
         experience_replay_steps=5,
         discount=0.99,
-        epsilon=0.0,
-        epsilon_decay=0.0,
-        epsilon_min=0.0,
+        epsilon=1.0,
+        epsilon_decay=0.999,
+        epsilon_min=0.001,
         tau=0.01
     )
     key, init_key = jax.random.split(key)
