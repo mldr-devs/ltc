@@ -30,13 +30,12 @@ PLOT_PARAMS = {
 }
 
 
-def plot_rewards(rewards, n, n_drl, seed, aggregation=100):
+def plot_rewards(rewards, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = rewards.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = rewards.shape[0]
+    xs = np.arange(n_epochs) + 1
 
-    rewards = rewards.reshape(-1, aggregation, n)
     rewards = rewards.mean(axis=1)
 
     for i in range(n_drl):
@@ -48,9 +47,9 @@ def plot_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Reward')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(-1, 1)
     plt.legend()
     plt.grid()
@@ -60,14 +59,13 @@ def plot_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.clf()
 
 
-def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
+def plot_cumulative_rewards(rewards, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = rewards.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = rewards.shape[0]
+    xs = np.arange(n_epochs) + 1
 
     cum_rewards = rewards.cumsum(axis=0)
-    cum_rewards = cum_rewards.reshape(-1, aggregation, n)
     cum_rewards = cum_rewards.mean(axis=1)
 
     for i in range(n_drl):
@@ -79,9 +77,9 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Cumulative reward')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -90,15 +88,14 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, aggregation=100):
     plt.clf()
 
 
-def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggregation=100):
+def plot_successful_transmissions(actions, channel_states, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = actions.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = actions.shape[0]
+    xs = np.arange(n_epochs) + 1
 
     actions = actions.at[np.where(channel_states != 1), :].set(0)
     actions = actions.cumsum(axis=0)
-    actions = actions.reshape(-1, aggregation, n)
     actions = actions.mean(axis=1)
 
     for i in range(n_drl):
@@ -110,9 +107,9 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Successful transmissions')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -122,28 +119,28 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, aggre
     plt.clf()
 
 
-def plot_channel_states(channel_states, n, n_drl, seed, aggregation=100):
+def plot_channel_states(channel_states, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = channel_states.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = channel_states.shape[0]
+    xs = np.arange(n_epochs) + 1
 
-    success = np.where(channel_states == 1, 1, 0).reshape(-1, aggregation)
+    success = np.where(channel_states == 1, 1, 0)
     success = success.mean(axis=1)
 
-    collision = np.where(channel_states == -1, 1, 0).reshape(-1, aggregation)
+    collision = np.where(channel_states == -1, 1, 0)
     collision = collision.mean(axis=1)
 
-    idle = np.where(channel_states == 0, 1, 0).reshape(-1, aggregation)
+    idle = np.where(channel_states == 0, 1, 0)
     idle = idle.mean(axis=1)
 
     plt.plot(xs, success, color='green', label='Success')
     plt.plot(xs, collision, color='red', label='Collision')
     plt.plot(xs, idle, color='blue', label='Idle')
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Channel state')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(0, 1)
     plt.legend()
     plt.grid()
@@ -153,19 +150,19 @@ def plot_channel_states(channel_states, n, n_drl, seed, aggregation=100):
     plt.clf()
 
 
-def plot_channel_states_fill(channel_states, n, n_drl, seed, aggregation=100):
+def plot_channel_states_fill(channel_states, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = channel_states.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = channel_states.shape[0]
+    xs = np.arange(n_epochs) + 1
 
-    collision = np.where(channel_states == -1, 1, 0).reshape(-1, aggregation)
+    collision = np.where(channel_states == -1, 1, 0)
     collision = collision.mean(axis=1)
 
-    idle = np.where(channel_states == 0, 1, 0).reshape(-1, aggregation)
+    idle = np.where(channel_states == 0, 1, 0)
     idle = idle.mean(axis=1) + collision
 
-    success = np.where(channel_states == 1, 1, 0).reshape(-1, aggregation)
+    success = np.where(channel_states == 1, 1, 0)
     success = success.mean(axis=1) + idle
 
     all = [np.zeros_like(success), collision, idle, success, np.ones_like(success)]
@@ -177,9 +174,9 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, aggregation=100):
     plt.fill_between(xs, all[1], all[2], color='blue', alpha=0.3, label='Idle', linewidth=0)
     plt.fill_between(xs, all[2], all[3], color='green', alpha=0.3, label='Success', linewidth=0)
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Channel state')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(0, 1)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
@@ -190,13 +187,13 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, aggregation=100):
     plt.clf()
 
 
-def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
+def plot_throughput(rewards, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = rewards.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = rewards.shape[0]
+    xs = np.arange(n_epochs) + 1
 
-    throughput = (rewards > NO_TX_REWARD).reshape(-1, aggregation, n)
+    throughput = (rewards > NO_TX_REWARD)
     throughput = throughput.mean(axis=1)
 
     for i in range(n_drl):
@@ -208,9 +205,9 @@ def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
     plt.plot([], color='blue', linestyle='--', label='DCF')
     plt.plot([], color='red', label='DRL')
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Throughput')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -220,13 +217,13 @@ def plot_throughput(rewards, n, n_drl, seed, aggregation=200):
     plt.clf()
 
 
-def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
+def plot_throughput_fill(rewards, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = rewards.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = rewards.shape[0]
+    xs = np.arange(n_epochs) + 1
 
-    throughput = (rewards > NO_TX_REWARD).reshape(-1, aggregation, n)
+    throughput = (rewards > NO_TX_REWARD)
     throughput = throughput.mean(axis=1).cumsum(axis=1)
     throughput = throughput / throughput[:, -1][:, None]
 
@@ -239,9 +236,9 @@ def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
     plt.fill_between(xs, np.zeros_like(xs), throughput[:, n_drl - 1], color='red', alpha=0.3, label='DRL', linewidth=0)
     plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='DCF', linewidth=0)
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Throughput')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(0, 1)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
@@ -252,13 +249,13 @@ def plot_throughput_fill(rewards, n, n_drl, seed, aggregation=200):
     plt.clf()
 
 
-def plot_throughput_fill_nn(rewards, n, n_drl, seed, aggregation=200):
+def plot_throughput_fill_nn(rewards, n, n_drl, seed):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_steps = rewards.shape[0]
-    xs = np.linspace(0, n_steps - 1, n_steps // aggregation)
+    n_epochs = rewards.shape[0]
+    xs = np.arange(n_epochs) + 1
 
-    throughput = (rewards > NO_TX_REWARD).reshape(-1, aggregation, n)
+    throughput = (rewards > NO_TX_REWARD)
     throughput = throughput.mean(axis=1).cumsum(axis=1)
 
     for i in range(n_drl):
@@ -270,9 +267,9 @@ def plot_throughput_fill_nn(rewards, n, n_drl, seed, aggregation=200):
     plt.fill_between(xs, np.zeros_like(xs), throughput[:, n_drl - 1], color='red', alpha=0.3, label='DRL', linewidth=0)
     plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='DCF', linewidth=0)
 
-    plt.xlabel('Step')
+    plt.xlabel('Epoch')
     plt.ylabel('Throughput')
-    plt.xlim(0, n_steps)
+    plt.xlim(1, n_epochs)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()

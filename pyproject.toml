@@ -21,7 +21,6 @@ authors = [
 ]
 
 dependencies = [
-    "jax-tqdm~=0.3.1",
     "reinforced-lib==1.2.2",
 ]
 

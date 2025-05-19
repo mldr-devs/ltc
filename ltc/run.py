@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 
 import cloudpickle
@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 import lz4.frame
 import optax
-from jax_tqdm import scan_tqdm
 from reinforced_lib.agents import AgentState
+from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, ModelState, cox_traffic, process_output, simulate
@@ -26,7 +26,7 @@ class Carry:
     obs: jax.Array
     actions: jax.Array
     rewards: jax.Array
-    terminal: bool
+    terminals: jax.Array
 
 
 @jax.tree_util.register_dataclass
@@ -35,6 +35,7 @@ class Output:
     dcf_states: AgentState
     actions: jax.Array
     rewards: jax.Array
+    terminals: jax.Array
     buffer_states: jax.Array
     observations: jax.Array
     channel_state: int
@@ -43,7 +44,7 @@ class Output:
 def init_agents(agent, key, n):
     keys = jax.random.split(key, n)
     states = jax.vmap(agent.init)(keys)
-    step_fn = jax.vmap(partial(agent_step, agent), in_axes=(0, 0, 0, 0, 0, None))
+    step_fn = jax.vmap(partial(agent_step, agent))
     return states, step_fn
 
 
@@ -57,7 +58,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal):
 def init_traffic(traffic, key, n):
     keys = jax.random.split(key, n)
     states = jax.vmap(traffic.init)(keys)
-    step_fn = jax.vmap(traffic.sample, in_axes=(0, 0))
+    step_fn = jax.vmap(traffic.sample)
     return states, step_fn
 
 
@@ -68,24 +69,25 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
         dcf_keys = jax.random.split(dcf_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
-        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminal)
-        dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminal)
+        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
+        dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
         actions = jnp.concatenate([drl_actions, dcf_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         new_buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
         obs, rewards = process_output(c.buffer_states, new_buffer_states, actions, channel_state, c.obs)
+        terminals = jnp.logical_or(c.terminals, c.terminals)
 
-        c = Carry(drl_states, dcf_states, traffic_states, new_buffer_states, channel_state, key, obs, actions, rewards, c.terminal)
-        o = Output(dcf_states, actions, rewards, new_buffer_states, obs, channel_state)
+        c = Carry(drl_states, dcf_states, traffic_states, new_buffer_states, channel_state, key, obs, actions, rewards, terminals)
+        o = Output(dcf_states, actions, rewards, terminals, new_buffer_states, obs, channel_state)
         return c, o
 
     return rl_step_fn
 
 
 if __name__ == '__main__':
-    n, n_drl = 10, 10
-    n_steps = 10000
+    n, n_drl = 10, 5
+    n_epochs, n_steps = 100, 200
     window_size = 5
     seed = 42
 
@@ -95,7 +97,7 @@ if __name__ == '__main__':
     channel_state = 0
     obs = jnp.zeros((n, window_size, 4), dtype=int)
     rewards = jnp.zeros(n)
-    terminal = False
+    terminals = jnp.full(n, False)
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetworkDropout()),
@@ -105,7 +107,7 @@ if __name__ == '__main__':
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,
         experience_replay_steps=5,
-        discount=0.99,
+        discount=1.0,
         epsilon=1.0,
         epsilon_decay=0.999,
         epsilon_min=0.001,
@@ -124,12 +126,22 @@ if __name__ == '__main__':
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn = jax.jit(rl_step(drl_step, dcf_step, traffic_step, n, n_drl))
-    rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
-    carry = Carry(drl_states, dcf_states, traffic_states, buffer_states, channel_state, key, obs, actions, rewards, terminal)
-    carry, output = jax.lax.scan(rl_step_fn, carry, jnp.arange(n_steps))
+    init_carry = Carry(drl_states, dcf_states, traffic_states, buffer_states, channel_state, key, obs, actions, rewards, terminals)
+    all_outputs = []
 
+    for _ in trange(n_epochs):
+        carry, output = jax.lax.scan(rl_step_fn, init_carry, length=n_steps)
+        init_carry = replace(
+            init_carry,
+            drl_states=carry.drl_states,
+            key=carry.key
+        )
+        all_outputs.append(output)
+
+    all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
     filename = f'history_{n}_{n_drl}_{seed}.pkl.lz4'
+
     with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((carry, output), f)
+        cloudpickle.dump((init_carry.drl_states, all_outputs), f)
 
     plot_all(filename)
