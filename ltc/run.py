@@ -120,7 +120,7 @@ if __name__ == '__main__':
         q_network=StochasticVariationalNetwork(QNetworkDropout()),
         obs_space_shape=obs.shape[1:],
         act_space_size=3,
-        optimizer=optax.adam(1e-3),
+        optimizer=optax.adam(1e-4),
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,
         experience_replay_steps=5,

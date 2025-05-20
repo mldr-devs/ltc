@@ -10,7 +10,6 @@ from ltc.sim.constants import Actions
 class DCFState(AgentState):
     cw: int
     backoff: int
-    sense: bool
 
 
 class DCF(BaseAgent):
@@ -26,7 +25,7 @@ class DCF(BaseAgent):
     def init(key):
         cw = DCF.CW_MIN
         backoff = jax.random.randint(key, (), 0, cw)
-        return DCFState(cw=cw, backoff=backoff, sense=backoff == 0)
+        return DCFState(cw=cw, backoff=backoff)
 
     @staticmethod
     def update(state, key, env_state, action, reward, terminal):
@@ -37,14 +36,13 @@ class DCF(BaseAgent):
             return state
 
         def countdown():
-            sense = state.backoff == 1
             backoff = jax.lax.max(state.backoff - 1, 0)
-            return DCFState(cw=state.cw, backoff=backoff, sense=sense)
+            return DCFState(cw=state.cw, backoff=backoff)
 
         def double_cw():
             cw = jax.lax.min(2 * state.cw, DCF.CW_MAX)
             backoff = jax.random.randint(key, (), 0, state.cw)
-            return DCFState(cw=cw, backoff=backoff, sense=backoff == 0)
+            return DCFState(cw=cw, backoff=backoff)
 
         buffer, channel, ret_c, _ = env_state[-1]
 
@@ -75,11 +73,11 @@ class DCF(BaseAgent):
         buffer, channel, _, _ = env_state[-1]
 
         return jnp.where(
-            jax.lax.bitwise_or(buffer == 0, state.backoff > 0), Actions.IDLE.value,
+            buffer == 0,
+            Actions.IDLE.value,
             jnp.where(
-                state.sense, Actions.CS.value,
-                jnp.where(
-                    channel == 0, Actions.TX.value, Actions.CS.value
-                )
+                jax.lax.bitwise_and(state.backoff == 0, channel == 0),
+                Actions.TX.value,
+                Actions.CS.value
             )
         )
