@@ -5,7 +5,7 @@ import lz4.frame
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ltc.sim.constants import NO_TX_REWARD
+from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY
 
 COLUMN_WIDTH = 4.0
 COLUMN_HIGHT = COLUMN_WIDTH * 0.618
@@ -28,6 +28,36 @@ PLOT_PARAMS = {
     'xtick.major.width': 0.5,
     'ytick.major.width': 0.5,
 }
+
+
+def plot_powers(power_states, n, n_drl, seed):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs = power_states.shape[0]
+    xs = np.arange(n_epochs) + 1
+
+    consumed_power = (INITIAL_CAPACITY - power_states[:, -1]) / INITIAL_CAPACITY
+
+    for i in range(n_drl):
+        plt.plot(xs, consumed_power[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, consumed_power[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Epoch')
+    plt.ylabel('Consumed power')
+    plt.xlim(1, n_epochs)
+    plt.ylim(0, 1)
+    plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'power_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'power_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
 
 
 def plot_rewards(rewards, n, n_drl, seed):
@@ -95,8 +125,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed):
     xs = np.arange(n_epochs) + 1
 
     actions = actions.at[*np.where(channel_states != 1), :].set(0)
-    actions = actions.cumsum(axis=0)
-    actions = actions.mean(axis=1)
+    actions = actions.sum(axis=1)
 
     for i in range(n_drl):
         plt.plot(xs, actions[:, i], color='red')
@@ -287,6 +316,7 @@ def plot_all(filename):
     seed, *_ = seed_r.split('.')
     n, n_drl, seed = int(n), int(n_drl), int(seed)
 
+    plot_powers(history.power_states, n, n_drl, seed)
     plot_rewards(history.rewards, n, n_drl, seed)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed)
@@ -304,7 +334,7 @@ def plot_dcf_collision_probabilities(actions, rewards, seed):
 
     for i in n:
         tx_successful = (rewards[i] > NO_TX_REWARD).sum(axis=0)
-        tx_all = (actions[i] == 1).sum(axis=0)
+        tx_all = (actions[i] == Actions.TX.value).sum(axis=0)
         vals.append(1 - (tx_successful / tx_all).mean())
 
     plt.rcParams.update(PLOT_PARAMS)
@@ -324,7 +354,7 @@ def plot_dcf_collision_probabilities(actions, rewards, seed):
 
 def plot_cw_values(backoff, actions, n, n_drl, seed):
     cw = [0] + [2 ** i for i in range(4, 11)]
-    counter = backoff[1:][actions[:-1] == 1]
+    counter = backoff[1:][actions[:-1] == Actions.TX.value]
     bins, _ = np.histogram(counter, bins=cw)
     cw = [f'[{a},{b})' for a, b in zip(cw, cw[1:])]
 

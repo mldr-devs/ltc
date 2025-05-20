@@ -1,3 +1,15 @@
+from enum import Enum
+
+
+class Actions(Enum):
+    """
+    Actions for the agent
+    """
+    TX = 0
+    CS = 1
+    IDLE = 2
+
+
 """
 Simulation parameters
 """

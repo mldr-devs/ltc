@@ -1,5 +1,7 @@
 import jax.numpy as jnp
 
+from ltc.sim.constants import Actions
+
 
 def channel_state_selector(actions):
     """
@@ -9,9 +11,11 @@ def channel_state_selector(actions):
     int: -1 if more than one STA transmit, 1 if exactly one STA transmit, 0 if noone transmit at the moment.
     """
 
-    ones_count = jnp.sum(actions)
-    return jnp.where(ones_count > 1, -1,
-                     jnp.where(ones_count == 1, 1, 0))
+    ones_count = jnp.sum(actions == Actions.TX.value)
+    return jnp.where(
+        ones_count > 1, -1,
+        jnp.where(ones_count == 1, 1, 0)
+    )
 
 
 def buffer_clearing(buffer_states, actions):
@@ -27,7 +31,7 @@ def buffer_clearing(buffer_states, actions):
     :return:
         jnp.ndarray: updated buffer_states.
     """
-    return jnp.where((buffer_states == 1) & (actions == 1), 0, buffer_states)
+    return jnp.where((buffer_states == 1) & (actions == Actions.TX.value), 0, buffer_states)
 
 
 def add_new_frames(buffer_states, new_frames):

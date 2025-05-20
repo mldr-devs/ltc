@@ -2,34 +2,35 @@ import unittest
 
 import jax.numpy as jnp
 
+from ltc.sim.constants import Actions
 from ltc.sim.sim import *
 
 
 class SimulateTestCase(unittest.TestCase):
     def test_channel_state_selector(self):
         # Test no actions
-        actions = jnp.array([0, 0, 0, 0])
+        actions = jnp.array([Actions.CS.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
         self.assertEqual(channel_state_selector(actions), 0)
 
         # Test single action
-        actions = jnp.array([1, 0, 0, 0])
+        actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
         self.assertEqual(channel_state_selector(actions), 1)
 
         # Test multiple actions
-        actions = jnp.array([1, 1, 0, 0])
+        actions = jnp.array([Actions.TX.value, Actions.TX.value, Actions.CS.value, Actions.CS.value])
         self.assertEqual(channel_state_selector(actions), -1)
 
     def test_buffer_clearing(self):
         # Test clearing buffers when actions match
         buffer_states = jnp.array([1, 0, 1, 0])
-        actions = jnp.array([1, 0, 0, 0])
+        actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
         expected = jnp.array([0, 0, 1, 0])
         result = buffer_clearing(buffer_states, actions)
         self.assertTrue(jnp.array_equal(result, expected))
 
         # Test no clearing when no matching actions
         buffer_states = jnp.array([1, 0, 1, 0])
-        actions = jnp.array([0, 0, 0, 0])
+        actions = jnp.array([Actions.CS.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
         expected = jnp.array([1, 0, 1, 0])
         result = buffer_clearing(buffer_states, actions)
         self.assertTrue(jnp.array_equal(result, expected))
@@ -53,7 +54,7 @@ class SimulateTestCase(unittest.TestCase):
         # Test full simulation
         buffer_states = jnp.array([1, 1, 1, 0])
         new_frames = jnp.array([0, 1, 1, 1])
-        actions = jnp.array([1, 0, 0, 0])
+        actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
 
         expected_buffer_states = jnp.array([0, 1, 1, 1])
         expected_channel_state = 1
@@ -65,7 +66,7 @@ class SimulateTestCase(unittest.TestCase):
         # Test simulation with no actions
         buffer_states = jnp.array([1, 0, 1, 0])
         new_frames = jnp.array([0, 1, 0, 1])
-        actions = jnp.array([0, 0, 0, 0])
+        actions = jnp.array([Actions.CS.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
 
         expected_buffer_states = jnp.array([1, 1, 1, 1])
         expected_channel_state = 0
@@ -77,7 +78,7 @@ class SimulateTestCase(unittest.TestCase):
         # Test simulation with multiple actions
         buffer_states = jnp.array([0, 0, 0, 0])
         new_frames = jnp.array([0, 1, 0, 1])
-        actions = jnp.array([1, 0, 0, 1])
+        actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.CS.value, Actions.TX.value])
 
         expected_buffer_states = jnp.array([0, 1, 0, 1])
         expected_channel_state = -1

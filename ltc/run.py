@@ -11,7 +11,7 @@ from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, ModelState, cox_traffic, process_output, simulate
-from ltc.sim.constants import INITIAL_CAPACITY
+from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.plots import plot_all
 
 
@@ -60,7 +60,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal):
         return state, action
 
     def power_off(state, update_key, sample_key, obs, action, reward, terminal):
-        return state, 0
+        return state, Actions.IDLE.value
 
     return jax.lax.cond(
         terminal, power_off, power_on,
@@ -103,7 +103,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
 
 if __name__ == '__main__':
     n, n_drl = 10, 5
-    n_epochs, n_steps = 100, 200
+    n_epochs, n_steps = 500, 2000
     window_size = 5
     seed = 42
 
@@ -114,12 +114,12 @@ if __name__ == '__main__':
     channel_state = 0
     obs = jnp.zeros((n, window_size, 4), dtype=int)
     rewards = jnp.zeros(n)
-    terminals = jnp.full(n, False)
+    terminals = jnp.full(n, False, dtype=bool)
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetworkDropout()),
         obs_space_shape=obs.shape[1:],
-        act_space_size=2,
+        act_space_size=3,
         optimizer=optax.adam(1e-3),
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,

@@ -12,7 +12,7 @@ class QNetwork(nn.Module):
     rnn_dim: int = 32
     dense_dim: int = 64
     num_layers: int = 4
-    num_actions: int = 2
+    num_actions: int = 3
 
     @nn.compact
     def __call__(self, s):
@@ -37,7 +37,7 @@ class QNetworkDropout(nn.Module):
     rnn_dim: int = 32
     dense_dim: int = 64
     num_layers: int = 4
-    num_actions: int = 2
+    num_actions: int = 3
     rate: float = 0.2
 
     @nn.compact
