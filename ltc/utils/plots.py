@@ -94,7 +94,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed):
     n_epochs = actions.shape[0]
     xs = np.arange(n_epochs) + 1
 
-    actions = actions.at[np.where(channel_states != 1), :].set(0)
+    actions = actions.at[*np.where(channel_states != 1), :].set(0)
     actions = actions.cumsum(axis=0)
     actions = actions.mean(axis=1)
 

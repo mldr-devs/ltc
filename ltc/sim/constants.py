@@ -16,6 +16,14 @@ COLLISION_PENALTY = -1.0
 MAX_RETRANSMISSION_PENALTY = -1.0
 
 """
+Power consumption
+"""
+INITIAL_CAPACITY = 1000
+TX_CONSUMPTION = 5
+CS_CONSUMPTION = 1
+IDLE_CONSUMPTION = 0
+
+"""
 Tx slot duration (s)
 https://ieeexplore.ieee.org/document/8930559
 """
