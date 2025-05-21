@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from functools import partial
 
 import cloudpickle
@@ -6,42 +6,13 @@ import jax
 import jax.numpy as jnp
 import lz4.frame
 import optax
-from reinforced_lib.agents import AgentState
 from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
-from ltc.sim import InitialStateConf, ModelState, cox_traffic, process_output, simulate
+from ltc.dataclasses import Carry, Output
+from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
-from ltc.utils.plots import plot_all
-
-
-@jax.tree_util.register_dataclass
-@dataclass
-class Carry:
-    drl_states: AgentState
-    dcf_states: AgentState
-    traffic_states: ModelState
-    buffer_states: jax.Array
-    power_states: jax.Array
-    channel_state: int
-    key: jax.random.PRNGKey
-    obs: jax.Array
-    actions: jax.Array
-    rewards: jax.Array
-    terminals: jax.Array
-
-
-@jax.tree_util.register_dataclass
-@dataclass
-class Output:
-    dcf_states: AgentState
-    observations: jax.Array
-    actions: jax.Array
-    rewards: jax.Array
-    terminals: jax.Array
-    buffer_states: jax.Array
-    power_states: jax.Array
-    channel_state: int
+from ltc.utils.plots import plot_all, plot_first
 
 
 def init_agents(agent, key, n):
@@ -165,3 +136,4 @@ if __name__ == '__main__':
         cloudpickle.dump((init_carry.drl_states, all_outputs), f)
 
     plot_all(filename)
+    plot_first(filename)
