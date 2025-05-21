@@ -67,8 +67,8 @@ def plot_powers(power_states, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_power_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_power_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_power_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_power_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -99,8 +99,8 @@ def plot_rewards(rewards, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -131,8 +131,8 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_cum_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_cum_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_cum_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_cum_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -165,8 +165,8 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, name)
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_tx_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_tx_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_tx_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_tx_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -199,8 +199,8 @@ def plot_channel_states(channel_states, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_channel_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_channel_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_channel_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_channel_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -239,8 +239,8 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_channel_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_channel_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_channel_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_channel_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -272,8 +272,8 @@ def plot_throughput(rewards, terminals, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_throughput_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_throughput_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_throughput_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_throughput_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -307,8 +307,8 @@ def plot_throughput_fill(rewards, terminals, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_throughput_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_throughput_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_throughput_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_throughput_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -340,8 +340,8 @@ def plot_throughput_fill_nn(rewards, terminals, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_throughput_fill_nn_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_throughput_fill_nn_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_throughput_fill_nn_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_throughput_fill_nn_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -406,8 +406,8 @@ def plot_dcf_collision_probabilities(actions, rewards, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name}_collision_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_collision_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_collision_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_collision_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -426,8 +426,8 @@ def plot_cw_values(backoff, actions, n, n_drl, seed, name):
     plt.xticks(cw, fontsize=7)
     plt.grid(axis='y')
     plt.tight_layout()
-    plt.savefig(f'{name}_cw_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name}_cw_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_cw_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_cw_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
