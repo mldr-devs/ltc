@@ -58,22 +58,23 @@ class ProcessOutputTestCase(unittest.TestCase):
     def test_process_rl_output(self):
         buffer_states = jnp.array([0, 0, 1, 0])
         new_buffer_states = jnp.array([0, 0, 1, 0])
-        power_states = jnp.array([10, 10, 10, 10])
+        power_states = jnp.array([100, 100, 100, 100])
         actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.TX.value, Actions.TX.value])
         terminals = jnp.array([False, False, False, False])
         channel_state = -1
         obs = jnp.array([[
-            [1, 1, 6, 0],
-            [1, 1, 7, 0],
-            [1, 1, 8, 0]
+            [1, 1, 6, 0, 100],
+            [1, 1, 7, 0, 100],
+            [1, 1, 8, 0, 100]
         ]] * 4)
 
         expected_obs_0 = jnp.array([
-            [1, 1, 7, 0],
-            [1, 1, 8, 0],
-            [0, -1, 0, 0]
+            [1, 1, 7, 0, 100],
+            [1, 1, 8, 0, 100],
+            [0, -1, 0, 0, 100 - TX_CONSUMPTION],
         ])
         expected_R_0 = -1.0
+        expected_power = power_states + jnp.array([-TX_CONSUMPTION, -CS_CONSUMPTION, -TX_CONSUMPTION, -TX_CONSUMPTION])
 
         result_obs, result_R, power = process_output(
             buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals
@@ -81,6 +82,7 @@ class ProcessOutputTestCase(unittest.TestCase):
 
         self.assertTrue(jnp.array_equal(result_obs[0], expected_obs_0))
         self.assertEqual(result_R[0], expected_R_0)
+        self.assertTrue(jnp.array_equal(power, expected_power))
 
 if __name__ == '__main__':
     unittest.main()

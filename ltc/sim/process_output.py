@@ -70,16 +70,12 @@ def successful_transmission(args):
 
 
 def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal):
-    _, _, ret_c, no_tx = obs[-1]
+    _, _, ret_c, no_tx, _ = obs[-1]
     args = (buffer_state, ret_c, channel_state, no_tx)
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
 
     reward = jnp.where(terminal, 0, reward)
     channel_state = jnp.where(action == Actions.CS.value, channel_state, -1)
-
-    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx])
-    obs = jnp.roll(obs, -1, axis=0)
-    obs = obs.at[-1].set(obs_t)
 
     power = jnp.where(
         action == Actions.TX.value, power_state - TX_CONSUMPTION,
@@ -91,6 +87,10 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
             )
         )
     )
+
+    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, power])
+    obs = jnp.roll(obs, -1, axis=0)
+    obs = obs.at[-1].set(obs_t)
 
     return obs, reward, power
 
