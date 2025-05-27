@@ -9,9 +9,9 @@ import optax
 from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
-from ltc.dataclasses import Carry, Output
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
+from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
 
 

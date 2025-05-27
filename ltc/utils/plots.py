@@ -8,7 +8,7 @@ import lz4.frame
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ltc.dataclasses import Output
+from ltc.utils.scan_states import Output
 from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY
 
 COLUMN_WIDTH = 4.0
