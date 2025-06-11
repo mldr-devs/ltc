@@ -62,7 +62,7 @@ def plot_powers(power_states, n, n_drl, seed, name):
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Consumed power')
     plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
-    plt.ylim(0, 1)
+    plt.ylim(-0.05, 1.05)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
     plt.grid()
@@ -95,7 +95,6 @@ def plot_rewards(rewards, n, n_drl, seed, name):
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Reward')
     plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
-    plt.ylim(-1, 1)
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -179,34 +178,34 @@ def plot_actions(actions, terminals, n, n_drl, seed, name):
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    tx = np.where(actions == Actions.TX.value, 1, 0)
+    tx = np.where((1 - terminals) * (actions == Actions.TX.value), 1, 0)
     tx = tx.sum(axis=1)
     tx_drl = tx[:, :n_drl] / (1 - terminals).sum(axis=1)[:, :n_drl]
     tx_dcf = tx[:, n_drl:] / (1 - terminals).sum(axis=1)[:, n_drl:]
 
-    cs = np.where(actions == Actions.CS.value, 1, 0)
+    cs = np.where((1 - terminals) * (actions == Actions.CS.value), 1, 0)
     cs = cs.sum(axis=1)
     cs_drl = cs[:, :n_drl] / (1 - terminals).sum(axis=1)[:, :n_drl]
     cs_dcf = cs[:, n_drl:] / (1 - terminals).sum(axis=1)[:, n_drl:]
 
-    idle = np.where(actions == Actions.IDLE.value, 1, 0)
+    idle = np.where((1 - terminals) * (actions == Actions.IDLE.value), 1, 0)
     idle = idle.sum(axis=1)
     idle_drl = idle[:, :n_drl] / (1 - terminals).sum(axis=1)[:, :n_drl]
     idle_dcf = idle[:, n_drl:] / (1 - terminals).sum(axis=1)[:, n_drl:]
 
-    plt.plot(xs, tx_drl, color='red', linestyle='-', marker='o', markersize=3)
-    plt.plot(xs, cs_drl, color='green', linestyle='-', marker='o', markersize=3)
-    plt.plot(xs, idle_drl, color='blue', linestyle='-', marker='o', markersize=3)
+    plt.plot(xs, tx_drl, color='red', linestyle='-')
+    plt.plot(xs, cs_drl, color='green', linestyle='-')
+    plt.plot(xs, idle_drl, color='blue', linestyle='-')
 
-    plt.plot(xs, tx_dcf, color='red', linestyle='--', marker='x', markersize=3)
-    plt.plot(xs, cs_dcf, color='green', linestyle='--', marker='x', markersize=3)
-    plt.plot(xs, idle_dcf, color='blue', linestyle='--', marker='x', markersize=3)
+    plt.plot(xs, tx_dcf, color='red', linestyle='--', alpha=0.5)
+    plt.plot(xs, cs_dcf, color='green', linestyle='--', alpha=0.5)
+    plt.plot(xs, idle_dcf, color='blue', linestyle='--', alpha=0.5)
 
     plt.plot([], color='red', label='TX')
     plt.plot([], color='green', label='CS')
     plt.plot([], color='blue', label='Idle')
-    plt.plot([], color='k', linestyle='-', label='DRL', marker='o', markersize=3)
-    plt.plot([], color='k', linestyle='--', label='DCF', marker='x', markersize=3)
+    plt.plot([], color='k', linestyle='-', label='DRL')
+    plt.plot([], color='k', linestyle='--', label='DCF', alpha=0.5)
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Action')
@@ -218,6 +217,40 @@ def plot_actions(actions, terminals, n, n_drl, seed, name):
     plt.tight_layout()
     plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
     plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
+def plot_buffer_states(buffer_states, terminals, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs, n_steps = buffer_states.shape[:2]
+    if name == PlotType.ALL:
+        xs = np.arange(n_epochs) + 1
+    else:
+        xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    buffer_states = np.where(1 - terminals, buffer_states, 0).sum(axis=1)
+    buffer_states = buffer_states / (1 - terminals).sum(axis=1)
+
+    for i in range(n_drl):
+        plt.plot(xs, buffer_states[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, buffer_states[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
+    plt.ylabel('Mean buffer fill')
+    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    plt.ylim(-0.05, 1.05)
+    plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'{name.value}_buffer_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_buffer_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -409,6 +442,7 @@ def plot_all(filename):
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_buffer_states(history.buffer_states, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
@@ -416,7 +450,7 @@ def plot_all(filename):
     plot_throughput_fill_nn(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
 
 
-def plot_first(filename, n_epochs=10, aggregation=100):
+def plot_first(filename, n_epochs=10, aggregation=500):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
         history = jax.tree.map(lambda x: x[:n_epochs], asdict(history))
@@ -431,7 +465,8 @@ def plot_first(filename, n_epochs=10, aggregation=100):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.FIRST)
-    plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_buffer_states(history.buffer_states, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.FIRST)
@@ -450,7 +485,7 @@ def plot_dcf_collision_probabilities(actions, rewards, seed, name):
         vals.append(1 - (tx_successful / tx_all).mean())
 
     plt.rcParams.update(PLOT_PARAMS)
-    plt.plot(n, vals, marker='o', markersize=3, label='LTC DCF')
+    plt.plot(n, vals, label='LTC DCF')
     plt.plot(n, analytical, linestyle='--', color='gray', label='Analytical')
 
     plt.xlabel('Number of DCF agents')
