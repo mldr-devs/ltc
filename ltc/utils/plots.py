@@ -81,7 +81,7 @@ def plot_rewards(rewards, n, n_drl, seed, name):
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    rewards = rewards.mean(axis=1)
+    rewards = rewards.sum(axis=1)
 
     for i in range(n_drl):
         plt.plot(xs, rewards[:, i], color='red')
@@ -114,7 +114,7 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, name):
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
     cum_rewards = rewards.cumsum(axis=0)
-    cum_rewards = cum_rewards.mean(axis=1)
+    cum_rewards = cum_rewards.sum(axis=1)
 
     for i in range(n_drl):
         plt.plot(xs, cum_rewards[:, i], color='red')
@@ -170,7 +170,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, name)
     plt.clf()
 
 
-def plot_actions(actions, n, n_drl, seed, name):
+def plot_actions(actions, terminals, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
     n_epochs, n_steps = actions.shape[:2]
@@ -180,24 +180,33 @@ def plot_actions(actions, n, n_drl, seed, name):
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
     tx = np.where(actions == Actions.TX.value, 1, 0)
-    tx = tx.mean(axis=1)
-    tx_drl, tx_dcf = tx[:, :n_drl].mean(axis=1), tx[:, n_drl:].mean(axis=1)
+    tx = tx.sum(axis=1)
+    tx_drl = tx[:, :n_drl] / (1 - terminals).sum(axis=1)[:, :n_drl]
+    tx_dcf = tx[:, n_drl:] / (1 - terminals).sum(axis=1)[:, n_drl:]
 
     cs = np.where(actions == Actions.CS.value, 1, 0)
-    cs = cs.mean(axis=1)
-    cs_drl, cs_dcf = cs[:, :n_drl].mean(axis=1), cs[:, n_drl:].mean(axis=1)
+    cs = cs.sum(axis=1)
+    cs_drl = cs[:, :n_drl] / (1 - terminals).sum(axis=1)[:, :n_drl]
+    cs_dcf = cs[:, n_drl:] / (1 - terminals).sum(axis=1)[:, n_drl:]
 
     idle = np.where(actions == Actions.IDLE.value, 1, 0)
-    idle = idle.mean(axis=1)
-    idle_drl, idle_dcf = idle[:, :n_drl].mean(axis=1), idle[:, n_drl:].mean(axis=1)
+    idle = idle.sum(axis=1)
+    idle_drl = idle[:, :n_drl] / (1 - terminals).sum(axis=1)[:, :n_drl]
+    idle_dcf = idle[:, n_drl:] / (1 - terminals).sum(axis=1)[:, n_drl:]
 
-    plt.plot(xs, tx_drl, color='red', label='TX DRL', linestyle='-', marker='o', markersize=3)
-    plt.plot(xs, cs_drl, color='green', label='CS DRL', linestyle='-', marker='o', markersize=3)
-    plt.plot(xs, idle_drl, color='blue', label='Idle DRL', linestyle='-', marker='o', markersize=3)
+    plt.plot(xs, tx_drl, color='red', linestyle='-', marker='o', markersize=3)
+    plt.plot(xs, cs_drl, color='green', linestyle='-', marker='o', markersize=3)
+    plt.plot(xs, idle_drl, color='blue', linestyle='-', marker='o', markersize=3)
 
-    plt.plot(xs, tx_dcf, color='red', label='TX DCF', linestyle='--', marker='x', markersize=3)
-    plt.plot(xs, cs_dcf, color='green', label='CS DCF', linestyle='--', marker='x', markersize=3)
-    plt.plot(xs, idle_dcf, color='blue', label='Idle DCF', linestyle='--', marker='x', markersize=3)
+    plt.plot(xs, tx_dcf, color='red', linestyle='--', marker='x', markersize=3)
+    plt.plot(xs, cs_dcf, color='green', linestyle='--', marker='x', markersize=3)
+    plt.plot(xs, idle_dcf, color='blue', linestyle='--', marker='x', markersize=3)
+
+    plt.plot([], color='red', label='TX')
+    plt.plot([], color='green', label='CS')
+    plt.plot([], color='blue', label='Idle')
+    plt.plot([], color='k', linestyle='-', label='DRL', marker='o', markersize=3)
+    plt.plot([], color='k', linestyle='--', label='DCF', marker='x', markersize=3)
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Action')
@@ -399,7 +408,7 @@ def plot_all(filename):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.ALL)
-    plot_actions(history.actions, n, n_drl, seed, PlotType.ALL)
+    plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
@@ -422,7 +431,7 @@ def plot_first(filename, n_epochs=10, aggregation=100):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.FIRST)
-    plot_actions(history.actions, n, n_drl, seed, PlotType.ALL)
+    plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.FIRST)
