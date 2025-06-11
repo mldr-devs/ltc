@@ -170,6 +170,48 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, name)
     plt.clf()
 
 
+def plot_actions(actions, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs, n_steps = actions.shape[:2]
+    if name == PlotType.ALL:
+        xs = np.arange(n_epochs) + 1
+    else:
+        xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    tx = np.where(actions == Actions.TX.value, 1, 0)
+    tx = tx.mean(axis=1)
+    tx_drl, tx_dcf = tx[:, :n_drl].mean(axis=1), tx[:, n_drl:].mean(axis=1)
+
+    cs = np.where(actions == Actions.CS.value, 1, 0)
+    cs = cs.mean(axis=1)
+    cs_drl, cs_dcf = cs[:, :n_drl].mean(axis=1), cs[:, n_drl:].mean(axis=1)
+
+    idle = np.where(actions == Actions.IDLE.value, 1, 0)
+    idle = idle.mean(axis=1)
+    idle_drl, idle_dcf = idle[:, :n_drl].mean(axis=1), idle[:, n_drl:].mean(axis=1)
+
+    plt.plot(xs, tx_drl, color='red', label='TX DRL', linestyle='-', marker='o', markersize=3)
+    plt.plot(xs, cs_drl, color='green', label='CS DRL', linestyle='-', marker='o', markersize=3)
+    plt.plot(xs, idle_drl, color='blue', label='Idle DRL', linestyle='-', marker='o', markersize=3)
+
+    plt.plot(xs, tx_dcf, color='red', label='TX DCF', linestyle='--', marker='x', markersize=3)
+    plt.plot(xs, cs_dcf, color='green', label='CS DCF', linestyle='--', marker='x', markersize=3)
+    plt.plot(xs, idle_dcf, color='blue', label='Idle DCF', linestyle='--', marker='x', markersize=3)
+
+    plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
+    plt.ylabel('Action')
+    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    plt.ylim(0, 1)
+    plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
+    plt.legend(ncol=2)
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
 def plot_channel_states(channel_states, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
@@ -357,6 +399,7 @@ def plot_all(filename):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.ALL)
+    plot_actions(history.actions, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
@@ -379,6 +422,7 @@ def plot_first(filename, n_epochs=10, aggregation=100):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.FIRST)
+    plot_actions(history.actions, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.FIRST)
