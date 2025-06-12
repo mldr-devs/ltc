@@ -328,16 +328,16 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, name):
     plt.clf()
 
 
-def plot_throughput(rewards, terminals, n, n_drl, seed, name):
+def plot_throughput(actions, channel_states, terminals, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_epochs, n_steps = rewards.shape[:2]
+    n_epochs, n_steps = actions.shape[:2]
     if name == PlotType.ALL:
         xs = np.arange(n_epochs) + 1
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    throughput = (rewards > NO_TX_REWARD)
+    throughput = jax.lax.bitwise_and(actions == Actions.TX.value, channel_states[..., None] == 1)
     throughput = throughput.sum(axis=1) / (1 - terminals).sum(axis=1)
 
     for i in range(n_drl):
@@ -361,16 +361,16 @@ def plot_throughput(rewards, terminals, n, n_drl, seed, name):
     plt.clf()
 
 
-def plot_throughput_fill(rewards, terminals, n, n_drl, seed, name):
+def plot_throughput_fill(actions, channel_states, terminals, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_epochs, n_steps = rewards.shape[:2]
+    n_epochs, n_steps = actions.shape[:2]
     if name == PlotType.ALL:
         xs = np.arange(n_epochs) + 1
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    throughput = (rewards > NO_TX_REWARD)
+    throughput = jax.lax.bitwise_and(actions == Actions.TX.value, channel_states[..., None] == 1)
     throughput = (throughput.sum(axis=1) / (1 - terminals).sum(axis=1)).cumsum(axis=1)
     throughput = throughput / throughput[:, -1][:, None]
 
@@ -396,16 +396,16 @@ def plot_throughput_fill(rewards, terminals, n, n_drl, seed, name):
     plt.clf()
 
 
-def plot_throughput_fill_nn(rewards, terminals, n, n_drl, seed, name):
+def plot_throughput_fill_nn(actions, channel_states, terminals, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
-    n_epochs, n_steps = rewards.shape[:2]
+    n_epochs, n_steps = actions.shape[:2]
     if name == PlotType.ALL:
         xs = np.arange(n_epochs) + 1
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    throughput = (rewards > NO_TX_REWARD)
+    throughput = jax.lax.bitwise_and(actions == Actions.TX.value, channel_states[..., None] == 1)
     throughput = (throughput.sum(axis=1) / (1 - terminals).sum(axis=1)).cumsum(axis=1)
 
     for i in range(n_drl):
@@ -445,9 +445,9 @@ def plot_all(filename):
     plot_buffer_states(history.buffer_states, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.ALL)
-    plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
-    plot_throughput_fill(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
-    plot_throughput_fill_nn(history.rewards, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_throughput(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_throughput_fill(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_throughput_fill_nn(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
 
 
 def plot_first(filename, n_epochs=10, aggregation=500):
@@ -469,9 +469,9 @@ def plot_first(filename, n_epochs=10, aggregation=500):
     plot_buffer_states(history.buffer_states, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states_fill(history.channel_state, n, n_drl, seed, PlotType.FIRST)
-    plot_throughput(history.rewards, history.terminals, n, n_drl, seed, PlotType.FIRST)
-    plot_throughput_fill(history.rewards, history.terminals, n, n_drl, seed, PlotType.FIRST)
-    plot_throughput_fill_nn(history.rewards, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_throughput(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_throughput_fill(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_throughput_fill_nn(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
 
 
 def plot_dcf_collision_probabilities(actions, rewards, seed, name):
