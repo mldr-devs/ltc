@@ -1,3 +1,6 @@
+import os
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+
 from dataclasses import replace
 from functools import partial
 
@@ -74,7 +77,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
 
 if __name__ == '__main__':
     n, n_drl = 10, 5
-    n_epochs, n_steps = 500, 2000
+    n_epochs, n_steps = 50, 10000
     window_size = 5
     seed = 42
 
@@ -110,7 +113,7 @@ if __name__ == '__main__':
     dcf_states, dcf_step = init_agents(dcf, init_key, n - n_drl)
 
     key, init_key = jax.random.split(key)
-    traffic = cox_traffic(f3dB=1.0, loc=0.0, scale=0.0, initial_state=InitialStateConf.ZERO)
+    traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn = jax.jit(rl_step(drl_step, dcf_step, traffic_step, n, n_drl))

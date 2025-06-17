@@ -5,19 +5,37 @@ from ltc.sim.constants import *
 
 
 def no_transmission(args):
-    _, _, _, no_tx = args
-    return jax.lax.cond(no_tx < SAFE_IDLE_PERIOD, no_transmission_short, no_transmission_long, args)
+    action, buffer_state, _, _, no_tx = args
+    return jax.lax.cond(
+        action == Actions.IDLE.value,
+        lambda: jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args),
+        lambda: jax.lax.cond(no_tx < SAFE_IDLE_PERIOD, no_transmission_short, no_transmission_long, args),
+    )
+
+
+def idle_empty_buffer(_):
+    reward = EMPTY_BUFFER_REWARD
+    ret_c = 0
+    no_tx = 0
+    return reward, ret_c, no_tx
+
+
+def idle_full_buffer(args):
+    _, _, ret_c, _, no_tx = args
+    reward = NO_TX_REWARD
+    no_tx = no_tx + 1
+    return reward, ret_c, no_tx
 
 
 def no_transmission_short(args):
-    buffer_state, ret_c, _, no_tx = args
+    _, buffer_state, ret_c, _, no_tx = args
     reward = NO_TX_REWARD
-    no_tx = jax.lax.select(buffer_state == 0, 0, no_tx + 1)
+    no_tx = jnp.where(buffer_state == 0, 0, no_tx + 1)
     return reward, ret_c, no_tx
 
 
 def no_transmission_long(args):
-    _, ret_c, _, no_tx = args
+    _, _, ret_c, _, no_tx = args
     scale = jax.lax.min(1., (no_tx - SAFE_IDLE_PERIOD + 1) / PENALIZED_IDLE_PERIOD)
     reward = scale * NO_TX_PENALTY
     no_tx = no_tx + 1
@@ -25,12 +43,12 @@ def no_transmission_long(args):
 
 
 def transmission(args):
-    _, _, channel_state, _ = args
+    _, _, _, channel_state, _ = args
     return jax.lax.cond(channel_state == 1, transmission_without_collision, transmission_with_collision, args)
 
 
 def transmission_with_collision(args):
-    _, ret_c, _, _ = args
+    _, _, ret_c, _, _ = args
     return jax.lax.cond(ret_c < MAX_RETRANSMISSION, retransmission, max_retransmission_collision, args)
 
 
@@ -42,7 +60,7 @@ def max_retransmission_collision(_):
 
 
 def retransmission(args):
-    _, ret_c, _, _ = args
+    _, _, ret_c, _, _ = args
     reward = COLLISION_PENALTY
     ret_c = ret_c + 1
     no_tx = 0
@@ -50,7 +68,7 @@ def retransmission(args):
 
 
 def transmission_without_collision(args):
-    buffer_state, _, _, _ = args
+    _, buffer_state, _, _, _ = args
     return jax.lax.cond(buffer_state > 0, successful_transmission, empty_buffer_transmission, args)
 
 
@@ -62,7 +80,7 @@ def empty_buffer_transmission(_):
 
 
 def successful_transmission(args):
-    _, ret_c, _, _ = args
+    _, _, ret_c, _, _ = args
     reward = TX_REWARD / (ret_c + 1)
     ret_c = 0
     no_tx = 0
@@ -71,12 +89,12 @@ def successful_transmission(args):
 
 def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal):
     _, _, ret_c, no_tx, _ = obs[-1]
-    args = (buffer_state, ret_c, channel_state, no_tx)
+    args = (action, buffer_state, ret_c, channel_state, no_tx)
+
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
+    reward = jnp.where(terminal, 0., reward)
 
-    reward = jnp.where(jax.lax.bitwise_or(terminal, action == Actions.IDLE.value), NO_TX_REWARD, reward)
     channel_state = jnp.where(action == Actions.CS.value, channel_state, -1)
-
     power = jnp.where(
         action == Actions.TX.value, power_state - TX_CONSUMPTION,
         jnp.where(
