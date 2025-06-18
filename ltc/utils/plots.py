@@ -586,6 +586,7 @@ def plot_first(filename, n_epochs=10, aggregation=500):
     plot_throughput_fill_nn(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_channel_access_delay(history.buffer_states, history.new_frames, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_xnor(history.actions, history.channel_state, history.buffer_states, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_weights(history.weights_histogram[:50], history.weights_bin_edges[:50], n, n_drl, seed, PlotType.FIRST)
 
 
 def plot_dcf_collision_probabilities(actions, rewards, seed, name):

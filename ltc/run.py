@@ -65,7 +65,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
         obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
-        flat_params, _ = jax.tree.flatten(drl_states.params)
+        flat_params, _ = jax.tree.flatten(c.drl_states.params)
         flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
         flat_params = jnp.hstack(flat_params)
         hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
