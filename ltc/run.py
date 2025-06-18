@@ -69,7 +69,10 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
             drl_states, dcf_states, traffic_states, buffer_states, powers,
             channel_state, key, obs, actions, rewards, terminals
         )
-        o = Output(dcf_states, obs, actions, rewards, terminals, buffer_states, powers, channel_state)
+        o = Output(
+            dcf_states, obs, actions, rewards, terminals, buffer_states, powers,
+            (new_frames > 0).astype(int), channel_state
+        )
         return c, o
 
     return rl_step_fn

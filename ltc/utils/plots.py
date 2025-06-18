@@ -429,6 +429,79 @@ def plot_throughput_fill_nn(actions, channel_states, terminals, n, n_drl, seed, 
     plt.clf()
 
 
+def plot_channel_access_delay(buffer_states, new_frames, terminals, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs, n_steps = buffer_states.shape[:2]
+    if name == PlotType.ALL:
+        xs = np.arange(n_epochs) + 1
+    else:
+        xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    buffer_states, new_frames = (1 - terminals) * buffer_states, (1 - terminals) * new_frames
+    cad = buffer_states.sum(axis=1) / (new_frames.sum(axis=1) + 1e-6)
+
+    for i in range(n_drl):
+        plt.plot(xs, cad[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, cad[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
+    plt.ylabel('Channel access delay')
+    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    plt.ylim(bottom=0)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'{name.value}_ch_acc_delay_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_ch_acc_delay_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
+def plot_xnor(actions, channel_states, buffer_states, terminals, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs, n_steps = actions.shape[:2]
+    if name == PlotType.ALL:
+        xs = np.arange(n_epochs) + 1
+    else:
+        xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    idle_and_empty = jax.lax.bitwise_and(
+        jax.lax.bitwise_not(terminals),
+        jax.lax.bitwise_and(actions == Actions.IDLE.value, buffer_states == 0)
+    ).sum(axis=1)
+    tx_and_full = jax.lax.bitwise_and(
+        jax.lax.bitwise_and(jax.lax.bitwise_not(terminals), np.expand_dims(channel_states, axis=-1) == 1),
+        jax.lax.bitwise_and(actions == Actions.TX.value, buffer_states != 0)
+    ).sum(axis=1)
+    xnor = idle_and_empty + tx_and_full
+
+    for i in range(n_drl):
+        plt.plot(xs, xnor[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, xnor[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
+    plt.ylabel('XNOR')
+    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    plt.ylim(bottom=0)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'{name.value}_xnor_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_xnor_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
 def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
@@ -448,6 +521,8 @@ def plot_all(filename):
     plot_throughput(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_throughput_fill(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_throughput_fill_nn(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_channel_access_delay(history.buffer_states, history.new_frames, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_xnor(history.actions, history.channel_state, history.buffer_states, history.terminals, n, n_drl, seed, PlotType.ALL)
 
 
 def plot_first(filename, n_epochs=10, aggregation=500):
@@ -472,6 +547,8 @@ def plot_first(filename, n_epochs=10, aggregation=500):
     plot_throughput(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_throughput_fill(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_throughput_fill_nn(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_channel_access_delay(history.buffer_states, history.new_frames, history.terminals, n, n_drl, seed, PlotType.FIRST)
+    plot_xnor(history.actions, history.channel_state, history.buffer_states, history.terminals, n, n_drl, seed, PlotType.FIRST)
 
 
 def plot_dcf_collision_probabilities(actions, rewards, seed, name):

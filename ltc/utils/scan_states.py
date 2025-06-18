@@ -32,4 +32,5 @@ class Output:
     terminals: jax.Array
     buffer_states: jax.Array
     power_states: jax.Array
+    new_frames: jax.Array
     channel_state: int
