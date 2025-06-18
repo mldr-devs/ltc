@@ -49,7 +49,7 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
+def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
     def rl_step_fn(c, _):
         key, drl_keys, dcf_keys, traffic_key = jax.random.split(c.key, 4)
         drl_keys = jax.random.split(drl_keys, n_drl)
@@ -65,13 +65,18 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl):
         obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
+        flat_params, _ = jax.tree.flatten(drl_states.params)
+        flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
+        flat_params = jnp.hstack(flat_params)
+        hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
+
         c = Carry(
             drl_states, dcf_states, traffic_states, buffer_states, powers,
             channel_state, key, obs, actions, rewards, terminals
         )
         o = Output(
             dcf_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state
+            (new_frames > 0).astype(int), channel_state, hist, bin_edges
         )
         return c, o
 

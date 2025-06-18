@@ -34,3 +34,5 @@ class Output:
     power_states: jax.Array
     new_frames: jax.Array
     channel_state: int
+    weights_histogram: jax.Array
+    weights_bin_edges: jax.Array

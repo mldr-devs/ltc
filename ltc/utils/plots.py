@@ -502,6 +502,42 @@ def plot_xnor(actions, channel_states, buffer_states, terminals, n, n_drl, seed,
     plt.clf()
 
 
+def plot_weights(histogram, bin_edges, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+    plt.rcParams['figure.figsize'] = (COLUMN_HIGHT, COLUMN_WIDTH)
+
+    n_epochs, n_steps = histogram.shape[:2]
+    if name == PlotType.ALL:
+        ys = np.arange(n_epochs) + 1
+    else:
+        ys = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    ys = np.linspace(ys.min(), ys.max(), 11)
+    ys = np.round(ys, 1 - int(np.floor(np.log10(ys.max())))).astype(int)
+
+    offset = 0.1
+    scale_max = 0.3
+    colors = plt.cm.Oranges(np.linspace(0.3, 1, n_epochs))
+
+    for i in range(n_drl):
+        hist_i = histogram[:, 0, i]
+        bin_edges_i = bin_edges[:, 0, i]
+
+        for j in range(n_epochs):
+            hist_scaled = hist_i[j] / hist_i[j].max() * scale_max
+            plt.fill_between(bin_edges_i[j, :-1], j * offset, hist_scaled + j * offset, color=colors[j], alpha=0.9)
+            plt.plot(bin_edges_i[j, :-1], hist_scaled + j * offset, color=colors[j], lw=0.8)
+
+        plt.xlabel('Value')
+        plt.ylabel('Epoch' if name == PlotType.ALL else 'Step')
+        plt.yticks(np.linspace(0, (n_epochs - 1) * offset, 11), labels=ys)
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f'{name.value}_hist_id{i}_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+        plt.savefig(f'{name.value}_hist_id{i}_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+        plt.clf()
+
+
 def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
@@ -523,6 +559,7 @@ def plot_all(filename):
     plot_throughput_fill_nn(history.actions, history.channel_state, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_channel_access_delay(history.buffer_states, history.new_frames, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_xnor(history.actions, history.channel_state, history.buffer_states, history.terminals, n, n_drl, seed, PlotType.ALL)
+    plot_weights(history.weights_histogram, history.weights_bin_edges, n, n_drl, seed, PlotType.ALL)
 
 
 def plot_first(filename, n_epochs=10, aggregation=500):
