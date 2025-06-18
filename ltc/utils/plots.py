@@ -521,12 +521,12 @@ def plot_weights(histogram, bin_edges, n, n_drl, seed, name):
 
     for i in range(n_drl):
         hist_i = histogram[:, 0, i]
-        bin_edges_i = bin_edges[:, 0, i]
+        bin_edges_i = (bin_edges[:, 0, i, :-1] + bin_edges[:, 0, i, 1:]) / 2
 
         for j in range(n_epochs):
             hist_scaled = hist_i[j] / hist_i[j].max() * scale_max
-            plt.fill_between(bin_edges_i[j, :-1], j * offset, hist_scaled + j * offset, color=colors[j], alpha=0.9)
-            plt.plot(bin_edges_i[j, :-1], hist_scaled + j * offset, color=colors[j], lw=0.8)
+            plt.fill_between(bin_edges_i[j], j * offset, hist_scaled + j * offset, color=colors[j], alpha=0.9)
+            plt.plot(bin_edges_i[j], hist_scaled + j * offset, color=colors[j], lw=0.8)
 
         plt.xlabel('Value')
         plt.ylabel('Epoch' if name == PlotType.ALL else 'Step')
