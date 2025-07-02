@@ -99,7 +99,8 @@ class StochasticVariationalNetwork(nn.Module):
 
         def add_noise(kp, x):
             name = '/'.join((k.key for k in kp))
-            return Uncertainty(name=name, prior_scale=self.prior_scale)(x)
+            noisy_x = Uncertainty(name=name, prior_scale=self.prior_scale)(x)
+            return jnp.where(kp[-1].key == 'bias', x, noisy_x)
 
         new_params = jax.tree.map_with_path(add_noise, old_params)
         vars = self.model.variables.copy()
