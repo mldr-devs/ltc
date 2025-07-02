@@ -66,7 +66,7 @@ class Uncertainty(nn.Module):
     scale_loc_ratio: float = 0.1
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, use_kl=True):
         m = self.scale_loc_ratio * jnp.clip(jnp.abs(x), min=self.clip_min)
         log_scale = self.param('log_scale', lambda _: jnp.log(m))
         scale = jnp.exp(log_scale)
@@ -79,9 +79,10 @@ class Uncertainty(nn.Module):
             axis=0
         )
 
-        loss_key = self.make_rng('rlib')
-        loss = self.variable('loss', 'kl', nn.initializers.zeros, key=loss_key, shape=(), dtype=x.dtype)
-        loss.value = kl
+        if use_kl:
+            loss_key = self.make_rng('rlib')
+            loss = self.variable('loss', 'kl', nn.initializers.zeros, key=loss_key, shape=(), dtype=x.dtype)
+            loss.value = kl
 
         return posterior_sample
 
@@ -99,8 +100,7 @@ class StochasticVariationalNetwork(nn.Module):
 
         def add_noise(kp, x):
             name = '/'.join((k.key for k in kp))
-            noisy_x = Uncertainty(name=name, prior_scale=self.prior_scale)(x)
-            return jnp.where(kp[-1].key == 'bias', x, noisy_x)
+            return Uncertainty(name=name, prior_scale=self.prior_scale)(x, use_kl=kp[-1].key != 'bias')
 
         new_params = jax.tree.map_with_path(add_noise, old_params)
         vars = self.model.variables.copy()
