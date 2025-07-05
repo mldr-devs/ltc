@@ -72,6 +72,43 @@ def plot_powers(power_states, n, n_drl, seed, name):
     plt.clf()
 
 
+def plot_power_per_tx(actions, channel_states, power_states, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs, n_steps = power_states.shape[:2]
+    if name == PlotType.ALL:
+        xs = np.arange(n_epochs) + 1
+    else:
+        xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    actions = actions.at[*np.where(channel_states != 1), :].set(-1)
+    actions = actions == Actions.TX.value
+    succ_tx = actions.sum(axis=1)
+
+    consumed_power = power_states[:, 0] - power_states[:, -1]
+    power_per_tx = consumed_power / succ_tx
+
+    for i in range(n_drl):
+        plt.plot(xs, power_per_tx[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, power_per_tx[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
+    plt.ylabel('Consumed power per succ. TX')
+    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    plt.ylim(bottom=0)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'{name.value}_power_per_succ_tx_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
+    plt.savefig(f'{name.value}_power_per_succ_tx_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
 def plot_rewards(rewards, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
@@ -547,6 +584,7 @@ def plot_all(filename):
     n, n_drl, seed = int(n), int(n_drl), int(seed)
 
     plot_powers(history.power_states, n, n_drl, seed, PlotType.ALL)
+    plot_power_per_tx(history.actions, history.channel_state, history.power_states, n, n_drl, seed, PlotType.ALL)
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.ALL)
@@ -574,6 +612,7 @@ def plot_first(filename, n_epochs=10, aggregation=500):
     n, n_drl, seed = int(n), int(n_drl), int(seed)
 
     plot_powers(history.power_states, n, n_drl, seed, PlotType.FIRST)
+    plot_power_per_tx(history.actions, history.channel_state, history.power_states, n, n_drl, seed, PlotType.FIRST)
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.FIRST)
