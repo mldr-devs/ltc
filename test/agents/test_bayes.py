@@ -14,7 +14,7 @@ class MultiSVI(nn.Module):
         Batched = nn.vmap(
             StochasticVariationalNetwork,
             in_axes=(None,), out_axes=-1,
-            variable_axes={'params': None, 'loss':0},
+            variable_axes={'params': None, 'loss': 0},
             split_rngs={'params': False, 'dropout': True, 'posterior': True},
             axis_size=self.num_ensembles
         )
