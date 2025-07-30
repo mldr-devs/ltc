@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import jax.random
 
 from ltc.sim.constants import Actions
 
@@ -50,4 +51,5 @@ def simulate(buffer_states, new_frames, actions):
     channel_state = channel_state_selector(actions)
     buffer_states = jnp.where(channel_state == 1, buffer_clearing(buffer_states, actions), buffer_states)
     buffer_states = add_new_frames(buffer_states, new_frames)
-    return buffer_states, channel_state
+    address = jnp.where(channel_state == 1, jax.random.randint(TODO), -1)
+    return buffer_states, channel_state, address

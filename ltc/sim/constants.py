@@ -8,6 +8,7 @@ class Actions(Enum):
     TX = 0
     CS = 1
     IDLE = 2
+    ACK = 3
 
 
 """
@@ -21,10 +22,12 @@ PENALIZED_IDLE_PERIOD = 32
 Rewards and penalties
 """
 TX_REWARD = 1.0
+ACK_REWARD = 1.0
 EMPTY_BUFFER_REWARD = 0.5
 NO_TX_REWARD = 0.0
 NO_TX_PENALTY = -1.0
 EMPTY_TX_PENALTY = -0.5
+EMPTY_ACK_PENALTY = -0.5
 COLLISION_PENALTY = -1.0
 MAX_RETRANSMISSION_PENALTY = -1.0
 
@@ -41,3 +44,30 @@ Tx slot duration (s)
 https://ieeexplore.ieee.org/document/8930559
 """
 TAU = 5.484 * 1e-3
+
+class Ack_state(Enum):
+    """
+    ACK state
+    """
+    SENT = 1
+    NOT_SENT = 0
+
+"""
+OBSERVATION INDEX TODO ZMIENIC NA ENUM
+"""
+BUFFER_INDEX = 0
+CHANNEL_INDEX = 1
+RET_C_INDEX = 2
+NO_TX_INDEX = 3
+POWER_INDEX = 4
+TYPE_INDEX = 5
+DEST_ADDRESS_INDEX = 6
+SOURCE_ADDRESS_INDEX = 7
+ACK_INDEX = 8
+
+"""
+OBSERVATION TYPES TODO ZMIENIC NA ENUM
+"""
+OBSERVATION_OTHER = 0
+OBSERVATION_DATA = 1
+OBSERVATION_ACK = 2

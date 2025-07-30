@@ -61,7 +61,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
         actions = jnp.concatenate([drl_actions, dcf_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
+        buffer_states, channel_state, address = simulate(c.buffer_states, new_frames, actions)
         obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
@@ -95,7 +95,8 @@ if __name__ == '__main__':
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
+    obs = jnp.zeros((n, window_size, 8), dtype=int).at[:, -1].set(INITIAL_CAPACITY) #TO DO zmienic index dla initial_capacity
+    transmision_history = jnp.zeros(window_size+1) #TO DO
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
