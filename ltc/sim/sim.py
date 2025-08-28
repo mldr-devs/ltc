@@ -1,5 +1,5 @@
 import jax.numpy as jnp
-import jax.random
+import jax
 
 from ltc.sim.constants import *
 
@@ -53,20 +53,20 @@ def modify_transmission_history(actions, transmission_history, address):
     args = (actions, transmission_history, address)
     return jax.lax.cond(
         jnp.any(actions == Actions.ACK.value),
-        lambda _: ack_transmission(args),
-        lambda _: jax.lax.cond(
+        ack_transmission,
+        lambda a: jax.lax.cond(
             jnp.any(actions == Actions.TX.value),
-            lambda _: data_transmission(args),
-            lambda _: no_transmission(args),
-            operand=None
+            data_transmission,
+            no_transmission,
+            operand=a
         ),
-        operand=None
+        operand=args
     )
 
 
 def data_transmission(args):
     actions, transmission_history, address = args
-    transmission_history_t = jnp.array([address, Ack_state.NOT_SENT.value])
+    transmission_history_t = jnp.array([address, AckState.NOT_SENT.value])
     transmission_history = jnp.roll(transmission_history, -1, axis=0)
     transmission_history = transmission_history.at[-1].set(transmission_history_t)
     return transmission_history
@@ -74,12 +74,12 @@ def data_transmission(args):
 
 def ack_transmission(args):
     actions, transmission_history, address = args
-    my_id = jnp.argmax(actions == Actions.ACK.value)
-    mask = (transmission_history[:, Transmision_indexes.DESTINATION_INDEX.value] == my_id) & (
-            transmission_history[:, Transmision_indexes.ACK_INDEX.value] == Ack_state.NOT_SENT.value)
+    sta_num = jnp.argmax(actions == Actions.ACK.value)
+    mask = (transmission_history[:, TransmissionIndex.DESTINATION.value] == sta_num) & (
+            transmission_history[:, TransmissionIndex.ACK.value] == AckState.NOT_SENT.value)
     matching_rows = jnp.nonzero(mask, size=mask.shape[0], fill_value=-1)[0]
-    transmission_history = transmission_history.at[matching_rows[0], Transmision_indexes.ACK_INDEX.value].set(
-        Ack_state.SENT.value)
+    transmission_history = transmission_history.at[matching_rows[0], TransmissionIndex.ACK.value].set(
+        AckState.SENT.value)
     return transmission_history
 
 
@@ -88,10 +88,8 @@ def no_transmission(args):
     return transmission_history
 
 
-def simulate(seed_number, buffer_states, new_frames, actions, transmission_history, nWifi):
+def simulate(key, buffer_states, new_frames, actions, transmission_history, nWifi):
     channel_state = channel_state_selector(actions)
-    seed = seed_number
-    key = jax.random.PRNGKey(seed)
     address = jnp.where(channel_state == 1, jax.random.randint(key, shape=(), minval=0, maxval=nWifi), -1)
     transmission_history = jnp.where(channel_state == 1,
                                      modify_transmission_history(actions, transmission_history, address),

@@ -4,7 +4,6 @@ import jax.numpy as jnp
 from ltc.sim.constants import *
 
 
-# obs = action, buffer_state, ret_c, channel_state, no_tx
 def no_transmission(args):
     action, buffer_state, _, _, no_tx, _ = args
     return jax.lax.cond(
@@ -18,7 +17,6 @@ def idle_empty_buffer(_):
     reward = EMPTY_BUFFER_REWARD
     ret_c = 0
     no_tx = 0
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -26,7 +24,6 @@ def idle_full_buffer(args):
     _, _, ret_c, _, no_tx, _ = args
     reward = NO_TX_REWARD
     no_tx = no_tx + 1
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -34,7 +31,6 @@ def no_transmission_short(args):
     _, buffer_state, ret_c, _, no_tx, _ = args
     reward = NO_TX_REWARD
     no_tx = jnp.where(buffer_state == 0, 0, no_tx + 1)
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -43,7 +39,6 @@ def no_transmission_long(args):
     scale = jax.lax.min(1., (no_tx - SAFE_IDLE_PERIOD + 1) / PENALIZED_IDLE_PERIOD)
     reward = scale * NO_TX_PENALTY
     no_tx = no_tx + 1
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -61,7 +56,6 @@ def max_retransmission_collision(_):
     reward = MAX_RETRANSMISSION_PENALTY
     ret_c = 0
     no_tx = 0
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -70,7 +64,6 @@ def retransmission(args):
     reward = COLLISION_PENALTY
     ret_c = ret_c + 1
     no_tx = 0
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -83,7 +76,6 @@ def empty_buffer_transmission(_):
     reward = EMPTY_TX_PENALTY
     ret_c = 0
     no_tx = 0
-    transmission_type = 0
     return reward, ret_c, no_tx
 
 
@@ -92,7 +84,6 @@ def successful_transmission(args):
     reward = TX_REWARD / (ret_c + 1)
     ret_c = 0
     no_tx = 0
-    transmission_type = 1
     return reward, ret_c, no_tx
 
 
@@ -107,10 +98,10 @@ def transmission_ack_without_collision(args):
 
 
 def empty_ack_transmission(args):
+    _, _, ret_c, _, no_tx, _ = args
     reward = EMPTY_ACK_PENALTY
-    ret_c = 0
-    no_tx = 0
-    transmission_type = 0
+    ret_c = ret_c
+    no_tx = no_tx + 1
     return reward, ret_c, no_tx
 
 
@@ -119,35 +110,29 @@ def successful_ack_transmission(args):
     reward = ACK_REWARD / (ret_c + 1)
     ret_c = 0
     no_tx = 0
-    transmission_type = -1
     return reward, ret_c, no_tx
 
 
 def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal,
                      transmission_history):
-    '''
-    type - type of the obserwation 0-other 1-data 2-ack
-    dest_address
-    ack - is ack was sended for that obserwation [0/1]
-    obs = buffer_state, channel_state, ret_c, no_tx, power, type, dest_address, ack
-    '''
     _, _, ret_c, no_tx, _, my_id = obs[-1]
-    mask = (transmission_history[:, Transmision_indexes.DESTINATION_INDEX.value] == my_id) & (
-            transmission_history[:, Transmision_indexes.ACK_INDEX.value] == Ack_state.NOT_SENT.value)
+    mask = (transmission_history[:, TransmissionIndex.DESTINATION.value] == my_id) & (
+            transmission_history[:, TransmissionIndex.ACK.value] == AckState.NOT_SENT.value)
     matching_rows = jnp.nonzero(mask, size=mask.shape[0], fill_value=-1)[0]
+    print(matching_rows)
     ack_flag = jnp.where(jnp.all(matching_rows == -1), -1, 1)
     args = (action, buffer_state, ret_c, channel_state, no_tx, ack_flag)
 
     reward, ret_c, no_tx = jax.lax.cond(
         action == Actions.ACK.value,
-        lambda _: transmission_ack(args),
-        lambda _: jax.lax.cond(
+        transmission_ack,
+        lambda a: jax.lax.cond(
             action == Actions.TX.value,
-            lambda _: transmission(args),
-            lambda _: no_transmission(args),
-            operand=None
+            transmission,
+            no_transmission,
+            operand=a
         ),
-        operand=None
+        operand=args
     )
 
     reward = jnp.where(terminal, 0., reward)
@@ -174,11 +159,9 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
     return obs, reward, power
 
 
-def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals,
-                   transmission_history):
+def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, transmission_history):
     channel_states = jnp.full(buffer_states.shape[0], channel_state)
     return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, 0, 0, 0, None))(buffer_states, new_buffer_states,
-                                                                                 power_states, channel_states, obs,
-                                                                                 actions,
-                                                                                 terminals, transmission_history
-                                                                                 )
+                                                                           power_states, channel_states, obs, actions,
+                                                                           terminals, transmission_history
+                                                                           )

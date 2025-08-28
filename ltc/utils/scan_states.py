@@ -14,6 +14,7 @@ class Carry:
     traffic_states: ModelState
     buffer_states: jax.Array
     power_states: jax.Array
+    transmission_history: jax.Array
     channel_state: int
     key: jax.random.PRNGKey
     obs: jax.Array

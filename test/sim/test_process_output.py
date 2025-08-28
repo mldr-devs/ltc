@@ -71,7 +71,7 @@ class ProcessOutputTestCase(unittest.TestCase):
         ]] * n)
 
         id_values = jnp.arange(0, n).reshape(n, 1)
-        obs = obs.at[:, :, Observation_indexes.ID_INDEX.value].set(id_values)
+        obs = obs.at[:, :, ObservationIndex.ID.value].set(id_values)
         expected_obs_0 = jnp.array([
             [1, 1, 7, 0, 100, 0],
             [1, 1, 8, 0, 100, 0],

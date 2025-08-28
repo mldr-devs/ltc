@@ -14,7 +14,7 @@ from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
-from ltc.sim.constants import INITIAL_CAPACITY, Actions, Observation_indexes
+from ltc.sim.constants import INITIAL_CAPACITY, Actions, ObservationIndex
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
 
@@ -50,21 +50,20 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, transmission_history, n_bins=50):
+def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
     def rl_step_fn(c, _):
-        key, drl_keys, dcf_keys, traffic_key = jax.random.split(c.key, 4)
+        key, drl_keys, dcf_keys, traffic_key, simulation_key = jax.random.split(c.key, 5)
         drl_keys = jax.random.split(drl_keys, n_drl)
         dcf_keys = jax.random.split(dcf_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
-        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl],
-                                           c.terminals[:n_drl])
-        dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:],
-                                           c.terminals[n_drl:])
+        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
+        dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
         actions = jnp.concatenate([drl_actions, dcf_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state, transmission_history = simulate(seed, c.buffer_states, new_frames, actions, transmission_history, n)
+        buffer_states, channel_state, transmission_history = simulate(simulation_key, c.buffer_states, new_frames,
+                                                                      actions, c.transmission_history, n)
         obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs,
                                               actions, c.terminals, transmission_history)
         terminals = jnp.logical_or(c.terminals, powers < 0)
@@ -76,7 +75,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, transmission_history, n_
         hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
 
         c = Carry(
-            drl_states, dcf_states, traffic_states, buffer_states, powers,
+            drl_states, dcf_states, traffic_states, buffer_states, powers, transmission_history,
             channel_state, key, obs, actions, rewards, terminals
         )
         o = Output(
@@ -99,9 +98,9 @@ if __name__ == '__main__':
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 6), dtype=int).at[:, Observation_indexes.POWER_INDEX.value].set(INITIAL_CAPACITY)
+    obs = jnp.zeros((n, window_size, 6), dtype=int).at[:, ObservationIndex.POWER.value].set(INITIAL_CAPACITY)
     id_values = jnp.arange(0, n).reshape(n, 1)
-    obs = obs.at[:, :, Observation_indexes.ID_INDEX.value].set(id_values)
+    obs = obs.at[:, :, ObservationIndex.ID.value].set(id_values)
     transmission_history = jnp.zeros((window_size + 1, 2))
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
@@ -132,9 +131,9 @@ if __name__ == '__main__':
     traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn = jax.jit(rl_step(drl_step, dcf_step, traffic_step, n, n_drl, transmission_history))
+    rl_step_fn = jax.jit(rl_step(drl_step, dcf_step, traffic_step, n, n_drl))
     init_carry = Carry(
-        drl_states, dcf_states, traffic_states, buffer_states, power_states,
+        drl_states, dcf_states, traffic_states, buffer_states, power_states, transmission_history,
         channel_state, key, obs, actions, rewards, terminals
     )
     all_outputs = []
