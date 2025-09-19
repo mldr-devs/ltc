@@ -5,6 +5,19 @@ from ltc.agents.drl import QNetwork, StochasticVariationalNetwork
 
 import flax.linen as nn
 
+class Softmaxifier(nn.Module):
+    """Convert a set of logits into a probability distribution. Optionally can perform Bayesian model aggregation by averaging posterior samples"""
+    model: nn.Module
+    softmax_axis: int = -2
+    mean_axis: int = -1
+    @nn.compact
+    def __call__(self, x):
+        logits = self.model(x)
+        x = nn.softmax(logits, axis=self.softmax_axis)
+        if self.mean_axis is not None:
+            x = x.mean(axis=self.mean_axis)
+        return x
+
 class MultiSVI(nn.Module):
     model: nn.Module
     num_ensembles: int = 16
@@ -42,5 +55,16 @@ class BayesTestCase(unittest.TestCase):
         y, s = svi.apply(vars, env_state, rngs=jax.random.key(0), mutable=['loss'])
 
         self.assertTrue('loss' in s)
+    def test_bayesian_aggregation(self):
+        env_state = jnp.zeros((5, 4))
+
+        qn = QNetwork()
+        svi = MultiSVI(model=qn)
+        bayes = Softmaxifier(model=svi)
+        vars = bayes.init(jax.random.key(0), env_state)
+        y, s = bayes.apply(vars, env_state, rngs=jax.random.key(0), mutable=['loss'])
+
+        self.assertTrue('loss' in s)
+        self.assertTrue(jnp.allclose(y.sum(axis=-1), jnp.ones(y.shape[:-1])))
 if __name__ == '__main__':
     unittest.main()
