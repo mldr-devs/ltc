@@ -125,7 +125,17 @@ class Softmaxifier(nn.Module):
         return x
 
 class MultiSVI(nn.Module):
-    """An ensemble of StochasticVariationalNetworks"""
+    """
+    An ensemble of StochasticVariationalNetworks.
+
+    Args:
+        model: The base neural network model to be ensembled.
+        num_ensembles (int): Number of ensemble members. Default is 16.
+            A larger number of ensembles can improve uncertainty estimation and robustness,
+            but increases computational and memory cost. The default value of 16 is chosen
+            as a balance between performance and efficiency for most use cases.
+            Adjust this parameter based on available resources and desired uncertainty quantification.
+    """
     model: nn.Module
     num_ensembles: int = 16
 
