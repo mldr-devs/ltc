@@ -1,39 +1,9 @@
 import unittest
 import jax
 import jax.numpy as jnp
-from ltc.agents.drl import QNetwork, StochasticVariationalNetwork
+from ltc.agents.drl import QNetwork, StochasticVariationalNetwork, MultiSVI, Softmaxifier
 
 import flax.linen as nn
-
-class Softmaxifier(nn.Module):
-    """Convert a set of logits into a probability distribution. Optionally can perform Bayesian model aggregation by averaging posterior samples"""
-    model: nn.Module
-    softmax_axis: int = -2
-    mean_axis: int = -1
-    @nn.compact
-    def __call__(self, x):
-        logits = self.model(x)
-        x = nn.softmax(logits, axis=self.softmax_axis)
-        if self.mean_axis is not None:
-            x = x.mean(axis=self.mean_axis)
-        return x
-
-class MultiSVI(nn.Module):
-    model: nn.Module
-    num_ensembles: int = 16
-
-    @nn.compact
-    def __call__(self, x):
-        Batched = nn.vmap(
-            StochasticVariationalNetwork,
-            in_axes=(None,), out_axes=-1,
-            variable_axes={'params': None, 'loss': 0},
-            split_rngs={'params': False, 'dropout': True, 'posterior': True},
-            axis_size=self.num_ensembles
-        )
-        ensemble = Batched(model=self.model, name='ensemble')
-
-        return ensemble(x)
 
 class BayesTestCase(unittest.TestCase):
     def test_svi(self):
