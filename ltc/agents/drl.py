@@ -112,7 +112,7 @@ class StochasticVariationalNetwork(nn.Module):
 
 
 class Softmaxifier(nn.Module):
-    """Convert a set of logits into a probability distribution. Optionally can perform Bayesian model aggregation by averaging posterior samples"""
+    """Convert a set of logits into a probability distribution. Optionally can perform Bayesian model aggregation by averaging posterior samples."""
     model: nn.Module
     softmax_axis: int = -2
     mean_axis: int = -1
