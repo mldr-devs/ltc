@@ -23,7 +23,7 @@ class BayesTestCase(unittest.TestCase):
         qn = QNetwork()
         svi = MultiSVI(model=qn)
         vars = svi.init(jax.random.key(0), env_state)
-        y, s = svi.apply(vars, env_state, rngs=jax.random.key(0), mutable=['loss'])
+        y, s = svi.apply(vars, env_state, rngs={'params':jax.random.key(0),'dropout':jax.random.key(0),'rlib':jax.random.key(0)}, mutable=['loss'])
 
         self.assertFalse(jnp.allclose(y[..., 0], y[..., 1]))
         self.assertTrue('loss' in s)
