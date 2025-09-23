@@ -101,9 +101,7 @@ class StochasticVariationalNetwork(nn.Module):
         def add_noise(kp, x):
             name = '/'.join((k.key for k in kp))
             return Uncertainty(name=name, prior_scale=self.prior_scale)(x, use_kl=kp[-1].key != 'bias')
-        # kv_leaves, treedef = jax.tree.flatten_with_path(old_params)
-        # flat_new_params = [Uncertainty(name='/'.join((k.key for k in kp)), prior_scale=self.prior_scale)(v, use_kl=kp[-1].key != 'bias') for kp,v in kv_leaves]
-        # new_params = jax.tree.unflatten(treedef, flat_new_params)
+
         new_params = jax.tree.map_with_path(add_noise, old_params)
         vars = self.model.variables.copy()
         vars.update({'params': new_params})
