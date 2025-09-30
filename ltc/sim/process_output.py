@@ -32,7 +32,8 @@ def successful_transmission(args):
 
 
 def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal):
-    _, _, ret_c, no_tx, _ = obs[-1]
+    ret_c = 0
+    no_tx = 0
     args = (action, buffer_state, ret_c, channel_state, no_tx)
 
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)

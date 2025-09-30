@@ -57,8 +57,9 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
         traffic_keys = jax.random.split(traffic_key, n)
 
         drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
-        dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
-        actions = jnp.concatenate([drl_actions, dcf_actions])
+        # dcf_states, dcf_actions = dcf_step(c.dcf_states, dcf_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
+        # actions = jnp.concatenate([drl_actions, dcf_actions])
+        actions = drl_actions
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
@@ -85,7 +86,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
 
 
 if __name__ == '__main__':
-    n, n_drl = 10, 5
+    n, n_drl = 10, 10
     n_epochs, n_steps = 50, 10000
     window_size = 5
     seed = 42
@@ -95,7 +96,7 @@ if __name__ == '__main__':
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
+    obs = jnp.zeros((n, window_size, 2), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
@@ -117,9 +118,11 @@ if __name__ == '__main__':
     drl_states, drl_step = init_agents(drl, init_key, n_drl)
     drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
 
-    dcf = DCF()
     key, init_key = jax.random.split(key)
-    dcf_states, dcf_step = init_agents(dcf, init_key, n - n_drl)
+    # dcf = DCF()
+    # dcf_states, dcf_step = init_agents(dcf, init_key, n - n_drl)
+    dcf_states = None
+    dcf_step = None
 
     key, init_key = jax.random.split(key)
     traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
