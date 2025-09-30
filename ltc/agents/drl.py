@@ -107,5 +107,56 @@ class StochasticVariationalNetwork(nn.Module):
         vars.update({'params': new_params})
 
         dropout_key = self.make_rng('dropout')
-        hat = self.model.clone(parent=None).apply(vars, x, rngs={'dropout': dropout_key})
+        rlib_key = self.make_rng('rlib')
+
+        hat = self.model.clone(parent=None).apply(vars, x, rngs={'dropout': dropout_key, 'rlib': rlib_key})
         return hat
+
+
+class Softmaxifier(nn.Module):
+    """Convert a set of logits into a probability distribution. Optionally can perform Bayesian model aggregation by averaging posterior samples."""
+
+    model: nn.Module
+    softmax_axis: int = -2
+    mean_axis: int = -1
+
+    @nn.compact
+    def __call__(self, x):
+        logits = self.model(x)
+        x = nn.softmax(logits, axis=self.softmax_axis)
+        if self.mean_axis is not None:
+            x = x.mean(axis=self.mean_axis)
+        return x
+
+
+class MultiSVI(nn.Module):
+    """
+    An ensemble of StochasticVariationalNetworks.
+
+    Args:
+        model: The base neural network model to be ensembled.
+        num_ensembles (int): Number of ensemble members. Default is 16.
+            A larger number of ensembles can improve uncertainty estimation and robustness,
+            but increases computational and memory cost. The default value of 16 is chosen
+            as a balance between performance and efficiency for most use cases.
+            Adjust this parameter based on available resources and desired uncertainty quantification.
+        apply_mean (bool): Whether to average the outputs across ensemble members.
+    """
+
+    model: nn.Module
+    num_ensembles: int = 16
+    apply_mean: bool = False
+
+    @nn.compact
+    def __call__(self, x):
+        Batched = nn.vmap(
+            StochasticVariationalNetwork,
+            in_axes=(None,), out_axes=-1,
+            variable_axes={'params': None, 'loss': 0},
+            split_rngs={'params': False, 'dropout': True, 'rlib': True},
+            axis_size=self.num_ensembles
+        )
+        x = Batched(model=self.model, name='ensemble')(x)
+        if self.apply_mean:
+            x = x.mean(axis=-1)
+        return x
