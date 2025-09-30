@@ -6,8 +6,7 @@ class Actions(Enum):
     Actions for the agent
     """
     TX = 0
-    CS = 1
-    IDLE = 2
+    IDLE = 1
 
 
 """
@@ -21,19 +20,13 @@ PENALIZED_IDLE_PERIOD = 32
 Rewards and penalties
 """
 TX_REWARD = 1.0
-EMPTY_BUFFER_REWARD = 0.5
 NO_TX_REWARD = 0.0
-NO_TX_PENALTY = -1.0
-EMPTY_TX_PENALTY = -0.5
-COLLISION_PENALTY = -1.0
-MAX_RETRANSMISSION_PENALTY = -1.0
 
 """
 Power consumption
 """
 INITIAL_CAPACITY = 10000
 TX_CONSUMPTION = 5
-CS_CONSUMPTION = 1
 IDLE_CONSUMPTION = 0
 
 """
