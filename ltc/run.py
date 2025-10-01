@@ -96,7 +96,7 @@ if __name__ == '__main__':
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 2), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
+    obs = jnp.zeros((n, window_size, 2), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
