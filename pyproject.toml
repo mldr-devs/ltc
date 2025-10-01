@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = [
-    "jax[cuda12_local]",
+    "jax[cuda12-local]",
 ]
 notebook = [
     "jupyterlab~=4.3.5",
