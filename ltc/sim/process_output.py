@@ -43,7 +43,13 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
 
     power = jnp.where(
         action == Actions.TX.value, power_state - TX_CONSUMPTION,
-        power_state
+        jnp.where(
+            action == Actions.CS.value, power_state - CS_CONSUMPTION,
+            jnp.where(
+                action == Actions.IDLE.value, power_state - IDLE_CONSUMPTION,
+                power_state
+            )
+        )
     )
 
     obs_t = jnp.array([channel_state, action])
