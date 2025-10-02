@@ -11,7 +11,7 @@ import lz4.frame
 import optax
 from tqdm import trange
 
-from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
+from ltc.agents import BayesianDDQN, DCF, DDQN, DLMANetwork, QNetwork, QNetworkDropout, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry, Output
@@ -53,7 +53,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
     def rl_step_fn(c, _):
         key, drl_keys, dcf_keys, traffic_key = jax.random.split(c.key, 4)
         drl_keys = jax.random.split(drl_keys, n_drl)
-        dcf_keys = jax.random.split(dcf_keys, n - n_drl)
+        # dcf_keys = jax.random.split(dcf_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
         drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
@@ -88,7 +88,7 @@ def rl_step(drl_step, dcf_step, traffic_step, n, n_drl, n_bins=50):
 if __name__ == '__main__':
     n, n_drl = 10, 10
     n_epochs, n_steps = 50, 10000
-    window_size = 5
+    window_size = 20
     seed = 42
 
     key = jax.random.key(seed)
@@ -100,10 +100,10 @@ if __name__ == '__main__':
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
-    drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(QNetworkDropout()),
+    drl = DDQN(
+        q_network=DLMANetwork(),
         obs_space_shape=obs.shape[1:],
-        act_space_size=3,
+        act_space_size=2,
         optimizer=optax.adam(1e-4),
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,
@@ -121,8 +121,7 @@ if __name__ == '__main__':
     key, init_key = jax.random.split(key)
     # dcf = DCF()
     # dcf_states, dcf_step = init_agents(dcf, init_key, n - n_drl)
-    dcf_states = None
-    dcf_step = None
+    dcf_states, dcf_step = None, None
 
     key, init_key = jax.random.split(key)
     traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
