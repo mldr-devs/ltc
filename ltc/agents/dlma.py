@@ -12,7 +12,9 @@ class DLMANetwork(nn.Module):
     def __call__(self, s):
         dense = partial(nn.Dense, kernel_init=nn.initializers.he_normal())
 
+        s = s[..., :-1]  # remove buffer state
         s = add_batch_dim(s)
+
         b, *_ = s.shape
         x = s.reshape(b, -1)
 

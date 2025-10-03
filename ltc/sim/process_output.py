@@ -52,7 +52,7 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
         )
     )
 
-    obs_t = jnp.array([channel_state, action])
+    obs_t = jnp.array([channel_state, action, new_buffer_state])
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 

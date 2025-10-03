@@ -10,7 +10,7 @@ from ltc.sim import ModelState
 @dataclass
 class Carry:
     drl_states: AgentState
-    dcf_states: AgentState
+    legacy_states: AgentState
     traffic_states: ModelState
     buffer_states: jax.Array
     power_states: jax.Array
@@ -25,7 +25,7 @@ class Carry:
 @jax.tree_util.register_dataclass
 @dataclass
 class Output:
-    dcf_states: AgentState
+    legacy_states: AgentState
     observations: jax.Array
     actions: jax.Array
     rewards: jax.Array
