@@ -30,10 +30,14 @@ class EBALOHA(BaseAgent):
 
     @staticmethod
     def update(state, key, env_state, action, reward, terminal, window_size: int, max_backoff: int):
-        *_, buffer = env_state[-1]
+        collision = (action == Actions.TX.value) & (reward == 0)
+        success = (action == Actions.TX.value) & (reward > 0)
 
-        collision = (action == Actions.TX.value) & (reward == 0) & (buffer > 0)
-        new_ret_c = jnp.where(collision, jnp.minimum(state.ret_c + 1, max_backoff), 0)
+        new_ret_c = jnp.where(
+            collision,
+            jnp.minimum(state.ret_c + 1, max_backoff),
+            jnp.where(success, 0, state.ret_c)
+        )
         window = window_size * (2 ** new_ret_c)
 
         reset_value = jax.random.randint(key, shape=(), minval=0, maxval=window)
