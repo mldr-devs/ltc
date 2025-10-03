@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import lz4.frame
 import optax
-from tqdm import trange
+from jax_tqdm import scan_tqdm
 
 from ltc.agents import BayesianDDQN, DDQN, DLMANetwork, QNetwork, QNetworkDropout, StochasticVariationalNetwork, DCF, QALOHA, EBALOHA, FWALOHA, TDMA
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     n_epochs, n_steps = 1, 500000
     window_size = 20
     seed = 42
-    traffic_type = 'saturated'  # 'saturated', 'bursty'
+    traffic_type = 'saturated'  # 'constant', 'saturated', 'bursty'
     legacy_type = 'q-aloha'     # 'q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'
 
     key = jax.random.key(seed)
@@ -122,11 +122,11 @@ if __name__ == '__main__':
     key, init_key = jax.random.split(key)
 
     if legacy_type == 'q-aloha':
-        legacy = QALOHA(q=0.2)
+        legacy = QALOHA(q=0.5)
     elif legacy_type == 'eb-aloha':
-        legacy = EBALOHA(window_size=4, max_backoff=3)
+        legacy = EBALOHA(window_size=4, max_backoff=2)
     elif legacy_type == 'fw-aloha':
-        legacy = FWALOHA(window_size=8)
+        legacy = FWALOHA(window_size=4)
     elif legacy_type == 'tdma':
         legacy = TDMA(state_size=10, assigned_slots=5)
     else:
@@ -136,8 +136,10 @@ if __name__ == '__main__':
 
     key, init_key = jax.random.split(key)
 
-    if traffic_type == 'saturated':
-        traffic = cox_traffic(f3dB=1.0, loc=0.0, scale=0.0, initial_state=InitialStateConf.ZERO)
+    if traffic_type == 'constant':
+        traffic = cox_traffic(f3dB=1.0, loc=-1.0, scale=0.0, initial_state=InitialStateConf.ZERO)
+    elif traffic_type == 'saturated':
+        traffic = cox_traffic(f3dB=1.0, loc=2.0, scale=0.0, initial_state=InitialStateConf.ZERO)
     elif traffic_type == 'bursty':
         traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
     else:
@@ -146,14 +148,16 @@ if __name__ == '__main__':
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl))
+    rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
     init_carry = Carry(
         drl_states, legacy_states, traffic_states, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals
     )
     all_outputs = []
 
-    for _ in trange(n_epochs):
-        carry, output = jax.lax.scan(rl_step_fn, init_carry, length=n_steps)
+    for epoch in range(n_epochs):
+        print(f'Epoch {epoch + 1}/{n_epochs}')
+        carry, output = jax.lax.scan(rl_step_fn, init_carry, jnp.arange(n_steps))
         init_carry = replace(
             init_carry,
             drl_states=carry.drl_states,

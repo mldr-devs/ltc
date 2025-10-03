@@ -24,7 +24,7 @@ class TDMA(BaseAgent):
 
     @staticmethod
     def init(key, state_size: int, assigned_slots: int):
-        tdma_slots = jnp.ones(state_size, dtype=int).at[:assigned_slots].set(1)
+        tdma_slots = jnp.zeros(state_size, dtype=int).at[:assigned_slots].set(1)
         tdma_slots = jax.random.permutation(key, tdma_slots)
         return TDMAState(counter=0, tdma_slots=tdma_slots)
 
