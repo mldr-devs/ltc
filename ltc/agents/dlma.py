@@ -1,8 +1,63 @@
 from functools import partial
 
+import jax
+import jax.numpy as jnp
 import flax.linen as nn
 
 from ltc.agents.drl import add_batch_dim
+
+
+@jax.vmap
+@jax.vmap
+def prepare_observation(obs):
+    def prepare_action(obs):
+        return jax.nn.one_hot(obs[1], 2)
+
+    def prepare_state(obs):
+        """
+        **WARNING**: This function assumes that there are only two nodes in the network (1 DLMA and 1 legacy)!
+
+        1. ch = -1, act = 0  (collision)
+        2. ch = 1, act = 0   (DLMA transmits)
+        3. ch = 1, act = 1   (legacy transmits)
+        4. ch = 0, act = 1   (idle)
+
+        s = max(ch + 2 * act, 0)
+
+        1. s = max(-1 + 0, 0) = 0  (collision)
+        2. s = max(1 + 0, 0) = 1   (DLMA transmits)
+        3. s = max(1 + 2, 0) = 3   (legacy transmits)
+        4. s = max(0 + 2, 0) = 2   (idle)
+        """
+
+        state = obs[:-1]  # remove buffer state
+        state = state[0] + 2 * state[1]
+        state = jnp.maximum(state, 0)
+        state = jax.nn.one_hot(state, 4)
+        return state
+
+    def prepare_rewards(obs):
+        """
+        **WARNING**: This function assumes that there are only two nodes in the network (1 DLMA and 1 legacy)!
+
+        1. ch = -1, act = 0  (collision)        -> DLMA reward = 0, legacy reward = 0
+        2. ch = 1, act = 0   (DLMA transmits)   -> DLMA reward = 1, legacy reward = 0
+        3. ch = 1, act = 1   (legacy transmits) -> DLMA reward = 0, legacy reward = 1
+        4. ch = 0, act = 1   (idle)             -> DLMA reward = 0, legacy reward = 0
+        """
+
+        state = obs[:-1]  # remove buffer state
+        no_tx = jnp.maximum(state[0], 0)
+        dlma_tx = no_tx * (1 - state[1])
+        legacy_tx = no_tx * state[1]
+        reward = jnp.array([dlma_tx, legacy_tx])
+        return reward
+
+    action = prepare_action(obs)
+    state = prepare_state(obs)
+    reward = prepare_rewards(obs)
+    obs = jnp.concatenate([action, state, reward], axis=0)
+    return obs
 
 
 class DLMANetwork(nn.Module):
@@ -12,8 +67,8 @@ class DLMANetwork(nn.Module):
     def __call__(self, s):
         dense = partial(nn.Dense, kernel_init=nn.initializers.he_normal())
 
-        s = s[..., :-1]  # remove buffer state
         s = add_batch_dim(s)
+        s = prepare_observation(s)
 
         b, *_ = s.shape
         x = s.reshape(b, -1)

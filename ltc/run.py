@@ -86,11 +86,11 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
 
 if __name__ == '__main__':
     n, n_drl = 2, 1
-    n_epochs, n_steps = 1, 500000
+    n_epochs, n_steps = 1, 100000
     window_size = 20
     seed = 42
     traffic_type = 'saturated'  # 'constant', 'saturated', 'bursty'
-    legacy_type = 'q-aloha'     # 'q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'
+    legacy_type = 'tdma'     # 'q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'
 
     key = jax.random.key(seed)
     actions = jnp.zeros(n, dtype=int)
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     if traffic_type == 'constant':
         traffic = cox_traffic(f3dB=1.0, loc=-1.0, scale=0.0, initial_state=InitialStateConf.ZERO)
     elif traffic_type == 'saturated':
-        traffic = cox_traffic(f3dB=1.0, loc=2.0, scale=0.0, initial_state=InitialStateConf.ZERO)
+        traffic = cox_traffic(f3dB=1.0, loc=5.0, scale=0.0, initial_state=InitialStateConf.ZERO)
     elif traffic_type == 'bursty':
         traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
     else:
