@@ -23,6 +23,11 @@ class ModelStats:
     mean: float
     variance: float
 
+    @property
+    def fano_factor(self) -> float:
+        """https://en.wikipedia.org/wiki/Fano_factor"""
+        return self.variance / self.mean if self.mean != 0 else np.inf
+
 
 class TrafficModel(NamedTuple):
     init: Callable[[jax.Array], ModelState]
