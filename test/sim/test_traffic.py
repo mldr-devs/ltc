@@ -12,14 +12,14 @@ from ltc.sim.traffic import _ss_step, cox_traffic
 class TrafficTestCase(unittest.TestCase):
     def test_ss(self):
         dt = 1e-3
-        fs = 1 / dt             # Sampling frequency in Hz
+        fs = 1 / dt  # Sampling frequency in Hz
         cutoff = 1 / (10 * dt)  # Desired 3dB cutoff frequency in Hz
-        order = 2               # Filter order
+        order = 2  # Filter order
 
         nyquist = fs / 2
         normalized_cutoff = cutoff / nyquist
 
-        b, a = signal.butter(order, normalized_cutoff, btype='low', analog=False)
+        b, a = signal.butter(order, normalized_cutoff, btype="low", analog=False)
 
         A, B, C, D = signal.tf2ss(b, a)
         A, B, C, D = jax.tree.map(jnp.squeeze, (A, B, C, D))
@@ -41,6 +41,24 @@ class TrafficTestCase(unittest.TestCase):
         model = cox_traffic(f3dB=1 / (10 * TAU))
         state = model.init(jax.random.key(4))
         state, frames = model.sample(state, key=jax.random.key(44))
+
+    def test_stats(self):
+        model = cox_traffic(f3dB=1 / (10 * TAU))
+        state = model.init(jax.random.key(4))
+        stats = model.stats()
+
+        def step(c, x)->tuple:#[c,x]
+            c,y=model.sample(c, x)
+            return x, y.squeeze()
+
+        keys = jax.random.split(jax.random.PRNGKey(44), 1000000)
+        _, yjax = jax.lax.scan(model.sample, state, keys)
+
+        self.assertAlmostEqual(yjax.mean(), stats.mean, places=3)
+        self.assertAlmostEqual(yjax.var(), stats.variance, places=1)
+        ...
+
+
 
 
 if __name__ == "__main__":

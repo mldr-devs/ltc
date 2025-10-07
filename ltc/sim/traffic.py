@@ -4,6 +4,7 @@ from typing import Tuple, Callable, NamedTuple
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import scipy.signal as signal
 from jax import tree
 
@@ -16,12 +17,22 @@ class ModelState:
     x: jax.Array
 
 
+@jax.tree_util.register_dataclass
+@dataclass
+class ModelStats:
+    mean: float
+    variance: float
+
+
 class TrafficModel(NamedTuple):
     init: Callable[[jax.Array], ModelState]
     sample: Callable[[ModelState, jax.Array], Tuple[ModelState, jax.Array]]
+    stats: Callable[[], ModelStats]
 
 
-def _ss_step(x: jax.Array, u: jax.Array, A: jax.Array, B: jax.Array, C: jax.Array, D: jax.Array) -> tuple[jax.Array, jax.Array]:
+def _ss_step(
+    x: jax.Array, u: jax.Array, A: jax.Array, B: jax.Array, C: jax.Array, D: jax.Array
+) -> tuple[jax.Array, jax.Array]:
     x_next = A @ x + B * u
     y = C @ x + D * u
     return y.squeeze(), x_next
@@ -32,7 +43,13 @@ class InitialStateConf(Enum):
     NORMAL = 1
 
 
-def cox_traffic(f3dB: float, order: int = 1, loc: float = 0., scale: float = 1.0, initial_state=InitialStateConf.ZERO) -> TrafficModel:
+def cox_traffic(
+    f3dB: float,
+    order: int = 1,
+    loc: float = 0.0,
+    scale: float = 1.0,
+    initial_state=InitialStateConf.ZERO,
+) -> TrafficModel:
     """
     Model factory.
 
@@ -53,7 +70,7 @@ def cox_traffic(f3dB: float, order: int = 1, loc: float = 0., scale: float = 1.0
     fs = 1 / TAU
     nyquist = fs / 2
     normalized_cutoff = f3dB / nyquist
-    b, a = signal.butter(order, normalized_cutoff, btype='low', analog=False)
+    b, a = signal.butter(order, normalized_cutoff, btype="low", analog=False)
 
     A, B, C, D = tree.map(jnp.asarray, signal.tf2ss(b, a))
     n_states = A.shape[0]
@@ -68,7 +85,7 @@ def cox_traffic(f3dB: float, order: int = 1, loc: float = 0., scale: float = 1.0
             case InitialStateConf.NORMAL:
                 return ModelState(x=jax.random.normal(key, (n_states,)))
             case _:
-                raise Exception(f'Unknown initial_state {initial_state}')
+                raise Exception(f"Unknown initial_state {initial_state}")
 
     def step(state: ModelState, key: jax.Array) -> tuple[ModelState, jax.Array]:
         state_key, obs_key = jax.random.split(key)
@@ -77,4 +94,22 @@ def cox_traffic(f3dB: float, order: int = 1, loc: float = 0., scale: float = 1.0
         n = jax.random.poisson(obs_key, lam=jnp.exp(y))
         return ModelState(x=x), n
 
-    return TrafficModel(init, step)
+    def stats() -> ModelStats:
+        n = int(fs/normalized_cutoff) # time to reach steady state
+        #Numerator (`b`) and denominator (`a`)
+        t, (y,) = signal.dimpulse(system=(b,a,1),n=n)
+
+        log_rate_loc = loc*y.sum()
+        log_rate_var = np.sum(scale*np.square(y))
+        # https://en.wikipedia.org/wiki/Log-normal_distribution
+        rate_loc = np.exp(log_rate_loc+0.5*log_rate_var)
+        rate_var = (np.exp(log_rate_var)-1)*np.exp(2*log_rate_loc+log_rate_var)
+
+        # https: // en.wikipedia.org / wiki / Law_of_total_expectation
+        # https: // en.wikipedia.org / wiki / Law_of_total_variance
+
+        count_mean = rate_loc
+        count_var = rate_loc + rate_var
+        return ModelStats(mean=count_mean, variance=count_var)
+
+    return TrafficModel(init, step, stats)
