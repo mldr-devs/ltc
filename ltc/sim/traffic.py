@@ -110,8 +110,8 @@ def cox_traffic(
         rate_loc = np.exp(log_rate_loc+0.5*log_rate_var)
         rate_var = (np.exp(log_rate_var)-1)*np.exp(2*log_rate_loc+log_rate_var)
 
-        # https: // en.wikipedia.org / wiki / Law_of_total_expectation
-        # https: // en.wikipedia.org / wiki / Law_of_total_variance
+        # https://en.wikipedia.org/wiki/Law_of_total_expectation
+        # https://en.wikipedia.org/wiki/Law_of_total_variance
 
         count_mean = rate_loc
         count_var = rate_loc + rate_var
