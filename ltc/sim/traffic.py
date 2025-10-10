@@ -101,7 +101,7 @@ def cox_traffic(
         return ModelState(x=x), n
 
     def stats() -> ModelStats:
-        n = int(fs/normalized_cutoff) # time to reach steady state
+        n = int(fs / normalized_cutoff)  # time to reach steady state
         #Numerator (`b`) and denominator (`a`)
         t, (y,) = signal.dimpulse(system=(b,a,1),n=n)
 
