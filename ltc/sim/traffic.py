@@ -22,6 +22,7 @@ class ModelState:
 class ModelStats:
     mean: float
     variance: float
+    acf_lag1: float
 
     @property
     def fano_factor(self) -> float:
@@ -115,6 +116,13 @@ def cox_traffic(
 
         count_mean = rate_loc
         count_var = rate_loc + rate_var
-        return ModelStats(mean=count_mean, variance=count_var)
+
+
+        log_rate_lag_1_acv = scale**2 * np.dot(y[:-1,0],y[1:,0])
+        rate_acv = np.exp(2*log_rate_loc + log_rate_var)*(np.exp(log_rate_lag_1_acv)-1)
+        count_lag_1_acv = rate_acv
+        count_lag_1_acf = count_lag_1_acv/count_var
+
+        return ModelStats(mean=count_mean, variance=count_var, acf_lag1=count_lag_1_acf)
 
     return TrafficModel(init, step, stats)
