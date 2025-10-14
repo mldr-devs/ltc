@@ -21,16 +21,16 @@ authors = [
 ]
 
 dependencies = [
-    "reinforced-lib==1.2.2",
+    "reinforced-lib==2.0.0",
     "tqdm~=4.67.1",
 ]
 
 [project.optional-dependencies]
 gpu = [
-    "jax[cuda12_local]",
+    "jax[cuda12-local]",
 ]
 notebook = [
-    "jupyterlab~=4.3.5",
+    "jupyterlab~=4.4.9",
     "seaborn~=0.13.2",
 ]
 

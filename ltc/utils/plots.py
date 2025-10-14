@@ -33,6 +33,8 @@ PLOT_PARAMS = {
     'ytick.major.width': 0.5,
 }
 
+SAVE_FORMAT = 'pdf'
+
 
 class PlotType(Enum):
     ALL = 'all'
@@ -56,7 +58,7 @@ def plot_powers(power_states, n, n_drl, seed, name):
     for i in range(n_drl, n):
         plt.plot(xs, consumed_power[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -67,8 +69,7 @@ def plot_powers(power_states, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_power_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_power_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_power_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -94,7 +95,7 @@ def plot_power_per_tx(actions, channel_states, power_states, n, n_drl, seed, nam
     for i in range(n_drl, n):
         plt.plot(xs, power_per_tx[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -104,8 +105,7 @@ def plot_power_per_tx(actions, channel_states, power_states, n, n_drl, seed, nam
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_power_per_succ_tx_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_power_per_succ_tx_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_power_per_succ_tx_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -126,7 +126,7 @@ def plot_rewards(rewards, n, n_drl, seed, name):
     for i in range(n_drl, n):
         plt.plot(xs, rewards[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -135,8 +135,7 @@ def plot_rewards(rewards, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_rewards_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -158,7 +157,7 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, name):
     for i in range(n_drl, n):
         plt.plot(xs, cum_rewards[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -167,8 +166,7 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_cum_rewards_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_cum_rewards_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_cum_rewards_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -191,7 +189,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, name)
     for i in range(n_drl, n):
         plt.plot(xs, actions[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -201,8 +199,41 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, name)
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_tx_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_tx_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_tx_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
+    plt.clf()
+
+
+def plot_cum_successful_transmissions(actions, channel_states, n, n_drl, seed, name):
+    plt.rcParams.update(PLOT_PARAMS)
+
+    n_epochs, n_steps = actions.shape[:2]
+    if name == PlotType.ALL:
+        xs = np.arange(n_epochs) + 1
+    else:
+        xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
+
+    actions = actions.at[*np.where(channel_states != 1), :].set(-1)
+    actions = actions == Actions.TX.value
+    actions = actions.sum(axis=1)
+    actions = actions.cumsum(axis=0)
+
+    for i in range(n_drl):
+        plt.plot(xs, actions[:, i], color='red')
+
+    for i in range(n_drl, n):
+        plt.plot(xs, actions[:, i], color='blue', linestyle='--')
+
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
+    plt.plot([], color='red', label='DRL')
+
+    plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
+    plt.ylabel('Successful transmissions')
+    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    plt.ylim(bottom=0)
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.savefig(f'{name.value}_tx_cum_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -242,7 +273,7 @@ def plot_actions(actions, terminals, n, n_drl, seed, name):
     plt.plot([], color='green', label='CS')
     plt.plot([], color='blue', label='Idle')
     plt.plot([], color='k', linestyle='-', label='DRL')
-    plt.plot([], color='k', linestyle='--', label='DCF', alpha=0.5)
+    plt.plot([], color='k', linestyle='--', label='Legacy', alpha=0.5)
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Action')
@@ -252,8 +283,7 @@ def plot_actions(actions, terminals, n, n_drl, seed, name):
     plt.legend(ncol=2)
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_action_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -275,7 +305,7 @@ def plot_buffer_states(buffer_states, terminals, n, n_drl, seed, name):
     for i in range(n_drl, n):
         plt.plot(xs, buffer_states[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -286,8 +316,7 @@ def plot_buffer_states(buffer_states, terminals, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_buffer_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_buffer_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_buffer_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -320,8 +349,7 @@ def plot_channel_states(channel_states, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_channel_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_channel_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_channel_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -360,8 +388,7 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_channel_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_channel_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_channel_fill_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -383,7 +410,7 @@ def plot_throughput(actions, channel_states, terminals, n, n_drl, seed, name):
     for i in range(n_drl, n):
         plt.plot(xs, throughput[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -393,8 +420,7 @@ def plot_throughput(actions, channel_states, terminals, n, n_drl, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_throughput_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_throughput_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_throughput_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -418,7 +444,7 @@ def plot_throughput_fill(actions, channel_states, terminals, n, n_drl, seed, nam
         plt.plot(xs, throughput[:, i], color='gray')
 
     plt.fill_between(xs, np.zeros_like(xs), throughput[:, n_drl - 1], color='red', alpha=0.3, label='DRL', linewidth=0)
-    plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='DCF', linewidth=0)
+    plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='Legacy', linewidth=0)
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Throughput')
@@ -428,8 +454,7 @@ def plot_throughput_fill(actions, channel_states, terminals, n, n_drl, seed, nam
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_throughput_fill_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_throughput_fill_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_throughput_fill_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -452,7 +477,7 @@ def plot_throughput_fill_nn(actions, channel_states, terminals, n, n_drl, seed, 
         plt.plot(xs, throughput[:, i], color='gray')
 
     plt.fill_between(xs, np.zeros_like(xs), throughput[:, n_drl - 1], color='red', alpha=0.3, label='DRL', linewidth=0)
-    plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='DCF', linewidth=0)
+    plt.fill_between(xs, throughput[:, n_drl - 1], throughput[:, -1], color='blue', alpha=0.3, label='Legacy', linewidth=0)
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Throughput')
@@ -461,8 +486,7 @@ def plot_throughput_fill_nn(actions, channel_states, terminals, n, n_drl, seed, 
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_throughput_fill_nn_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_throughput_fill_nn_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_throughput_fill_nn_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -484,7 +508,7 @@ def plot_channel_access_delay(buffer_states, new_frames, terminals, n, n_drl, se
     for i in range(n_drl, n):
         plt.plot(xs, cad[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -494,8 +518,7 @@ def plot_channel_access_delay(buffer_states, new_frames, terminals, n, n_drl, se
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_ch_acc_delay_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_ch_acc_delay_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_ch_acc_delay_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -524,7 +547,7 @@ def plot_xnor(actions, channel_states, buffer_states, terminals, n, n_drl, seed,
     for i in range(n_drl, n):
         plt.plot(xs, xnor[:, i], color='blue', linestyle='--')
 
-    plt.plot([], color='blue', linestyle='--', label='DCF')
+    plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
@@ -534,8 +557,7 @@ def plot_xnor(actions, channel_states, buffer_states, terminals, n, n_drl, seed,
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_xnor_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_xnor_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_xnor_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -570,8 +592,7 @@ def plot_weights(histogram, bin_edges, n, n_drl, seed, name):
         plt.yticks(np.linspace(0, (n_epochs - 1) * offset, 11), labels=ys)
         plt.grid(alpha=0.3)
         plt.tight_layout()
-        plt.savefig(f'{name.value}_hist_id{i}_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-        plt.savefig(f'{name.value}_hist_id{i}_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+        plt.savefig(f'{name.value}_hist_id{i}_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
         plt.clf()
 
 
@@ -588,6 +609,7 @@ def plot_all(filename):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.ALL)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.ALL)
+    plot_cum_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.ALL)
     plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_buffer_states(history.buffer_states, history.terminals, n, n_drl, seed, PlotType.ALL)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.ALL)
@@ -600,7 +622,7 @@ def plot_all(filename):
     plot_weights(history.weights_histogram, history.weights_bin_edges, n, n_drl, seed, PlotType.ALL)
 
 
-def plot_first(filename, n_epochs=10, aggregation=500):
+def plot_first(filename, n_epochs=10, aggregation=1000):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
         history = jax.tree.map(lambda x: x[:n_epochs], asdict(history))
@@ -616,6 +638,7 @@ def plot_first(filename, n_epochs=10, aggregation=500):
     plot_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_cumulative_rewards(history.rewards, n, n_drl, seed, PlotType.FIRST)
     plot_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.FIRST)
+    plot_cum_successful_transmissions(history.actions, history.channel_state, n, n_drl, seed, PlotType.FIRST)
     plot_actions(history.actions, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_buffer_states(history.buffer_states, history.terminals, n, n_drl, seed, PlotType.FIRST)
     plot_channel_states(history.channel_state, n, n_drl, seed, PlotType.FIRST)
@@ -648,8 +671,7 @@ def plot_dcf_collision_probabilities(actions, rewards, seed, name):
     plt.legend()
     plt.grid()
     plt.tight_layout()
-    plt.savefig(f'{name.value}_collision_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_collision_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_collision_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
@@ -668,8 +690,7 @@ def plot_cw_values(backoff, actions, n, n_drl, seed, name):
     plt.xticks(cw, fontsize=7)
     plt.grid(axis='y')
     plt.tight_layout()
-    plt.savefig(f'{name.value}_cw_{n}_{n_drl}_{seed}.pdf', bbox_inches='tight')
-    plt.savefig(f'{name.value}_cw_{n}_{n_drl}_{seed}.png', bbox_inches='tight', dpi=300)
+    plt.savefig(f'{name.value}_cw_{n}_{n_drl}_{seed}.{SAVE_FORMAT}', bbox_inches='tight', dpi=300)
     plt.clf()
 
 
