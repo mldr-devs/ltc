@@ -85,11 +85,37 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
 
 
 if __name__ == '__main__':
-    n, n_drl = 10, 5
-    n_epochs, n_steps = 50, 10000
-    window_size = 5
-    seed = 42
-    traffic_type = 'saturated'  # 'constant', 'saturated', 'bursty'
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Run the RL network simulation with configurable parameters."
+    )
+
+    parser.add_argument('--n', type=int, default=10,
+                        help='Total number of agents in the simulation.')
+    parser.add_argument('--n_drl', type=int, default=5,
+                        help='Number of DRL agents.')
+    parser.add_argument('--n_epochs', type=int, default=40,
+                        help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=2000,
+                        help='Number of steps per epoch.')
+    parser.add_argument('--window_size', type=int, default=20,
+                        help='Size of the observation window for each agent.')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducibility.')
+    parser.add_argument('--traffic_type', type=str, default='saturated',
+                        choices=['constant', 'saturated', 'bursty'],
+                        help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
+
+    args = parser.parse_args()
+
+    n = args.n
+    n_drl = args.n_drl
+    n_epochs = args.n_epochs
+    n_steps = args.n_steps
+    window_size = args.window_size
+    seed = args.seed
+    traffic_type = args.traffic_type
 
     key = jax.random.key(seed)
     actions = jnp.zeros(n, dtype=int)
