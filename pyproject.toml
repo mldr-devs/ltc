@@ -21,6 +21,7 @@ authors = [
 ]
 
 dependencies = [
+    "pysr>=1.5.8",
     "reinforced-lib==2.0.0",
     "tqdm~=4.67.1",
 ]
