@@ -1,6 +1,7 @@
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 
+import argparse
 from dataclasses import replace
 from functools import partial
 
@@ -65,11 +66,14 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
-        params = c.drl_states.params['model'] if 'model' in c.drl_states.params else c.drl_states.params
-        flat_params, _ = jax.tree.flatten(params)
-        flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
-        flat_params = jnp.hstack(flat_params)
-        hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
+        if n_drl > 0:
+            params = c.drl_states.params['model'] if 'model' in c.drl_states.params else c.drl_states.params
+            flat_params, _ = jax.tree.flatten(params)
+            flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
+            flat_params = jnp.hstack(flat_params)
+            hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
+        else:
+            hist, bin_edges = None, None
 
         c = Carry(
             drl_states, legacy_states, traffic_states, buffer_states, powers,
@@ -85,28 +89,14 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
 
 
 if __name__ == '__main__':
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        description="Run the RL network simulation with configurable parameters."
-    )
-
-    parser.add_argument('--n', type=int, default=10,
-                        help='Total number of agents in the simulation.')
-    parser.add_argument('--n_drl', type=int, default=5,
-                        help='Number of DRL agents.')
-    parser.add_argument('--n_epochs', type=int, default=40,
-                        help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2000,
-                        help='Number of steps per epoch.')
-    parser.add_argument('--window_size', type=int, default=20,
-                        help='Size of the observation window for each agent.')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='Random seed for reproducibility.')
-    parser.add_argument('--traffic_type', type=str, default='saturated',
-                        choices=['constant', 'saturated', 'bursty'],
-                        help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
-
+    parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
+    parser.add_argument('--n', type=int, default=10, help='Total number of agents in the simulation.')
+    parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
+    parser.add_argument('--n_epochs', type=int, default=40, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
+    parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
+    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
     args = parser.parse_args()
 
     n = args.n
