@@ -12,7 +12,7 @@ import lz4.frame
 import optax
 from tqdm import trange
 
-from ltc.agents import BayesianDDQN, DCF, QNetwork, QNetworkDropout, StochasticVariationalNetwork
+from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry, Output
@@ -108,6 +108,7 @@ if __name__ == '__main__':
     traffic_type = args.traffic_type
 
     key = jax.random.key(seed)
+    num_actions = len(Actions)
     actions = jnp.zeros(n, dtype=int)
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
@@ -117,9 +118,9 @@ if __name__ == '__main__':
     terminals = jnp.full(n, False, dtype=bool)
 
     drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(QNetworkDropout()),
+        q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=4, dim=64, num_heads=4)),
         obs_space_shape=obs.shape[1:],
-        act_space_size=3,
+        act_space_size=num_actions,
         optimizer=optax.adam(1e-4),
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,
