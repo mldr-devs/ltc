@@ -3,7 +3,8 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from ltc.agents.drl import QNetwork, StochasticVariationalNetwork, MultiSVI, Softmaxifier
+from ltc.agents.svi import StochasticVariationalNetwork, MultiSVI, Softmaxifier
+from ltc.agents import QNetwork
 
 
 class BayesTestCase(unittest.TestCase):
