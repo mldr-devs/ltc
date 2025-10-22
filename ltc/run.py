@@ -76,10 +76,10 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         buffer_states, channel_state, d2lt = simulate(c.buffer_states, new_frames, actions, c.d2lt)
-        obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, c.d2lt, channel_state, c.obs, actions, c.terminals)
+        obs, rewards, throughputs, global_obs, powers = process_output(
+            c.buffer_states, buffer_states, c.power_states, c.d2lt, c.throughputs, channel_state, c.obs, actions, c.terminals
+        )
         terminals = jnp.logical_or(c.terminals, powers < 0)
-
-        global_obs = jnp.concatenate([actions, d2lt / d2lt.sum()])
 
         if n_drl > 0:
             params = c.drl_states.params['model'] if 'model' in c.drl_states.params else c.drl_states.params
@@ -91,7 +91,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
             hist, bin_edges = None, None
 
         c = Carry(
-            drl_states, legacy_states, traffic_states, buffer_states, powers, d2lt,
+            drl_states, legacy_states, traffic_states, buffer_states, powers, d2lt, throughputs, global_obs,
             channel_state, key, obs, actions, rewards, terminals
         )
         o = Output(
@@ -133,6 +133,8 @@ if __name__ == '__main__':
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
     d2lt = jnp.zeros(n, dtype=int)
+    throughputs = jnp.zeros((n, 1000), dtype=int)
+    global_obs = jnp.zeros(2 * n, dtype=float)
 
     drl = DDQN(
         q_network=QNetwork(num_actions),
@@ -172,7 +174,7 @@ if __name__ == '__main__':
     rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl))
     rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
     init_carry = Carry(
-        drl_states, legacy_states, traffic_states, buffer_states, power_states, d2lt,
+        drl_states, legacy_states, traffic_states, buffer_states, power_states, d2lt, throughputs, global_obs,
         channel_state, key, obs, actions, rewards, terminals
     )
     all_outputs = []

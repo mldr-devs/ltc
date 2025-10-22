@@ -15,6 +15,8 @@ class Carry:
     buffer_states: jax.Array
     power_states: jax.Array
     d2lt: jax.Array
+    throughputs: jax.Array
+    global_obs: jax.Array
     channel_state: int
     key: jax.random.PRNGKey
     obs: jax.Array
