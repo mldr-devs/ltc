@@ -97,6 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
+    parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
     args = parser.parse_args()
 
@@ -175,5 +176,6 @@ if __name__ == '__main__':
     with lz4.frame.open(filename, 'wb') as f:
         cloudpickle.dump((init_carry.drl_states, all_outputs), f)
 
-    plot_all(filename)
-    plot_first(filename)
+    if args.save_plots:
+        plot_all(filename)
+        plot_first(filename)
