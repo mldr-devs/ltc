@@ -27,20 +27,26 @@ def init_agents(agent, key, n):
     return states, step_fn
 
 
-def agent_step(agent, state, key, obs, action, reward, terminal):
+def agent_step(agent, state, key, obs, action, reward, terminal, wait):
     update_key, sample_key = jax.random.split(key)
 
-    def power_on(state, update_key, sample_key, obs, action, reward, terminal):
-        state = agent.update(state, update_key, obs, action, reward, terminal)
-        action = agent.sample(state, sample_key, obs)
-        return state, action
+    def power_on(state, update_key, sample_key, obs, action, reward, terminal, wait):
+        def update(state, update_key, sample_key, obs, action, reward, terminal):
+            state = agent.update(state, update_key, obs, action, reward, terminal)
+            action = agent.sample(state, sample_key, obs)
+            return state, action
 
-    def power_off(state, update_key, sample_key, obs, action, reward, terminal):
+        return jax.lax.cond(
+            wait, lambda state, *_: (state, Actions.CS.value), update,
+            state, update_key, sample_key, obs, action, reward, terminal
+        )
+
+    def power_off(state, update_key, sample_key, obs, action, reward, terminal, wait):
         return state, Actions.IDLE.value
 
     return jax.lax.cond(
         terminal, power_off, power_on,
-        state, update_key, sample_key, obs, action, reward, terminal
+        state, update_key, sample_key, obs, action, reward, terminal, wait
     )
 
 
@@ -58,8 +64,14 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
-        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
-        legacy_states, legacy_actions = legacy_step(c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
+        drl_states, drl_actions = drl_step(
+            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl],
+            c.terminals[:n_drl], (c.actions[:n_drl] == Actions.TX.value) | (c.channel_state != 0)
+        )
+        legacy_states, legacy_actions = legacy_step(
+            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:],
+            c.terminals[n_drl:], jnp.zeros(n - n_drl, dtype=bool)
+        )
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
@@ -95,8 +107,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=10, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
-    parser.add_argument('--n_epochs', type=int, default=2, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=200, help='Number of steps per epoch.')
+    parser.add_argument('--n_epochs', type=int, default=40, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
