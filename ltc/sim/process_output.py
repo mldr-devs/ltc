@@ -87,14 +87,18 @@ def successful_transmission(args):
     return reward, ret_c, no_tx
 
 
-def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal):
-    _, _, ret_c, no_tx, _ = obs[-1]
+def process_output_i(buffer_state, new_buffer_state, power_state, d2lt, idx, channel_state, obs, action, terminal):
+    _, _, no_tx, _, _, ret_c, _ = obs[-1]
     args = (action, buffer_state, ret_c, channel_state, no_tx)
+
+    d2lt_i = d2lt[idx]
+    d2lt_mi = d2lt.at[idx].set(jnp.inf).min()
+    d2lt_i, d2lt_mi = d2lt_i / (d2lt_i + d2lt_mi), d2lt_mi / (d2lt_i + d2lt_mi)
 
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
     reward = jnp.where(terminal, 0., reward)
 
-    channel_state = jnp.where(action == Actions.CS.value, channel_state, -1)
+    channel_state = jnp.where(action == Actions.TX.value, channel_state == 1, jnp.abs(channel_state))
     power = jnp.where(
         action == Actions.TX.value, power_state - TX_CONSUMPTION,
         jnp.where(
@@ -106,13 +110,15 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
         )
     )
 
-    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, power])
+    obs_t = jnp.array([action, channel_state, 1, d2lt_i, d2lt_mi, ret_c, new_buffer_state])
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 
     return obs, reward, power
 
 
-def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals):
-    channel_states = jnp.full(buffer_states.shape[0], channel_state)
-    return jax.vmap(process_output_i)(buffer_states, new_buffer_states, power_states, channel_states, obs, actions, terminals)
+def process_output(buffer_states, new_buffer_states, power_states, d2lt, channel_state, obs, actions, terminals):
+    idxs = jnp.arange(buffer_states.shape[0])
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, None, 0, None, 0, 0, 0))(
+        buffer_states, new_buffer_states, power_states, d2lt, idxs, channel_state, obs, actions, terminals
+    )

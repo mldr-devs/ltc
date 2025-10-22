@@ -46,8 +46,9 @@ def add_new_frames(buffer_states, new_frames):
     return jnp.bitwise_or(buffer_states, new_frames)
 
 
-def simulate(buffer_states, new_frames, actions):
+def simulate(buffer_states, new_frames, actions, d2lt):
     channel_state = channel_state_selector(actions)
     buffer_states = jnp.where(channel_state == 1, buffer_clearing(buffer_states, actions), buffer_states)
     buffer_states = add_new_frames(buffer_states, new_frames)
-    return buffer_states, channel_state
+    d2lt = jnp.where((channel_state == 1) & (actions == Actions.TX.value), 0, d2lt + 1)
+    return buffer_states, channel_state, d2lt

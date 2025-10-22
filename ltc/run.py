@@ -11,9 +11,9 @@ import jax
 import jax.numpy as jnp
 import lz4.frame
 import optax
-from tqdm import trange
+from jax_tqdm import scan_tqdm
 
-from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
+from ltc.agents import DDQN, DCF, QNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry, Output
@@ -63,9 +63,11 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
-        obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals)
+        buffer_states, channel_state, d2lt = simulate(c.buffer_states, new_frames, actions, c.d2lt)
+        obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, c.d2lt, channel_state, c.obs, actions, c.terminals)
         terminals = jnp.logical_or(c.terminals, powers < 0)
+
+        global_obs = jnp.concatenate([actions, d2lt / d2lt.sum()])
 
         if n_drl > 0:
             params = c.drl_states.params['model'] if 'model' in c.drl_states.params else c.drl_states.params
@@ -77,7 +79,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
             hist, bin_edges = None, None
 
         c = Carry(
-            drl_states, legacy_states, traffic_states, buffer_states, powers,
+            drl_states, legacy_states, traffic_states, buffer_states, powers, d2lt,
             channel_state, key, obs, actions, rewards, terminals
         )
         o = Output(
@@ -93,8 +95,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=10, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
-    parser.add_argument('--n_epochs', type=int, default=40, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
+    parser.add_argument('--n_epochs', type=int, default=2, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=200, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
@@ -110,17 +112,18 @@ if __name__ == '__main__':
     traffic_type = args.traffic_type
 
     key = jax.random.key(seed)
-    num_actions = len(Actions)
+    num_actions = 2
     actions = jnp.zeros(n, dtype=int)
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
+    obs = jnp.zeros((n, window_size, 7), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
+    d2lt = jnp.zeros(n, dtype=int)
 
-    drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=4, dim=64, num_heads=4)),
+    drl = DDQN(
+        q_network=QNetwork(num_actions, num_layers=2, dim=32, num_heads=2),
         obs_space_shape=obs.shape[1:],
         act_space_size=num_actions,
         optimizer=optax.adam(1e-4),
@@ -155,14 +158,16 @@ if __name__ == '__main__':
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl))
+    rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
     init_carry = Carry(
-        drl_states, legacy_states, traffic_states, buffer_states, power_states,
+        drl_states, legacy_states, traffic_states, buffer_states, power_states, d2lt,
         channel_state, key, obs, actions, rewards, terminals
     )
     all_outputs = []
 
-    for _ in trange(n_epochs):
-        carry, output = jax.lax.scan(rl_step_fn, init_carry, length=n_steps)
+    for epoch in range(n_epochs):
+        print(f'Epoch {epoch + 1}/{n_epochs}')
+        carry, output = jax.lax.scan(rl_step_fn, init_carry, jnp.arange(n_steps))
         init_carry = replace(
             init_carry,
             drl_states=carry.drl_states,

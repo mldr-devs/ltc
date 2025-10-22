@@ -70,7 +70,7 @@ class QNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, s, training=True):
-        x = add_batch_dim(s)
+        x = add_batch_dim(s[..., :-2])  # remove last two features (ret_c and buffer_state)
         b, t, _ = x.shape
 
         pos_embed = self.param('pos_embed', nn.initializers.xavier_uniform(), (1, t + 1, self.dim), self.dtype)
