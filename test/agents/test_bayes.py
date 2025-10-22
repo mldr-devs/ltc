@@ -5,13 +5,14 @@ import jax.numpy as jnp
 
 from ltc.agents.svi import StochasticVariationalNetwork, MultiSVI, Softmaxifier
 from ltc.agents import QNetwork
+from ltc.sim.constants import Actions
 
 
 class BayesTestCase(unittest.TestCase):
     def test_svi(self):
         env_state = jnp.zeros((5, 4))
 
-        qn = QNetwork()
+        qn = QNetwork(len(Actions), num_layers=2, dim=32, num_heads=2)
         svi = StochasticVariationalNetwork(model=qn)
         vars = svi.init(jax.random.key(0), env_state)
         y, s = svi.apply(vars, env_state, rngs=jax.random.key(0), mutable=['loss'])
@@ -21,7 +22,7 @@ class BayesTestCase(unittest.TestCase):
     def test_multi_svi(self):
         env_state = jnp.zeros((5, 4))
 
-        qn = QNetwork()
+        qn = QNetwork(len(Actions), num_layers=2, dim=32, num_heads=2)
         svi = MultiSVI(model=qn)
         vars = svi.init(jax.random.key(0), env_state)
         y, s = svi.apply(vars, env_state, rngs={'params':jax.random.key(0),'dropout':jax.random.key(0),'rlib':jax.random.key(0)}, mutable=['loss'])
@@ -32,7 +33,7 @@ class BayesTestCase(unittest.TestCase):
     def test_bayesian_softmaxifier(self):
         env_state = jnp.zeros((5, 4))
 
-        qn = QNetwork()
+        qn = QNetwork(len(Actions), num_layers=2, dim=32, num_heads=2)
         svi = MultiSVI(model=qn)
         bayes = Softmaxifier(model=svi)
         vars = bayes.init(jax.random.key(0), env_state)
@@ -44,7 +45,7 @@ class BayesTestCase(unittest.TestCase):
     def test_bayesian_aggregation(self):
         env_state = jnp.zeros((5, 4))
 
-        qn = QNetwork()
+        qn = QNetwork(len(Actions), num_layers=2, dim=32, num_heads=2)
         svi = StochasticVariationalNetwork(model=qn)
         multi_svi = MultiSVI(model=qn, apply_mean=True)
 
