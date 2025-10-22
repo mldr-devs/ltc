@@ -49,7 +49,8 @@ def zero_counters(_):
 
 
 def process_output_i(buffer_state, new_buffer_state, power_state, d2lt, idx, channel_state, obs, action, terminal):
-    _, _, no_tx, _, _, ret_c, _ = obs[-1]
+    _, _, no_tx, _, _, _, ret_c, _ = obs[-1]
+    no_tx, ret_c = no_tx.astype(int), ret_c.astype(int)
     args = (action, buffer_state, ret_c, channel_state, no_tx)
 
     d2lt_i = d2lt[idx]
@@ -70,7 +71,7 @@ def process_output_i(buffer_state, new_buffer_state, power_state, d2lt, idx, cha
         )
     )
 
-    obs_t = jnp.array([action, channel_state, 1, d2lt_i, d2lt_mi, ret_c, new_buffer_state])
+    obs_t = jnp.array([action, channel_state, 1, d2lt_i, d2lt_mi, d2lt[idx], ret_c, new_buffer_state])
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 
@@ -78,8 +79,6 @@ def process_output_i(buffer_state, new_buffer_state, power_state, d2lt, idx, cha
 
 
 def process_output(buffer_states, new_buffer_states, power_states, d2lt, throughputs, channel_state, obs, actions, terminals):
-    global_obs = jnp.concatenate([actions, d2lt / d2lt.sum()])
-
     thr_t = ((actions == Actions.TX.value) & (channel_state == 1)).astype(int)
     throughputs = jnp.roll(throughputs, -1, axis=1)
     throughputs = throughputs.at[:, -1].set(thr_t)
@@ -99,11 +98,11 @@ def process_output(buffer_states, new_buffer_states, power_states, d2lt, through
             )
         )
     )
-    rewards = jnp.concatenate([rewards_ind, jnp.array([reward_tot])])
+    rewards = jnp.concatenate([jnp.array([reward_tot]), rewards_ind])
 
     idxs = jnp.arange(buffer_states.shape[0])
     obs, powers = jax.vmap(process_output_i, in_axes=(0, 0, 0, None, 0, None, 0, 0, 0))(
         buffer_states, new_buffer_states, power_states, d2lt, idxs, channel_state, obs, actions, terminals
     )
 
-    return obs, rewards, throughputs, global_obs, powers
+    return obs, rewards, throughputs, powers

@@ -57,7 +57,7 @@ class Transformer(nn.Module):
 
 
 def add_batch_dim(x):
-    return x[None, ...] if x.ndim == 2 else x
+    return x[None, ...] if x.ndim == 3 else x
 
 
 class QNetwork(nn.Module):
@@ -66,10 +66,8 @@ class QNetwork(nn.Module):
     fc_dim = 32
 
     @nn.compact
-    def __call__(self, s, training=True):
+    def __call__(self, s):
         scan_gru = nn.scan(nn.GRUCell, variable_broadcast='params', split_rngs={'params': False}, in_axes=1, out_axes=1)
-
-        s = add_batch_dim(s[..., :-2])  # remove last two features (ret_c and buffer_state)
         h = scan_gru(self.rnn_dim).initialize_carry(jax.random.PRNGKey(0), s[:, 0].shape)
 
         _, s = scan_gru(self.rnn_dim)(h, s)
@@ -90,10 +88,10 @@ class MixingNetwork(nn.Module):
         _, g_feat = g.shape
 
         W1 = self.param('W1', nn.initializers.xavier_uniform(), (self.fc_dim * n * self.num_actions, g_feat))
-        b1 = self.param('b1', nn.initializers.zeros, (self.fc_dim, g_feat))
+        b1 = self.param('b1', nn.zeros_init(), (self.fc_dim, g_feat))
         W2 = self.param('W2', nn.initializers.xavier_uniform(), ((n + 1) * self.fc_dim, g_feat))
-        b2a = self.param('b2a', nn.initializers.zeros, (self.fc_dim, g_feat))
-        b2b = self.param('b2b', nn.initializers.zeros, ((n + 1), self.fc_dim))
+        b2a = self.param('b2a', nn.zeros_init(), (self.fc_dim, g_feat))
+        b2b = self.param('b2b', nn.zeros_init(), ((n + 1), self.fc_dim))
 
         W1s = jnp.abs(g @ W1.T).reshape(b, self.fc_dim, n * self.num_actions)
         b1s = g @ b1.T
@@ -111,3 +109,28 @@ class MixingNetwork(nn.Module):
 
         s = jax.vmap(fwd)(qs, W1s, b1s, W2s, b2s)
         return s
+
+
+class QLBTNetwork(nn.Module):
+    num_actions: int
+    rnn_dim: int = 32
+    fc_dim: int = 32
+
+    @nn.compact
+    def __call__(self, s):
+        BatchQNetwork = nn.vmap(
+            QNetwork,
+            in_axes=1, out_axes=1,
+            variable_axes={'params': 0},
+            split_rngs={'params': True}
+        )
+
+        s = add_batch_dim(s)
+        ss = s[..., :-4]  # remove auxiliary features (raw d2lt, ret_c, buffer_state, and reward)
+        actions, d2lt = s[..., -1, 0], s[..., -1, 5]
+        d2lt = d2lt / (d2lt.sum(axis=-1, keepdims=True) + 1e-6)
+        g = jnp.concatenate([actions, d2lt], axis=-1)
+
+        qs = BatchQNetwork(self.num_actions)(ss)
+        q_tot = MixingNetwork(self.num_actions, self.fc_dim)(qs, g)
+        return jnp.concatenate([q_tot, qs.reshape(s.shape[0], -1)], axis=-1)
