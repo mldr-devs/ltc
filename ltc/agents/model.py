@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from flax import linen as nn
 
@@ -61,28 +62,19 @@ def add_batch_dim(x):
 
 class QNetwork(nn.Module):
     num_actions: int
-    num_layers: int
-    dim: int
-    num_heads: int
-    dropout_rate: float = 0.25
-    mc_dropout: bool = True
-    dtype: jnp.dtype = 'float32'
+    rnn_dim = 32
+    fc_dim = 32
 
     @nn.compact
     def __call__(self, s, training=True):
-        x = add_batch_dim(s[..., :-2])  # remove last two features (ret_c and buffer_state)
-        b, t, _ = x.shape
+        scan_gru = nn.scan(nn.GRUCell, variable_broadcast='params', split_rngs={'params': False}, in_axes=1, out_axes=1)
 
-        pos_embed = self.param('pos_embed', nn.initializers.xavier_uniform(), (1, t + 1, self.dim), self.dtype)
-        cls_token = self.param('cls_token', nn.initializers.xavier_uniform(), (1, 1, self.dim), self.dtype)
-        cls_tokens = jnp.tile(cls_token, (b, 1, 1))
+        s = add_batch_dim(s[..., :-2])  # remove last two features (ret_c and buffer_state)
+        h = scan_gru(self.rnn_dim).initialize_carry(jax.random.PRNGKey(0), s[:, 0].shape)
 
-        x = nn.Dense(self.dim, dtype=self.dtype)(x)
-        x = jnp.concatenate([cls_tokens, x], axis=1)
-        x = x + pos_embed
+        _, s = scan_gru(self.rnn_dim)(h, s)
+        s = nn.Dense(self.fc_dim)(s[:, -1])
+        s = nn.relu(s)
+        s = nn.Dense(self.num_actions)(s)
 
-        x = Transformer(self.num_layers, self.num_heads, 4 * self.dim, self.dropout_rate, self.dtype)(x, training=training)
-        x = nn.Dropout(self.dropout_rate)(x, deterministic=not training or self.mc_dropout)
-        x = nn.Dense(self.num_actions, dtype=self.dtype)(x[:, 0])
-
-        return x
+        return s

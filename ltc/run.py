@@ -109,7 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
     parser.add_argument('--n_epochs', type=int, default=40, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
-    parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
+    parser.add_argument('--window_size', type=int, default=10, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
@@ -135,18 +135,18 @@ if __name__ == '__main__':
     d2lt = jnp.zeros(n, dtype=int)
 
     drl = DDQN(
-        q_network=QNetwork(num_actions, num_layers=2, dim=32, num_heads=2),
+        q_network=QNetwork(num_actions),
         obs_space_shape=obs.shape[1:],
         act_space_size=num_actions,
-        optimizer=optax.adam(1e-4),
-        experience_replay_buffer_size=10000,
-        experience_replay_batch_size=128,
-        experience_replay_steps=5,
-        discount=1.0,
+        optimizer=optax.rmsprop(5e-4),
+        experience_replay_buffer_size=500,
+        experience_replay_batch_size=32,
+        experience_replay_steps=1,
+        discount=0.5,
         epsilon=1.0,
-        epsilon_decay=0.999,
-        epsilon_min=0.001,
-        tau=0.01
+        epsilon_decay=0.998,
+        epsilon_min=0.01,
+        tau=0.02
     )
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(drl, init_key, n_drl)
