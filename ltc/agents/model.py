@@ -78,3 +78,36 @@ class QNetwork(nn.Module):
         s = nn.Dense(self.num_actions)(s)
 
         return s
+
+
+class MixingNetwork(nn.Module):
+    num_actions: int
+    fc_dim: int = 32
+
+    @nn.compact
+    def __call__(self, qs, g):
+        b, n, _ = qs.shape
+        _, g_feat = g.shape
+
+        W1 = self.param('W1', nn.initializers.xavier_uniform(), (self.fc_dim * n * self.num_actions, g_feat))
+        b1 = self.param('b1', nn.initializers.zeros, (self.fc_dim, g_feat))
+        W2 = self.param('W2', nn.initializers.xavier_uniform(), ((n + 1) * self.fc_dim, g_feat))
+        b2a = self.param('b2a', nn.initializers.zeros, (self.fc_dim, g_feat))
+        b2b = self.param('b2b', nn.initializers.zeros, ((n + 1), self.fc_dim))
+
+        W1s = jnp.abs(g @ W1.T).reshape(b, self.fc_dim, n * self.num_actions)
+        b1s = g @ b1.T
+        W2s = jnp.abs(g @ W2.T).reshape(b, n + 1, self.fc_dim)
+        b2s = g @ b2a.T
+        b2s = nn.relu(b2s)
+        b2s = b2s @ b2b.T
+
+        def fwd(q, W1, b1, W2, b2):
+            s = q.flatten()
+            s = jnp.dot(s, W1.T) + b1.T
+            s = nn.elu(s)
+            s = jnp.dot(s, W2.T) + b2.T
+            return s
+
+        s = jax.vmap(fwd)(qs, W1s, b1s, W2s, b2s)
+        return s
