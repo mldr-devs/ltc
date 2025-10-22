@@ -11,6 +11,8 @@ import numpy as np
 from ltc.utils.scan_states import Output
 from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY
 
+SAVE_FORMAT = 'normal'
+
 COLUMN_WIDTH = 4.0
 COLUMN_HIGHT = COLUMN_WIDTH * 0.618
 
@@ -18,8 +20,6 @@ PLOT_PARAMS = {
     'figure.figsize': (COLUMN_WIDTH, COLUMN_HIGHT),
     'figure.dpi': 72,
     'font.size': 9,
-    'font.family': 'serif',
-    'font.serif': 'cm',
     'axes.titlesize': 9,
     'axes.linewidth': 0.5,
     'grid.alpha': 0.42,
@@ -27,13 +27,20 @@ PLOT_PARAMS = {
     'legend.title_fontsize': 7,
     'legend.fontsize': 7,
     'lines.linewidth': 0.5,
-    'text.usetex': True,
-    'text.latex.preamble': r'\usepackage{amsmath}',
     'xtick.major.width': 0.5,
     'ytick.major.width': 0.5,
 }
 
-SAVE_FORMAT = 'pdf'
+if SAVE_FORMAT == 'latex':
+    PLOT_PARAMS.update({
+        'font.family': 'serif',
+        'font.serif': 'cm',
+        'text.usetex': True,
+        'text.latex.preamble': r'\usepackage{amsmath}',
+    })
+    SAVE_FORMAT = 'pdf'
+else:
+    SAVE_FORMAT = 'png'
 
 
 class PlotType(Enum):

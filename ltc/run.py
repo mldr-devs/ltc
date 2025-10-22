@@ -1,5 +1,6 @@
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 
 import argparse
 from dataclasses import replace
