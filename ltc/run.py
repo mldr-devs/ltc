@@ -120,7 +120,7 @@ if __name__ == '__main__':
     terminals = jnp.full(n, False, dtype=bool)
 
     drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=4, dim=64, num_heads=4)),
+        q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
         obs_space_shape=obs.shape[1:],
         act_space_size=num_actions,
         optimizer=optax.adam(3e-5, b1=0.95, b2=0.95),

@@ -64,8 +64,7 @@ class QNetwork(nn.Module):
     num_layers: int
     dim: int
     num_heads: int
-    dropout_rate: float = 0.25
-    mc_dropout: bool = True
+    dropout_rate: float = 0.0
     dtype: jnp.dtype = 'float32'
 
     @nn.compact
@@ -82,7 +81,7 @@ class QNetwork(nn.Module):
         x = x + pos_embed
 
         x = Transformer(self.num_layers, self.num_heads, 4 * self.dim, self.dropout_rate, self.dtype)(x, training=training)
-        x = nn.Dropout(self.dropout_rate)(x, deterministic=not training or self.mc_dropout)
+        x = nn.Dropout(self.dropout_rate)(x, deterministic=not training)
         x = nn.Dense(self.num_actions, dtype=self.dtype)(x[:, 0])
 
         return x
