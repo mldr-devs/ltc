@@ -1140,6 +1140,7 @@ dependencies = [
     { name = "cloudpickle" },
     { name = "pysr" },
     { name = "reinforced-lib" },
+    { name = "sympy" },
     { name = "tqdm" },
 ]
 
@@ -1157,9 +1158,10 @@ requires-dist = [
     { name = "cloudpickle", specifier = ">=3.1.1" },
     { name = "jax", extras = ["cuda12-local"], marker = "extra == 'gpu'" },
     { name = "jupyterlab", marker = "extra == 'notebook'", specifier = "~=4.4.9" },
-    { name = "pysr", specifier = ">=1.5.8" },
+    { name = "pysr", specifier = ">=1.5.9" },
     { name = "reinforced-lib", specifier = "==2.0.0" },
     { name = "seaborn", marker = "extra == 'notebook'", specifier = "~=0.13.2" },
+    { name = "sympy", specifier = ">=1.14.0" },
     { name = "tqdm", specifier = "~=4.67.1" },
 ]
 provides-extras = ["gpu", "notebook"]
@@ -1865,7 +1867,7 @@ wheels = [
 
 [[package]]
 name = "pysr"
-version = "1.5.8"
+version = "1.5.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1876,9 +1878,9 @@ dependencies = [
     { name = "sympy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/65/7faef35bba834f2ee3c2384467438e76c8736ce6fabf970b7ebcbc887e98/pysr-1.5.8.tar.gz", hash = "sha256:3b1a90fcb11e93287afdb6b040526d834bf173c8b8465ef7a6ed8d327dac78f1", size = 2381347, upload-time = "2025-05-20T16:00:02.971Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/c4/726318438cfd0a6993fdc717baa2eec577fe053e4b2c0a872bd5f41357ce/pysr-1.5.9.tar.gz", hash = "sha256:7bb884963b38346581b12cb8512096c1d1ef14613bcf56215f4a45e9f97a8bbd", size = 2381354, upload-time = "2025-07-15T20:07:42.595Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/c7/79d52d5896cde09ff2fd79a9ce5b1973cc9722fbfa75b97b1d7eacb56b75/pysr-1.5.8-py3-none-any.whl", hash = "sha256:178a615ddadf4903819c9a651e2b9aae917e402d9d420656372465dec108d3fa", size = 99256, upload-time = "2025-05-20T16:00:00.364Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/25/2d43697be7c3cb1a5b3adabc60227bddf2edcf6058b91ac27de6cb982f55/pysr-1.5.9-py3-none-any.whl", hash = "sha256:cf1b1082ab32c2099031410274b242a9183c1a90952bc61dd0f1a06cfaaf3ac9", size = 99284, upload-time = "2025-07-15T20:07:40.955Z" },
 ]
 
 [[package]]
