@@ -22,7 +22,7 @@ authors = [
 
 dependencies = [
     "cloudpickle>=3.1.1",
-    "pysr>=1.5.9",
+    "pysr>=1.5.8",
     "reinforced-lib==2.0.0",
     "sympy>=1.14.0",
     "tqdm~=4.67.1",

@@ -1,10 +1,12 @@
+from pysr import PySRRegressor
+
 import cloudpickle
 import jax
 import jax.numpy as jnp
 import lz4.frame
 import numpy as np
 import pandas as pd
-from pysr import PySRRegressor
+from .regressor import Regressor
 
 from ltc.agents import QNetwork, StochasticVariationalNetwork
 
@@ -61,19 +63,21 @@ if __name__ == '__main__':
     COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
     hdf = pd.DataFrame(fo, columns=COLUMNS)
 
-    model = PySRRegressor(maxsize=20, niterations=40,
-        # < Increase me for better results
-        binary_operators=["+", "*", "^"],
-        unary_operators=["exp", "inv(x) = 1/x",'r(x)=randn(eltype(x),size(x)...)'
-            # ^ Custom operator (julia syntax)
-        ], extra_sympy_mappings={"inv": lambda x: 1 / x, "r": lambda x: sympy.stats.Normal(x)},
-        # ^ Define operator for SymPy as well
-        elementwise_loss="loss(prediction, target) = sum((prediction - target)^2)",
-        constraints={'r': 1, '^': (-1, 1)},
-        # ^ Custom loss function (julia syntax)
-    )
+    model = Regressor()
 
-    # model.fit(hdf, qvals)
+    # model = PySRRegressor(maxsize=20, niterations=40,
+    #     # < Increase me for better results
+    #     binary_operators=["+", "*", "^"],
+    #     unary_operators=["exp", "inv(x) = 1/x",'r(x)=randn(eltype(x),size(x)...)'
+    #         # ^ Custom operator (julia syntax)
+    #     ], extra_sympy_mappings={"inv": lambda x: 1 / x, "r": lambda x: sympy.stats.Normal(x)},
+    #     # ^ Define operator for SymPy as well
+    #     elementwise_loss="loss(prediction, target) = sum((prediction - target)^2)",
+    #     constraints={'r': 1, '^': (-1, 1)},
+    #     # ^ Custom loss function (julia syntax)
+    # )
+
+    model.fit(hdf, qvals)
 
     def _pyjax_fit(X,Y):
         hdf = pd.DataFrame(X,columns=COLUMNS)
