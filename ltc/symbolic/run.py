@@ -97,19 +97,21 @@ if __name__ == "__main__":
     def _pyjax_fit(X,Y):
         hdf = pd.DataFrame(X,columns=COLUMNS)
         agents.agents[0].fit(hdf, Y)
+        return jnp.zeros(())
 
 
 
     @jax.custom_batching.custom_vmap
     def jax_fit(X,Y):
         print('jit')
-        return jax.experimental.io_callback(_pyjax_fit, None, X, Y)
+        return jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), X, Y)
 
 
     @jax_fit.def_vmap
     def jax_fit_vmap(axis_size, in_batched,X,Y):
         print('vmap')
-        return jax.experimental.io_callback(_pyjax_fit, None, X[0], Y[0])
+        return jnp.stack([jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), _X, _Y)
+                          for _X,_Y in zip(X,Y)]),True
 
     jax.jit(jax.vmap(jax_fit))(jnp.expand_dims(jnp.asarray(fo),0),
                      jnp.expand_dims(jnp.asarray(qvals),0)
