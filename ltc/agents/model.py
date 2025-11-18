@@ -35,10 +35,10 @@ class MixingNetwork(nn.Module):
         _, g_feat = g.shape
 
         W1 = self.param('W1', nn.initializers.xavier_uniform(), (self.fc_dim * n * self.num_actions, g_feat))
-        b1 = self.param('b1', nn.zeros_init(), (self.fc_dim, g_feat))
+        b1 = self.param('b1', nn.initializers.xavier_uniform(), (self.fc_dim, g_feat))
         W2 = self.param('W2', nn.initializers.xavier_uniform(), ((n + 1) * self.fc_dim, g_feat))
-        b2a = self.param('b2a', nn.zeros_init(), (self.fc_dim, g_feat))
-        b2b = self.param('b2b', nn.zeros_init(), ((n + 1), self.fc_dim))
+        b2a = self.param('b2a', nn.initializers.xavier_uniform(), (self.fc_dim, g_feat))
+        b2b = self.param('b2b', nn.initializers.xavier_uniform(), ((n + 1), self.fc_dim))
 
         W1s = jnp.abs(g @ W1.T).reshape(b, self.fc_dim, n * self.num_actions)
         b1s = g @ b1.T
@@ -78,6 +78,7 @@ class QLBTNetwork(nn.Module):
         d2lt = d2lt / jnp.maximum(d2lt.sum(axis=-1, keepdims=True), 1)
         g = jnp.concatenate([actions, d2lt], axis=-1)
 
-        qs = BatchQNetwork(self.num_actions)(ss)
-        q_tot = MixingNetwork(self.num_actions, self.fc_dim)(qs, g)
-        return jnp.concatenate([q_tot, qs.reshape(s.shape[0], -1)], axis=-1)
+        q_loc = BatchQNetwork(self.num_actions)(ss)
+        q_mix = MixingNetwork(self.num_actions, self.fc_dim)(q_loc, g)
+        q_loc = q_loc.reshape(s.shape[0], -1)
+        return jnp.concatenate([q_mix, q_loc], axis=-1)

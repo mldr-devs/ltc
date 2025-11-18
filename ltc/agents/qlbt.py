@@ -22,24 +22,21 @@ class QLBT(DDQN):
             q_network: nn.Module,
             discount: Scalar
     ) -> tuple[Scalar, dict]:
-        states, actions, rewards_tot, terminals, next_states = batch
+        states, _, rewards_tot, terminals, next_states = batch
         q_key, q_target_key = jax.random.split(key)
 
-        rewards_ind = next_states[:, :, -1, -1]
+        rewards_ind = next_states[..., -1, -1]
         b, n = rewards_ind.shape
         beta = n
 
         q_values, net_state = forward(q_network, params, state.net_state, q_key, states)
-        actions = q_values[..., n + 1:].reshape(b, n, -1)
-        actions = jnp.argmax(actions, axis=-1)
-        q_tot, q_ind = q_values[..., 0], q_values[..., 1:n + 1]
-        q_tot = jnp.expand_dims(q_tot, axis=-1)
-        next_states = next_states.at[:, :, -1, 0].set(actions)
+        q_tot, q_ind = q_values[..., :1], q_values[..., 1:n + 1]
+        q_values = q_values[..., n + 1:].reshape(b, n, -1)
+        new_actions = jnp.argmax(q_values, axis=-1)
+        next_states = next_states.at[..., -1, 0].set(new_actions)
 
         q_values_target, _ = forward(q_network, state.params_target, state.net_state_target, q_target_key, next_states)
-        q_values_target = q_values_target[..., :n + 1]
-        q_tot_target, q_ind_target = q_values_target[..., 0], q_values_target[..., 1:n + 1]
-        q_tot_target = jnp.expand_dims(q_tot_target, axis=-1)
+        q_tot_target, q_ind_target = q_values_target[..., :1], q_values_target[..., 1:n + 1]
 
         target_tot = rewards_tot + (1 - terminals) * discount * q_tot_target
         target_ind = rewards_ind + (1 - terminals) * discount * q_ind_target

@@ -13,11 +13,11 @@ import lz4.frame
 import optax
 from jax_tqdm import scan_tqdm
 
-from ltc.agents import DDQN, DCF, QNetwork, QLBT, QLBTNetwork
+from ltc.agents import DCF, QLBT, QLBTNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry, Output
-from ltc.utils.plots import plot_all, plot_first
+from ltc.utils.plots import plot_first
 
 
 def init_agents(agent, key, n, apply_vmap):
@@ -42,7 +42,7 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
+def rl_step(drl_step, legacy_step, traffic_step, n, n_drl):
     def rl_step_fn(c, _):
         key, drl_keys, legacy_keys, traffic_key = jax.random.split(c.key, 4)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
