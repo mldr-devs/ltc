@@ -32,13 +32,14 @@ class QLBT(DDQN):
         q_values, net_state = forward(q_network, params, state.net_state, q_key, states)
         actions = q_values[..., n + 1:].reshape(b, n, -1)
         actions = jnp.argmax(actions, axis=-1)
-        q_tot, q_ind = q_values[..., 0][..., None], q_values[..., 1:n + 1]
+        q_tot, q_ind = q_values[..., 0], q_values[..., 1:n + 1]
+        q_tot = jnp.expand_dims(q_tot, axis=-1)
         next_states = next_states.at[:, :, -1, 0].set(actions)
 
         q_values_target, _ = forward(q_network, state.params_target, state.net_state_target, q_target_key, next_states)
         q_values_target = q_values_target[..., :n + 1]
         q_tot_target, q_ind_target = q_values_target[..., 0], q_values_target[..., 1:n + 1]
-        q_tot_target = q_tot_target[..., None]
+        q_tot_target = jnp.expand_dims(q_tot_target, axis=-1)
 
         target_tot = rewards_tot + (1 - terminals) * discount * q_tot_target
         target_ind = rewards_ind + (1 - terminals) * discount * q_ind_target

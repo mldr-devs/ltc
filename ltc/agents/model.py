@@ -3,59 +3,6 @@ import jax.numpy as jnp
 from flax import linen as nn
 
 
-class FeedForwardBlock(nn.Module):
-    ff_dim: int
-    dropout_rate: float
-    dtype: jnp.dtype
-
-    @nn.compact
-    def __call__(self, x, training=True):
-        *_, out_dim = x.shape
-        x = nn.Dense(self.ff_dim, dtype=self.dtype)(x)
-        x = nn.gelu(x)
-        x = nn.Dropout(self.dropout_rate)(x, deterministic=not training)
-        x = nn.Dense(out_dim, dtype=self.dtype)(x)
-        x = nn.Dropout(self.dropout_rate)(x, deterministic=not training)
-        return x
-
-
-class TransformerBlock(nn.Module):
-    num_heads: int
-    ff_dim: int
-    dropout_rate: float
-    dtype: jnp.dtype
-
-    @nn.compact
-    def __call__(self, x, mask, training=True):
-        residual = x
-        x = nn.LayerNorm(dtype=self.dtype)(x)
-        x = nn.MultiHeadDotProductAttention(self.num_heads, qkv_features=x.shape[-1], dtype=self.dtype)(x, mask=mask)
-        x = x + residual
-
-        residual = x
-        x = nn.LayerNorm(dtype=self.dtype)(x)
-        x = FeedForwardBlock(self.ff_dim, self.dropout_rate, self.dtype)(x, training=training)
-        x = x + residual
-
-        return x
-
-
-class Transformer(nn.Module):
-    num_layers: int
-    num_heads: int
-    ff_dim: int
-    dropout_rate: float
-    dtype: jnp.dtype
-
-    @nn.compact
-    def __call__(self, x, mask=None, training=True):
-        for _ in range(self.num_layers):
-            x = TransformerBlock(self.num_heads, self.ff_dim, self.dropout_rate, self.dtype)(x, mask, training=training)
-
-        x = nn.LayerNorm(dtype=self.dtype)(x)
-        return x
-
-
 def add_batch_dim(x):
     return x[None, ...] if x.ndim == 3 else x
 
