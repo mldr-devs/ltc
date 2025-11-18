@@ -34,11 +34,11 @@ class MixingNetwork(nn.Module):
         b, n, _ = qs.shape
         _, g_feat = g.shape
 
-        W1 = self.param('W1', nn.initializers.xavier_uniform(), (self.fc_dim * n * self.num_actions, g_feat))
-        b1 = self.param('b1', nn.initializers.xavier_uniform(), (self.fc_dim, g_feat))
-        W2 = self.param('W2', nn.initializers.xavier_uniform(), ((n + 1) * self.fc_dim, g_feat))
-        b2a = self.param('b2a', nn.initializers.xavier_uniform(), (self.fc_dim, g_feat))
-        b2b = self.param('b2b', nn.initializers.xavier_uniform(), ((n + 1), self.fc_dim))
+        W1 = self.param('W1', nn.initializers.lecun_normal(), (self.fc_dim * n * self.num_actions, g_feat))
+        b1 = self.param('b1', nn.initializers.lecun_normal(), (self.fc_dim, g_feat))
+        W2 = self.param('W2', nn.initializers.lecun_normal(), ((n + 1) * self.fc_dim, g_feat))
+        b2a = self.param('b2a', nn.initializers.lecun_normal(), (self.fc_dim, g_feat))
+        b2b = self.param('b2b', nn.initializers.lecun_normal(), ((n + 1), self.fc_dim))
 
         W1s = jnp.abs(g @ W1.T).reshape(b, self.fc_dim, n * self.num_actions)
         b1s = g @ b1.T
