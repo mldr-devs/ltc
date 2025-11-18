@@ -1,39 +1,82 @@
 import argparse
+import dataclasses
+from abc import abstractmethod
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+from reinforced_lib.agents import BaseAgent
 
 from ltc.symbolic.nn2sym import Target
 from ltc.sim.constants import Actions, INITIAL_CAPACITY
 from ltc.symbolic.regressor import Regressor
 
+@jax.tree_util.register_dataclass
+@dataclasses.dataclass
+class SymbolicAgenState:
+    dummy: jax.Array
 
-@jax.tree_util.register_pytree_node_class
 class SymbolicAgents:
     def __init__(self, n):
         self.n = n
         self.agents = [Regressor() for _ in range(n)]
 
-    # def __init__(self,regressors:list[Regressor]):
-    #     self.n = len(regressors)
-    #     self.agents = regressors
 
-    def update(self, observations, qvals):
+        def init(key:jax.Array)->SymbolicAgenState:
+            return SymbolicAgenState(key)
+
+        @jax.custom_batching.custom_vmap
+        def update(state: SymbolicAgenState, key: jax.Array, X,y) -> SymbolicAgenState:
+            return state
+
+        def _pyjax_fit(X, Y,i):
+            print('fitting agent',i)
+            return 0.0
+            #hdf = pd.DataFrame(X)
+            #self.agents[int(i)].fit(hdf, Y)
+
+        @update.def_vmap
+        def update_vmap(axis_size, in_batched,state: SymbolicAgenState, key, X,y) -> SymbolicAgenState:
+            for i in range(axis_size):
+                jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), X[i], y[i], i)
+            return state,in_batched[0]
+
+
+        self.init = jax.jit(init)
+        self.update = jax.jit(update)
+
+
+    # @staticmethod
+    # @abstractmethod
+    # def init(key) -> SymbolicAgenState:
+    #     """
+    #     Creates and initializes instance of the agent.
+    #     """
+    #
+    #     return SymbolicAgenState()
+
+    # @staticmethod
+    # @abstractmethod
+    # def update(state: SymbolicAgenState, key: jax.Array, *args, **kwargs) -> SymbolicAgenState:
+    #     """
+    #     Updates the state of the agent after performing some action and receiving a reward.
+    #     """
+    #
+    #     pass
+
+    @staticmethod
+    @abstractmethod
+    def sample(state: SymbolicAgenState, key: jax.Array, *args, **kwargs) -> any:
+        """
+        Selects the next action based on the current environment and agent state.
+        """
 
         pass
 
-    def predict(self, observations):
-        pass
 
-    def tree_flatten(self):
-        return (None, (self.n, self.agents))
 
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        _, agents = aux_data
-        return cls(agents)
+
 
 @jax.custom_batching.custom_vmap
 def predict(symbolic_agents: SymbolicAgents, observations):
@@ -84,14 +127,22 @@ if __name__ == "__main__":
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
-    target = Target("history_5_5_42.pkl.lz4")
-    observations, qvals = target()
-
-    fo = np.squeeze(observations)
-    COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
-    hdf = pd.DataFrame(fo, columns=COLUMNS)
+    # target = Target("history_5_5_42.pkl.lz4")
+    # observations, qvals = target()
+    #
+    # fo = np.squeeze(observations)
+    # COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
+    # hdf = pd.DataFrame(fo, columns=COLUMNS)
 
     agents = SymbolicAgents(1)
+    state = jax.vmap(agents.init)(jax.random.split(jax.random.key(5),3))
+
+    X=jnp.ones((3,4,5))
+    y = jnp.ones((3,4))
+
+    next_states = jax.jit(jax.vmap(agents.update))(state,
+                            jax.random.split(jax.random.key(6),3), X,y
+                            )
 
 
     def _pyjax_fit(X,Y):
