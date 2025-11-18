@@ -75,7 +75,7 @@ class QLBTNetwork(nn.Module):
         s = add_batch_dim(s)
         ss = s[..., :-4]  # remove auxiliary features (raw d2lt, ret_c, buffer_state, and reward)
         actions, d2lt = s[..., -1, 0], s[..., -1, 5]
-        d2lt = d2lt / (d2lt.sum(axis=-1, keepdims=True) + 1e-6)
+        d2lt = d2lt / jnp.maximum(d2lt.sum(axis=-1, keepdims=True), 1)
         g = jnp.concatenate([actions, d2lt], axis=-1)
 
         qs = BatchQNetwork(self.num_actions)(ss)

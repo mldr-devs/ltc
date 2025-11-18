@@ -55,7 +55,8 @@ def process_output_i(buffer_state, new_buffer_state, power_state, d2lt, idx, cha
 
     d2lt_i = d2lt[idx]
     d2lt_mi = d2lt.at[idx].set(jnp.inf).min()
-    d2lt_i, d2lt_mi = d2lt_i / (d2lt_i + d2lt_mi), d2lt_mi / (d2lt_i + d2lt_mi)
+    denominator = jnp.maximum(d2lt_i + d2lt_mi, 1)
+    d2lt_i, d2lt_mi = d2lt_i / denominator, d2lt_mi / denominator
 
     ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
 
@@ -94,7 +95,7 @@ def process_output(buffer_states, new_buffer_states, power_states, d2lt, through
             channel_state == 0, NO_TX_REWARD,
             jnp.where(
                 jnp.argmax(actions == Actions.TX.value) == jnp.argmax(d2lt), TX_REWARD,
-                d2lt[jnp.argmax(actions == Actions.TX.value)] / d2lt.sum()
+                d2lt[jnp.argmax(actions == Actions.TX.value)] / jnp.maximum(d2lt.sum(), 1)
             )
         )
     )

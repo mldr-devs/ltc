@@ -80,13 +80,13 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
-    parser.add_argument('--n', type=int, default=10, help='Total number of agents in the simulation.')
+    parser.add_argument('--n', type=int, default=5, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
-    parser.add_argument('--n_epochs', type=int, default=40, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
+    parser.add_argument('--n_epochs', type=int, default=1, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=100000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=10, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
-    parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
+    parser.add_argument('--save-plots', action='store_false', default=True, help='Whether to save the generated plots.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
     args = parser.parse_args()
 
@@ -169,5 +169,4 @@ if __name__ == '__main__':
         cloudpickle.dump((init_carry.drl_states, all_outputs), f)
 
     if args.save_plots:
-        plot_all(filename)
         plot_first(filename)
