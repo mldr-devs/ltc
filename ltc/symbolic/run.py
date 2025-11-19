@@ -42,49 +42,29 @@ class SymbolicAgents:
                 jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), X[i], y[i], i)
             return state,in_batched[0]
 
+        @jax.custom_batching.custom_vmap
+        def sample(state: SymbolicAgenState, key: jax.Array, X) -> any:
+            # precaution to avoid DCE
+            return jnp.zeros(key.shape)
+
+        def _pyjax_sample(X,i):
+            print('sampling agent',i)
+            return 0
+
+        @sample.def_vmap
+        def sample_vmap(axis_size, in_batched,state: SymbolicAgenState, key, X):
+            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((),jnp.int32), X[i],i)
+                  for i in range(axis_size)
+                ]
+
+            return jnp.stack(s), True
 
         self.init = jax.jit(init)
         self.update = jax.jit(update)
-
-
-    # @staticmethod
-    # @abstractmethod
-    # def init(key) -> SymbolicAgenState:
-    #     """
-    #     Creates and initializes instance of the agent.
-    #     """
-    #
-    #     return SymbolicAgenState()
-
-    # @staticmethod
-    # @abstractmethod
-    # def update(state: SymbolicAgenState, key: jax.Array, *args, **kwargs) -> SymbolicAgenState:
-    #     """
-    #     Updates the state of the agent after performing some action and receiving a reward.
-    #     """
-    #
-    #     pass
-
-    @staticmethod
-    @abstractmethod
-    def sample(state: SymbolicAgenState, key: jax.Array, *args, **kwargs) -> any:
-        """
-        Selects the next action based on the current environment and agent state.
-        """
-
-        pass
+        self.sample = jax.jit(sample)
 
 
 
-
-
-@jax.custom_batching.custom_vmap
-def predict(symbolic_agents: SymbolicAgents, observations):
-    pass
-
-@predict.def_vmap
-def predict_vmap(axis_size, in_batched,symbolic_agents: SymbolicAgents, observations):
-    pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -143,34 +123,9 @@ if __name__ == "__main__":
     next_states = jax.jit(jax.vmap(agents.update))(state,
                             jax.random.split(jax.random.key(6),3), X,y
                             )
+    sampled = jax.jit(jax.vmap(agents.sample))(next_states,
+                            jax.random.split(jax.random.key(7),3), X
+                                               )
 
-
-    def _pyjax_fit(X,Y):
-        hdf = pd.DataFrame(X,columns=COLUMNS)
-        agents.agents[0].fit(hdf, Y)
-        return jnp.zeros(())
-
-
-
-    @jax.custom_batching.custom_vmap
-    def jax_fit(X,Y):
-        print('jit')
-        return jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), X, Y)
-
-
-    @jax_fit.def_vmap
-    def jax_fit_vmap(axis_size, in_batched,X,Y):
-        print('vmap')
-        return jnp.stack([jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), _X, _Y)
-                          for _X,_Y in zip(X,Y)]),True
-
-    jax.jit(jax.vmap(jax_fit))(jnp.expand_dims(jnp.asarray(fo),0),
-                     jnp.expand_dims(jnp.asarray(qvals),0)
-    )
-
-
-
-
-    print("Model saved and agents updated.")
 
     ...
