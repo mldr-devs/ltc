@@ -38,7 +38,7 @@ def process_output(buffer_states, new_buffer_states, power_states, d2lt, through
     throughputs = jnp.roll(throughputs, -1, axis=1)
     throughputs = throughputs.at[:, -1].set(thr_t)
 
-    priority = new_buffer_states / jnp.maximum(throughputs.mean(axis=1), 1)
+    priority = new_buffer_states / (throughputs.mean(axis=1) + 1e-6)
     opt_action = (priority == priority.max()).astype(int)
     rewards_ind = 2 * (tx_action == opt_action).astype(float) - 1
     rewards_ind = jnp.where(terminals, 0., rewards_ind)
@@ -48,7 +48,7 @@ def process_output(buffer_states, new_buffer_states, power_states, d2lt, through
         jnp.where(
             channel_state == 0, NO_TX_REWARD,
             jnp.where(
-                jnp.argmax(tx_action) == jnp.argmax(d2lt), TX_REWARD,
+                (tx_action & (d2lt == d2lt.max())).sum() > 0, TX_REWARD,
                 d2lt[jnp.argmax(tx_action)] / jnp.maximum(d2lt.sum(), 1)
             )
         )

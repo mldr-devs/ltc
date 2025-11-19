@@ -69,7 +69,7 @@ class DCF(BaseAgent):
         )
 
     @staticmethod
-    def sample(state, key, env_state, _):
+    def sample(state, key, env_state):
         _, channel, _, _, _, _, _, buffer = env_state[-1]
 
         return jnp.where(

@@ -89,7 +89,7 @@ class QLBT(DDQN):
             optimizer: optax.GradientTransformation
     ) -> tuple[any, any, optax.OptState]:
         vmaped_loss_fn = jax.vmap(jax.grad(QLBT.loss_fn, has_aux=True), in_axes=(None, None, None, None, 0))
-        grads, aux = vmaped_loss_fn(objective, *loss_params, jnp.arange(loss_params[-1][-1].shape[1] + 1))
+        grads, aux = vmaped_loss_fn(objective, *loss_params, jnp.arange(n + 1))
         grads, aux = QLBT.combine_grads(grads, aux, n)
         updates, opt_state = optimizer.update(grads, opt_state, objective)
         objective = optax.apply_updates(objective, updates)
@@ -137,7 +137,6 @@ class QLBT(DDQN):
             state: DDQNState,
             key: PRNGKey,
             env_state: Array,
-            wait: Array,
             q_network: nn.Module,
             act_space_size: int
     ) -> int:
@@ -152,5 +151,4 @@ class QLBT(DDQN):
         max_q = (q == q.max(axis=-1, keepdims=True)).astype(float)
         probs = (1 - state.epsilon) * max_q / jnp.sum(max_q, axis=-1, keepdims=True) + state.epsilon / q.shape[-1]
 
-        action = jax.random.categorical(action_key, jnp.log(probs), axis=-1)
-        return jnp.where(wait, Actions.CS.value, action)
+        return jax.random.categorical(action_key, jnp.log(probs), axis=-1)

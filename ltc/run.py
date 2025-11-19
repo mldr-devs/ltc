@@ -29,10 +29,16 @@ def init_agents(agent, key, n, apply_vmap):
 
 
 def agent_step(agent, state, key, obs, action, reward, terminal, wait):
-    update_key, sample_key = jax.random.split(key)
-    state = agent.update(state, update_key, obs, action, reward, terminal)
-    action = agent.sample(state, sample_key, obs, wait)
-    return state, action
+    def agent_fn(state, key, obs, action, reward, terminal):
+        update_key, sample_key = jax.random.split(key)
+        state = agent.update(state, update_key, obs, action, reward, terminal)
+        action = agent.sample(state, sample_key, obs)
+        return state, action
+    
+    def wait_fn(state, key, obs, action, reward, terminal):
+        return state, jnp.full_like(action, Actions.CS.value)
+
+    return jax.lax.cond(jnp.any(wait), wait_fn, agent_fn, state, key, obs, action, reward, terminal)
 
 
 def init_traffic(traffic, key, n):
@@ -50,7 +56,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl):
 
         drl_states, drl_actions = drl_step(
             c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl + 1],
-            c.terminals[:n_drl], (c.actions[:n_drl] == Actions.TX.value) | (c.channel_state != 0)
+            c.terminals[:n_drl], c.channel_state != 0
         )
         legacy_states, legacy_actions = legacy_step(
             c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl + 1:],
@@ -120,7 +126,7 @@ if __name__ == '__main__':
         experience_replay_steps=1,
         discount=0.5,
         epsilon=1.0,
-        epsilon_decay=0.998,
+        epsilon_decay=0.9997,
         epsilon_min=0.01,
         tau=0.02
     )
