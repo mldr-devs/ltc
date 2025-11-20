@@ -12,6 +12,7 @@ from reinforced_lib.agents import BaseAgent
 from reinforced_lib.utils.experience_replay import ReplayBuffer, \
     experience_replay
 
+from explain.pred import params
 from ltc.agents import BayesianDDQN, StochasticVariationalNetwork, QNetwork, \
     DCF
 from ltc.run import init_agents, init_traffic, rl_step
@@ -29,6 +30,8 @@ class SymbolicAgenState:
     replay_buffer: ReplayBuffer
     prev_env_state: jax.Array
     epsilon: jax.Array
+
+    params: dict
 
     replace = dataclasses.replace
 
@@ -65,9 +68,10 @@ class SymbolicAgents:
         )
         def init(key: jax.Array) -> SymbolicAgenState:
             replay_buffer = er.init()
+            # DUmmy params to simulate dqn params
             return SymbolicAgenState(key, replay_buffer=replay_buffer,
                                      prev_env_state=jnp.zeros(obs_space_shape),
-                                     epsilon=epsilon)
+                                     epsilon=epsilon, params=dict(x=jnp.zeros((2,))))
 
         #obs:int32[1,5], action:int32[], reward:float32[], terminal:bool[]
         @jax.custom_batching.custom_vmap
@@ -103,14 +107,15 @@ class SymbolicAgents:
                 dummy=state.dummy,
                 replay_buffer=replay_buffer,
                 prev_env_state=env_state,
-                epsilon=jnp.maximum(state.epsilon * self.args['epsilon_decay'], self.args['epsilon_min'])
+                epsilon=jnp.maximum(state.epsilon * self.args['epsilon_decay'], self.args['epsilon_min']),
+                params = state.params
             )
             return next_state,in_batched[0]
 
         @jax.custom_batching.custom_vmap
         def sample(state: SymbolicAgenState, key: jax.Array, X) -> any:
             # precaution to avoid DCE
-            return jnp.zeros((act_space_size,), jnp.int32)
+            return jnp.zeros((), jnp.int32)
 
         def _pyjax_sample(env_state,i):
             print('sampling agent',i)
@@ -206,21 +211,38 @@ if __name__ == "__main__":
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(agents, init_key, n_drl)
 
-    # drl = BayesianDDQN(
-    #     q_network=StochasticVariationalNetwork(
-    #         QNetwork(num_actions, num_layers=2, dim=4, num_heads=2)),
-    #     obs_space_shape=obs.shape[1:],
-    #     act_space_size=num_actions,
-    #     optimizer=optax.adam(3e-5, b1=0.95, b2=0.95),
-    #     experience_replay_buffer_size=1000,
-    #     experience_replay_batch_size=128,
-    #     experience_replay_steps=5,
-    #     discount=1.0,
-    #     epsilon=1.0,
-    #     epsilon_decay=0.999,
-    #     epsilon_min=0.001,
-    #     tau=0.01
-    # )
+    drl = BayesianDDQN(
+        q_network=StochasticVariationalNetwork(
+            QNetwork(num_actions, num_layers=2, dim=4, num_heads=2)),
+        obs_space_shape=obs.shape[1:],
+        act_space_size=num_actions,
+        optimizer=optax.adam(3e-5, b1=0.95, b2=0.95),
+        experience_replay_buffer_size=1000,
+        experience_replay_batch_size=128,
+        experience_replay_steps=5,
+        discount=1.0,
+        epsilon=1.0,
+        epsilon_decay=0.999,
+        epsilon_min=0.001,
+        tau=0.01
+    )
+    state_drl = jax.vmap(drl.init)(jax.random.split(jax.random.key(5), n_drl))
+    next_states_drl = jax.jit(jax.vmap(drl.update))(state_drl,
+                                                   jax.random.split(
+                                                       jax.random.key(6),
+                                                       n_drl),
+                                                   env_state=obs,
+                                                   action=jnp.zeros((n_drl,)),
+                                                   reward=rewards,
+                                                   terminal=terminals,
+                                                   )
+
+    sampled_drl = jax.jit(jax.vmap(drl.sample))(next_states_drl,
+                            jax.random.split(jax.random.key(7),n_drl), obs
+                                               )
+
+    assert sampled.shape == sampled_drl.shape
+
     sq = SymbolicAgents(n_drl,obs_space_shape=obs.shape[1:],act_space_size=num_actions)
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(sq, init_key, n_drl)
