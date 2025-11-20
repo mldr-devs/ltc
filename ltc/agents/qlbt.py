@@ -10,8 +10,6 @@ from reinforced_lib.agents.deep.ddqn import DDQN, DDQNState
 from reinforced_lib.utils.experience_replay import ExperienceReplay
 from reinforced_lib.utils.jax_utils import forward
 
-from ltc.sim.constants import Actions
-
 
 class QLBT(DDQN):
     def __init__(
@@ -41,13 +39,10 @@ class QLBT(DDQN):
         q_key, q_target_key = jax.random.split(key)
 
         rewards_ind = next_states[..., -1, -1]
-        b, n = rewards_ind.shape
+        n = rewards_ind.shape[-1]
 
         q_values, net_state = forward(q_network, params, state.net_state, q_key, states)
         q_tot, q_ind = q_values[..., :1], q_values[..., 1:n + 1]
-        q_values = q_values[..., n + 1:].reshape(b, n, -1)
-        new_actions = jnp.argmax(q_values, axis=-1)
-        next_states = next_states.at[..., -1, 0].set(new_actions)
 
         q_values_target, _ = forward(q_network, state.params_target, state.net_state_target, q_target_key, next_states)
         q_tot_target, q_ind_target = q_values_target[..., :1], q_values_target[..., 1:n + 1]
@@ -149,6 +144,6 @@ class QLBT(DDQN):
         q = q[0, n + 1:].reshape(n, act_space_size)
 
         max_q = (q == q.max(axis=-1, keepdims=True)).astype(float)
-        probs = (1 - state.epsilon) * max_q / jnp.sum(max_q, axis=-1, keepdims=True) + state.epsilon / q.shape[-1]
+        probs = (1 - state.epsilon) * max_q / jnp.sum(max_q, axis=-1, keepdims=True) + state.epsilon / act_space_size
 
         return jax.random.categorical(action_key, jnp.log(probs), axis=-1)

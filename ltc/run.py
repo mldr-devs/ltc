@@ -56,7 +56,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl):
 
         drl_states, drl_actions = drl_step(
             c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl + 1],
-            c.terminals[:n_drl], c.channel_state != 0
+            c.terminals[:n_drl], False
         )
         legacy_states, legacy_actions = legacy_step(
             c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl + 1:],
@@ -89,7 +89,7 @@ if __name__ == '__main__':
     parser.add_argument('--n', type=int, default=5, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
     parser.add_argument('--n_epochs', type=int, default=1, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=100000, help='Number of steps per epoch.')
+    parser.add_argument('--n_steps', type=int, default=20000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=10, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save-plots', action='store_false', default=True, help='Whether to save the generated plots.')
@@ -126,7 +126,7 @@ if __name__ == '__main__':
         experience_replay_steps=1,
         discount=0.5,
         epsilon=1.0,
-        epsilon_decay=0.9997,
+        epsilon_decay=0.998,
         epsilon_min=0.01,
         tau=0.02
     )

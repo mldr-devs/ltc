@@ -631,7 +631,7 @@ def plot_all(filename):
         plot_weights(history.weights_histogram, history.weights_bin_edges, n, n_drl, seed, PlotType.ALL)
 
 
-def plot_first(filename, n_epochs=1, aggregation=500):
+def plot_first(filename, n_epochs=1, aggregation=100):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
         history = jax.tree.map(lambda x: x[:n_epochs], asdict(history))

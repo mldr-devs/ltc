@@ -26,21 +26,20 @@ class QNetwork(nn.Module):
 
 
 class MixingNetwork(nn.Module):
-    num_actions: int
     fc_dim: int = 32
 
     @nn.compact
     def __call__(self, qs, g):
-        b, n, _ = qs.shape
+        b, n = qs.shape
         _, g_feat = g.shape
 
-        W1 = self.param('W1', nn.initializers.lecun_normal(), (self.fc_dim * n * self.num_actions, g_feat))
+        W1 = self.param('W1', nn.initializers.lecun_normal(), (self.fc_dim * n, g_feat))
         b1 = self.param('b1', nn.initializers.lecun_normal(), (self.fc_dim, g_feat))
         W2 = self.param('W2', nn.initializers.lecun_normal(), ((n + 1) * self.fc_dim, g_feat))
         b2a = self.param('b2a', nn.initializers.lecun_normal(), (self.fc_dim, g_feat))
         b2b = self.param('b2b', nn.initializers.lecun_normal(), ((n + 1), self.fc_dim))
 
-        W1s = jnp.abs(g @ W1.T).reshape(b, self.fc_dim, n * self.num_actions)
+        W1s = jnp.abs(g @ W1.T).reshape(b, self.fc_dim, n)
         b1s = g @ b1.T
         W2s = jnp.abs(g @ W2.T).reshape(b, n + 1, self.fc_dim)
         b2s = g @ b2a.T
@@ -60,8 +59,6 @@ class MixingNetwork(nn.Module):
 
 class QLBTNetwork(nn.Module):
     num_actions: int
-    rnn_dim: int = 32
-    fc_dim: int = 32
 
     @nn.compact
     def __call__(self, s):
@@ -78,7 +75,8 @@ class QLBTNetwork(nn.Module):
         d2lt = d2lt / jnp.maximum(d2lt.sum(axis=-1, keepdims=True), 1)
         g = jnp.concatenate([actions, d2lt], axis=-1)
 
-        q_loc = BatchQNetwork(self.num_actions)(ss)
-        q_mix = MixingNetwork(self.num_actions, self.fc_dim)(q_loc, g)
-        q_loc = q_loc.reshape(s.shape[0], -1)
-        return jnp.concatenate([q_mix, q_loc], axis=-1)
+        q_idn = BatchQNetwork(self.num_actions)(ss)
+        q_idn_inp = jnp.max(q_idn, axis=-1)
+        q_idn = q_idn.reshape(s.shape[0], -1)
+        q_mix = MixingNetwork()(q_idn_inp, g)
+        return jnp.concatenate([q_mix, q_idn], axis=-1)
