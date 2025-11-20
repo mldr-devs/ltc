@@ -61,7 +61,7 @@ class QLBTNetwork(nn.Module):
     num_actions: int
 
     @nn.compact
-    def __call__(self, s):
+    def __call__(self, s, epsilon=0.0):
         BatchQNetwork = nn.vmap(
             QNetwork,
             in_axes=1, out_axes=1,
@@ -75,8 +75,13 @@ class QLBTNetwork(nn.Module):
         d2lt = d2lt / jnp.maximum(d2lt.sum(axis=-1, keepdims=True), 1)
         g = jnp.concatenate([actions, d2lt], axis=-1)
 
-        q_idn = BatchQNetwork(self.num_actions)(ss)
-        q_idn_inp = jnp.max(q_idn, axis=-1)
-        q_idn = q_idn.reshape(s.shape[0], -1)
-        q_mix = MixingNetwork()(q_idn_inp, g)
-        return jnp.concatenate([q_mix, q_idn], axis=-1)
+        q_ind = BatchQNetwork(self.num_actions)(ss)
+        max_q = (q_ind == q_ind.max(axis=-1, keepdims=True)).astype(float)
+        probs = (1 - epsilon) * max_q / jnp.sum(max_q, axis=-1, keepdims=True) + epsilon / self.num_actions
+        acts = jax.random.categorical(self.make_rng('rlib'), jnp.log(probs), axis=-1)
+        q_ind_inp = jnp.take_along_axis(q_ind, acts[..., None], axis=-1).squeeze(-1)
+        
+        q_mix = MixingNetwork()(q_ind_inp, g)
+        q_vals = jnp.concatenate([q_mix, q_ind.reshape(s.shape[0], -1)], axis=-1)
+
+        return q_vals, acts

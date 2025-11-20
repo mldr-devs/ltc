@@ -38,7 +38,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal, wait):
     def wait_fn(state, key, obs, action, reward, terminal):
         return state, jnp.full_like(action, Actions.CS.value)
 
-    return jax.lax.cond(jnp.any(wait), wait_fn, agent_fn, state, key, obs, action, reward, terminal)
+    return jax.lax.cond(wait, wait_fn, agent_fn, state, key, obs, action, reward, terminal)
 
 
 def init_traffic(traffic, key, n):
