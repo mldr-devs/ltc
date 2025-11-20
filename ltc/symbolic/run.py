@@ -51,6 +51,7 @@ class SymbolicAgents:
         self.args = locals()
         self.n = num_regressors
         self.agents = [Regressor() for _ in range(n)]
+        self.COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
 
         assert experience_replay_buffer_size > experience_replay_batch_size > 0
         assert 0.0 <= discount <= 1.0
@@ -86,9 +87,28 @@ class SymbolicAgents:
 
         def _pyjax_fit(batch,i):
             print('fitting agent',i)
+            states, actions, rewards, terminals, next_states = batch
+            reg = self.agents[int(i)]
+
+            #TODO prefit in init
+            try:
+                q_values_target = reg.predict(
+                    next_states.reshape(states.shape[0], -1))
+            except:
+                # not fitted
+                q_values_target = np.random.normal(size=(states.shape[0], self.act_space_size))
+
+            target = rewards + (1 - terminals) * self.args['discount'] * np.max(
+                q_values_target, axis=-1, keepdims=True)
+            next_action = np.argmax(q_values_target, axis=-1)
+
+            Y = q_values_target.copy()
+            Y[np.arange(len(actions)), next_action.flatten()] = target.flatten()
+            X = states.reshape(states.shape[0], -1)
+
+            self.agents[int(i)]=reg.fit(X, Y,variable_names=self.COLUMNS)
             return 0.0
-            #hdf = pd.DataFrame(X)
-            #self.agents[int(i)].fit(hdf, Y)
+
 
 
 
@@ -119,11 +139,16 @@ class SymbolicAgents:
 
         def _pyjax_sample(env_state,i):
             print('sampling agent',i)
-            return jnp.asarray(act_space_size*[0])
+            reg = self.agents[int(i)]
+            try:
+                q = reg.predict(env_state.reshape(1,-1))
+            except:
+                q = np.random.normal(size=(self.act_space_size,))
+            return jnp.asarray(q)
 
         @sample.def_vmap
         def sample_vmap(axis_size, in_batched,state: SymbolicAgenState, key, env_state):
-            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((act_space_size,),jnp.int32), env_state[i],i)
+            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((act_space_size,),jnp.float32), env_state[i],i)
                   for i in range(axis_size)
                 ]
             q = jnp.stack(s)
@@ -186,62 +211,63 @@ if __name__ == "__main__":
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
-    # target = Target("history_5_5_42.pkl.lz4")
-    # observations, qvals = target()
+    # # # For testing purposes only
+    # # target = Target("history_5_5_42.pkl.lz4")
+    # # observations, qvals = target()
+    # #
+    # # fo = np.squeeze(observations)
+    # #
+    # # hdf = pd.DataFrame(fo, columns=COLUMNS)
     #
-    # fo = np.squeeze(observations)
-    # COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
-    # hdf = pd.DataFrame(fo, columns=COLUMNS)
-
-    agents = SymbolicAgents(n_drl,obs_space_shape=obs.shape[1:],act_space_size=num_actions)
-    state = jax.vmap(agents.init)(jax.random.split(jax.random.key(5),n_drl))
-
-    X=jnp.ones((n_drl,4,5))
-    y = jnp.ones((n_drl,4))
-
-    next_states = jax.jit(jax.vmap(agents.update))(state,
-                            jax.random.split(jax.random.key(6),n_drl),
-                            env_state=obs,
-                            action=jnp.zeros((n_drl,)),reward=rewards,terminal=terminals,
-                            )
-    sampled = jax.jit(jax.vmap(agents.sample))(next_states,
-                            jax.random.split(jax.random.key(7),n_drl), X
-                                               )
-
-    key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(agents, init_key, n_drl)
-
-    drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(
-            QNetwork(num_actions, num_layers=2, dim=4, num_heads=2)),
-        obs_space_shape=obs.shape[1:],
-        act_space_size=num_actions,
-        optimizer=optax.adam(3e-5, b1=0.95, b2=0.95),
-        experience_replay_buffer_size=1000,
-        experience_replay_batch_size=128,
-        experience_replay_steps=5,
-        discount=1.0,
-        epsilon=1.0,
-        epsilon_decay=0.999,
-        epsilon_min=0.001,
-        tau=0.01
-    )
-    state_drl = jax.vmap(drl.init)(jax.random.split(jax.random.key(5), n_drl))
-    next_states_drl = jax.jit(jax.vmap(drl.update))(state_drl,
-                                                   jax.random.split(
-                                                       jax.random.key(6),
-                                                       n_drl),
-                                                   env_state=obs,
-                                                   action=jnp.zeros((n_drl,)),
-                                                   reward=rewards,
-                                                   terminal=terminals,
-                                                   )
-
-    sampled_drl = jax.jit(jax.vmap(drl.sample))(next_states_drl,
-                            jax.random.split(jax.random.key(7),n_drl), obs
-                                               )
-
-    assert sampled.shape == sampled_drl.shape
+    # agents = SymbolicAgents(n_drl,obs_space_shape=obs.shape[1:],act_space_size=num_actions)
+    # state = jax.vmap(agents.init)(jax.random.split(jax.random.key(5),n_drl))
+    #
+    # X=jnp.ones((n_drl,4,5))
+    # y = jnp.ones((n_drl,4))
+    #
+    # next_states = jax.jit(jax.vmap(agents.update))(state,
+    #                         jax.random.split(jax.random.key(6),n_drl),
+    #                         env_state=obs,
+    #                         action=jnp.zeros((n_drl,)),reward=rewards,terminal=terminals,
+    #                         )
+    # sampled = jax.jit(jax.vmap(agents.sample))(next_states,
+    #                         jax.random.split(jax.random.key(7),n_drl), X
+    #                                            )
+    #
+    # key, init_key = jax.random.split(key)
+    # drl_states, drl_step = init_agents(agents, init_key, n_drl)
+    #
+    # drl = BayesianDDQN(
+    #     q_network=StochasticVariationalNetwork(
+    #         QNetwork(num_actions, num_layers=2, dim=4, num_heads=2)),
+    #     obs_space_shape=obs.shape[1:],
+    #     act_space_size=num_actions,
+    #     optimizer=optax.adam(3e-5, b1=0.95, b2=0.95),
+    #     experience_replay_buffer_size=1000,
+    #     experience_replay_batch_size=128,
+    #     experience_replay_steps=5,
+    #     discount=1.0,
+    #     epsilon=1.0,
+    #     epsilon_decay=0.999,
+    #     epsilon_min=0.001,
+    #     tau=0.01
+    # )
+    # state_drl = jax.vmap(drl.init)(jax.random.split(jax.random.key(5), n_drl))
+    # next_states_drl = jax.jit(jax.vmap(drl.update))(state_drl,
+    #                                                jax.random.split(
+    #                                                    jax.random.key(6),
+    #                                                    n_drl),
+    #                                                env_state=obs,
+    #                                                action=jnp.zeros((n_drl,)),
+    #                                                reward=rewards,
+    #                                                terminal=terminals,
+    #                                                )
+    #
+    # sampled_drl = jax.jit(jax.vmap(drl.sample))(next_states_drl,
+    #                         jax.random.split(jax.random.key(7),n_drl), obs
+    #                                            )
+    #
+    # assert sampled.shape == sampled_drl.shape
 
     sq = SymbolicAgents(n_drl,obs_space_shape=obs.shape[1:],act_space_size=num_actions)
     key, init_key = jax.random.split(key)

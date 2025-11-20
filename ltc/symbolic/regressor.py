@@ -4,7 +4,7 @@ import sympy
 from sympy.stats import Normal
 from pysr import PySRRegressor
 
-Regressor = partial(PySRRegressor, maxsize=20, niterations=40,
+Regressor = partial(PySRRegressor, maxsize=20, niterations=10,
                     # < Increase me for better results
                     binary_operators=["+", "*", "^"],
                     unary_operators=["exp", "inv(x) = 1/x",
