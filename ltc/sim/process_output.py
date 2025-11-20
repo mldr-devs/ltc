@@ -32,7 +32,7 @@ def process_output_i(buffer_state, new_buffer_state, power_state, d2lt, idx, cha
     return obs, power
 
 
-def process_output(buffer_states, new_buffer_states, power_states, d2lt, throughputs, channel_state, obs, actions, terminals):
+def process_output(key, buffer_states, new_buffer_states, power_states, d2lt, throughputs, channel_state, obs, actions, terminals):
     tx_action = (actions == Actions.TX.value).astype(int)
     thr_t = (tx_action & (channel_state == 1)).astype(int)
     throughputs = jnp.roll(throughputs, -1, axis=1)
@@ -40,6 +40,9 @@ def process_output(buffer_states, new_buffer_states, power_states, d2lt, through
 
     priority = new_buffer_states / (throughputs.mean(axis=1) + 1e-6)
     opt_action = (priority == priority.max()).astype(int)
+    probs = opt_action / opt_action.sum()
+    opt_action = jax.random.choice(key, actions.shape[0], p=probs)
+    opt_action = jnp.zeros_like(actions).at[opt_action].set(1)
     rewards_ind = 2 * (tx_action == opt_action).astype(float) - 1
     rewards_ind = jnp.where(terminals, 0., rewards_ind)
 

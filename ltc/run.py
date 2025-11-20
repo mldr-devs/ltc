@@ -50,7 +50,7 @@ def init_traffic(traffic, key, n):
 
 def rl_step(drl_step, legacy_step, traffic_step, n, n_drl):
     def rl_step_fn(c, _):
-        key, drl_keys, legacy_keys, traffic_key = jax.random.split(c.key, 4)
+        key, drl_keys, legacy_keys, traffic_key, process_key = jax.random.split(c.key, 5)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
@@ -67,7 +67,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl):
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         buffer_states, channel_state, d2lt = simulate(c.buffer_states, new_frames, actions, c.d2lt)
         obs, rewards, throughputs, powers = process_output(
-            c.buffer_states, buffer_states, c.power_states, c.d2lt, c.throughputs, channel_state, c.obs, actions, c.terminals
+            process_key, c.buffer_states, buffer_states, c.power_states, c.d2lt, c.throughputs, channel_state, c.obs, actions, c.terminals
         )
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
