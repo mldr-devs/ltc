@@ -15,4 +15,8 @@ Regressor = partial(PySRRegressor, maxsize=20, niterations=10,
                                           "r": lambda x: Normal(name='N', mean=0, std=1)},
                     # ^ Define operator for SymPy as well
                     elementwise_loss="loss(prediction, target) = sum((prediction - target)^2)",
-                    constraints={'r': 1, '^': (-1, 1)}, )
+                    constraints={'r': 1, '^': (-1, 1)},
+                    parallelism='serial',
+                    input_stream="devnull",
+
+                    )

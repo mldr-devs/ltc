@@ -6,6 +6,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+import os
+os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"]="yes"
 # https://juliapy.github.io/PythonCall.jl/stable/
 from juliacall import Main as jl
 
@@ -14,35 +16,36 @@ from pysr import PySRRegressor
 from ltc.symbolic.regressor import Regressor
 
 if __name__ == '__main__':
-    jl.println("Hello from Julia!")
-    jl.seval("f(x) = @. x^2 + 1")
-    x = jnp.asarray([1, 2, 3.])
-    y = jl.f(jnp.asarray([1, 2, 3.]))
-    print("Julia f(x):", y)
+    if True:
+        jl.println("Hello from Julia!")
+        jl.seval("f(x) = @. x^2 + 1")
+        x = jnp.asarray([1, 2, 3.])
+        y = jl.f(jnp.asarray([1, 2, 3.]))
+        print("Julia f(x):", y)
 
-    def jax_f(x):
-        return jax.experimental.io_callback(jl.f, jax.ShapeDtypeStruct(x.shape, x.dtype), x)
+        def jax_f(x):
+            return jax.experimental.io_callback(jl.f, jax.ShapeDtypeStruct(x.shape, x.dtype), x)
 
-    yj = jax_f(x)
-    print("JAX f(x):", yj)
+        yj = jax_f(x)
+        print("JAX f(x):", yj)
 
-    yj = jax.jit(jax_f)(x)
-    print("JAX f(x):", yj)
+        yj = jax.jit(jax_f)(x)
+        print("JAX f(x):", yj)
 
-    yj = jax.jit(jax.vmap(jax_f))(jnp.stack([x,x]))
-    print("JAX f(x):", yj)
+        yj = jax.jit(jax.vmap(jax_f))(jnp.stack([x,x]))
+        print("JAX f(x):", yj)
 
-    @jax.custom_batching.custom_vmap
-    def jax_f2(x):
-        return jax.experimental.io_callback(jl.f, jax.ShapeDtypeStruct(x.shape, x.dtype), x)
+        @jax.custom_batching.custom_vmap
+        def jax_f2(x):
+            return jax.experimental.io_callback(jl.f, jax.ShapeDtypeStruct(x.shape, x.dtype), x)
 
-    @jax_f2.def_vmap
-    def jax_f2_vmap(axis_size, in_batched,x):
-        ret = [jax.experimental.io_callback(jl.f, jax.ShapeDtypeStruct(_x.shape, _x.dtype), _x) for _x in x]
-        return jnp.stack(ret, 0), True
+        @jax_f2.def_vmap
+        def jax_f2_vmap(axis_size, in_batched,x):
+            ret = [jax.experimental.io_callback(jl.f, jax.ShapeDtypeStruct(_x.shape, _x.dtype), _x) for _x in x]
+            return jnp.stack(ret, 0), True
 
-    yj2 = jax.jit(jax.vmap(jax_f2))(jnp.stack([x,x]))
-    print("JAX f2(x):", yj2)
+        yj2 = jax.jit(jax.vmap(jax_f2))(jnp.stack([x,x]))
+        print("JAX f2(x):", yj2)
 
     X = 2 * np.random.randn(100, 5)
     y = 2 * np.cos(X[:, 3]) + X[:, 0] ** 2 - 2
@@ -83,7 +86,7 @@ if __name__ == '__main__':
     def fit_models2(X, y):
         return jax.experimental.io_callback(pyfit, jax.ShapeDtypeStruct(y.shape, y.dtype), 0, X, y)
 
-    jax.jit(jax.vmap(fit_models2))(XX, yy)
+    jax.jit(jax.vmap(fit_models))(XX, yy)
 
 
 

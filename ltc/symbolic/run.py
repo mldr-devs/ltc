@@ -1,6 +1,14 @@
 import argparse
 import dataclasses
+import threading
 from abc import abstractmethod
+
+import os
+os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"]="yes"
+# https://juliapy.github.io/PythonCall.jl/stable/
+from juliacall import Main as jl
+jl.println("Hello from Julia!")
+
 
 import jax
 import jax.numpy as jnp
@@ -12,7 +20,7 @@ from reinforced_lib.agents import BaseAgent
 from reinforced_lib.utils.experience_replay import ReplayBuffer, \
     experience_replay
 
-from explain.pred import params
+# from explain.pred import params
 from ltc.agents import BayesianDDQN, StochasticVariationalNetwork, QNetwork, \
     DCF
 from ltc.run import init_agents, init_traffic, rl_step
@@ -52,6 +60,7 @@ class SymbolicAgents:
         self.n = num_regressors
         self.agents = [Regressor() for _ in range(n)]
         self.COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
+        self.julia_lock = threading.Lock()
 
         assert experience_replay_buffer_size > experience_replay_batch_size > 0
         assert 0.0 <= discount <= 1.0
@@ -88,7 +97,9 @@ class SymbolicAgents:
         def _pyjax_fit(batch,i):
             print('fitting agent',i)
             states, actions, rewards, terminals, next_states = batch
+            #with self.julia_lock:
             reg = self.agents[int(i)]
+            return jnp.asarray(jl.zeros())
 
             #TODO prefit in init
             try:
@@ -139,6 +150,7 @@ class SymbolicAgents:
 
         def _pyjax_sample(env_state,i):
             print('sampling agent',i)
+
             reg = self.agents[int(i)]
             try:
                 q = reg.predict(env_state.reshape(1,-1))
@@ -148,7 +160,7 @@ class SymbolicAgents:
 
         @sample.def_vmap
         def sample_vmap(axis_size, in_batched,state: SymbolicAgenState, key, env_state):
-            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((act_space_size,),jnp.float32), env_state[i],i)
+            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((act_space_size,),jnp.float32), env_state[i],i,ordered=True)
                   for i in range(axis_size)
                 ]
             q = jnp.stack(s)
@@ -211,28 +223,29 @@ if __name__ == "__main__":
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
 
-    # # # For testing purposes only
-    # # target = Target("history_5_5_42.pkl.lz4")
-    # # observations, qvals = target()
-    # #
-    # # fo = np.squeeze(observations)
-    # #
-    # # hdf = pd.DataFrame(fo, columns=COLUMNS)
+    # For testing purposes only
+    # target = Target("history_5_5_42.pkl.lz4")
+    # observations, qvals = target()
     #
-    # agents = SymbolicAgents(n_drl,obs_space_shape=obs.shape[1:],act_space_size=num_actions)
-    # state = jax.vmap(agents.init)(jax.random.split(jax.random.key(5),n_drl))
+    # fo = np.squeeze(observations)
     #
-    # X=jnp.ones((n_drl,4,5))
-    # y = jnp.ones((n_drl,4))
+    # hdf = pd.DataFrame(fo)
+    # Regressor().fit(hdf, qvals)
     #
-    # next_states = jax.jit(jax.vmap(agents.update))(state,
-    #                         jax.random.split(jax.random.key(6),n_drl),
-    #                         env_state=obs,
-    #                         action=jnp.zeros((n_drl,)),reward=rewards,terminal=terminals,
-    #                         )
-    # sampled = jax.jit(jax.vmap(agents.sample))(next_states,
-    #                         jax.random.split(jax.random.key(7),n_drl), X
-    #                                            )
+    agents = SymbolicAgents(n_drl,obs_space_shape=obs.shape[1:],act_space_size=num_actions)
+    state = jax.vmap(agents.init)(jax.random.split(jax.random.key(5),n_drl))
+
+    X=jnp.ones((n_drl,4,5))
+    y = jnp.ones((n_drl,4))
+
+    next_states = jax.jit(jax.vmap(agents.update))(state,
+                            jax.random.split(jax.random.key(6),n_drl),
+                            env_state=obs,
+                            action=jnp.zeros((n_drl,)),reward=rewards,terminal=terminals,
+                            )
+    sampled = jax.jit(jax.vmap(agents.sample))(next_states,
+                            jax.random.split(jax.random.key(7),n_drl), X
+                                               )
     #
     # key, init_key = jax.random.split(key)
     # drl_states, drl_step = init_agents(agents, init_key, n_drl)
