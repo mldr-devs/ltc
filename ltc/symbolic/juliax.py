@@ -7,18 +7,70 @@ import jax.numpy as jnp
 import numpy as np
 
 import os
-os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"]="yes"
+
+
+# Konfiguracja JuliaCall - musi zostać wykonana PRZED importem juliacall
+# 1. Użyj globalnego depot Julia (standardowa lokalizacja pakietów)
+os.environ["JULIA_DEPOT_PATH"] = os.path.expanduser("~/.julia")
+
+# 2. Aktywuj projekt z katalogu juliagents
+os.environ["PYTHON_JULIACALL_PROJECT"] = os.path.expanduser("~/Documents/ml4wifi/ltc/juliagents")
+
+# 3. Wskaż ścieżkę do wykonania Julia (używa globalnej instalacji 'julia' z PATH)
+os.environ["PYTHON_JULIACALL_EXE"] = "julia"
+
 # https://juliapy.github.io/PythonCall.jl/stable/
 from juliacall import Main as jl
 
-from pysr import PySRRegressor
+from juliacall import Main as jl
+
+
+
+
+
+
+
+# https://juliapy.github.io/PythonCall.jl/stable/
+from juliacall import Main as jl
+
+# from pysr import PySRRegressor
 
 from ltc.symbolic.regressor import Regressor
+
+code='''
+using Pkg
+Pkg.activate("../.venv/julia_env")
+# Pkg.add("MLJ")
+# Pkg.add("SymbolicRegression")
+
+
+using SymbolicRegression
+using MLJ
+
+
+X = 2randn(1000, 5)
+y = @. 2*cos(X[:, 4]) + X[:, 1]^2 - 2
+
+model = SRRegressor(
+    binary_operators=[+, -, *, /],
+    unary_operators=[cos],
+    niterations=30
+)
+mach = machine(model, X, y)
+f()=fit!(mach)
+'''
 
 if __name__ == '__main__':
     if True:
         jl.println("Hello from Julia!")
         jl.seval("f(x) = @. x^2 + 1")
+        # jl.seval('using Pkg')
+        # jl.seval('''Pkg.activate("../.venv/julia_env")''')
+        # jl.seval("import Pkg; Pkg.instantiate()")
+        print(jl.seval('Base.julia_cmd()'))
+        print(jl.seval("Base.active_project()"))
+
+        # jl.seval(code)
         x = jnp.asarray([1, 2, 3.])
         y = jl.f(jnp.asarray([1, 2, 3.]))
         print("Julia f(x):", y)
@@ -46,7 +98,7 @@ if __name__ == '__main__':
 
         yj2 = jax.jit(jax.vmap(jax_f2))(jnp.stack([x,x]))
         print("JAX f2(x):", yj2)
-
+    os.exit(0)
     X = 2 * np.random.randn(100, 5)
     y = 2 * np.cos(X[:, 3]) + X[:, 0] ** 2 - 2
     model = PySRRegressor(

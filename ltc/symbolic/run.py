@@ -1,13 +1,27 @@
+import os
+os.environ["JULIA_DEPOT_PATH"] = os.path.expanduser("~/.julia")
+os.environ["JULIA_PROJECT"] = "@"   # optional
+os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"]="yes"
+os.environ["PYTHON_JULIACALL_EXE"]="/opt/homebrew/bin/julia"
+from juliacall import Main as jl
+#import pysr
+
 import argparse
 import dataclasses
 import threading
 from abc import abstractmethod
 
-import os
-os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"]="yes"
-# https://juliapy.github.io/PythonCall.jl/stable/
-from juliacall import Main as jl
+# import os
+# os.environ["PYTHON_JULIACALL_HANDLE_SIGNALS"]="yes"
+# # https://juliapy.github.io/PythonCall.jl/stable/
+# from juliacall import Main as jl
 jl.println("Hello from Julia!")
+jl.PythonCall.GC.disable()
+# jl.seval('using Pkg')
+# jl.seval('''Pkg.activate("../.venv/julia_env")''')
+
+# from juliacall import Main as jl
+# jl.seval("import Pkg; Pkg.instantiate()")
 
 
 import jax
@@ -96,6 +110,8 @@ class SymbolicAgents:
 
         def _pyjax_fit(batch,i):
             print('fitting agent',i)
+
+            return jnp.asarray(jl.zeros())
             states, actions, rewards, terminals, next_states = batch
             #with self.julia_lock:
             reg = self.agents[int(i)]
@@ -133,7 +149,7 @@ class SymbolicAgents:
 
             for i in range(axis_size):
                 args = (states[i], actions[i], rewards[i], terminals[i], next_states[i])
-                jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), args, i)
+                jax.experimental.io_callback(_pyjax_fit, jax.ShapeDtypeStruct((),jnp.float32), args, i, ordered=False)
             next_state = SymbolicAgenState(
                 dummy=state.dummy,
                 replay_buffer=replay_buffer,
@@ -160,7 +176,7 @@ class SymbolicAgents:
 
         @sample.def_vmap
         def sample_vmap(axis_size, in_batched,state: SymbolicAgenState, key, env_state):
-            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((act_space_size,),jnp.float32), env_state[i],i,ordered=True)
+            s = [ jax.experimental.io_callback(_pyjax_sample, jax.ShapeDtypeStruct((act_space_size,),jnp.float32), env_state[i],i,ordered=False)
                   for i in range(axis_size)
                 ]
             q = jnp.stack(s)
