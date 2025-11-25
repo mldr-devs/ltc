@@ -98,14 +98,14 @@ if __name__ == '__main__':
 
         yj2 = jax.jit(jax.vmap(jax_f2))(jnp.stack([x,x]))
         print("JAX f2(x):", yj2)
-    os.exit(0)
+    # os.exit(0)
     X = 2 * np.random.randn(100, 5)
     y = 2 * np.cos(X[:, 3]) + X[:, 0] ** 2 - 2
-    model = PySRRegressor(
-        binary_operators=["+", "*"],
-        niterations=2
-    )
-    R = partial(PySRRegressor, binary_operators=["+", "*"], niterations=2)
+    # model = PySRRegressor(
+    #     binary_operators=["+", "*"],
+    #     niterations=2
+    # )
+    # R = partial(PySRRegressor, binary_operators=["+", "*"], niterations=2)
     R= Regressor
 
     # models = [deepcopy(model), deepcopy(model)]
