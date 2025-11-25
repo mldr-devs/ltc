@@ -29,16 +29,17 @@ def init_agents(agent, key, n, apply_vmap):
 
 
 def agent_step(agent, state, key, obs, action, reward, terminal, wait):
-    def agent_fn(state, key, obs, action, reward, terminal):
-        update_key, sample_key = jax.random.split(key)
-        state = agent.update(state, update_key, obs, action, reward, terminal)
-        action = agent.sample(state, sample_key, obs)
-        return state, action
-    
-    def wait_fn(state, key, obs, action, reward, terminal):
-        return state, jnp.full_like(action, Actions.CS.value)
+    update_key, sample_key = jax.random.split(key)
 
-    return jax.lax.cond(wait, wait_fn, agent_fn, state, key, obs, action, reward, terminal)
+    state = agent.update(state, update_key, obs, action, reward, terminal)
+    action = jax.lax.cond(
+        wait, 
+        lambda *_: jnp.full_like(action, Actions.CS.value),
+        lambda state, key, obs: agent.sample(state, key, obs),
+        state, sample_key, obs
+    )
+
+    return state, action
 
 
 def init_traffic(traffic, key, n):
@@ -56,7 +57,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl):
 
         drl_states, drl_actions = drl_step(
             c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl + 1],
-            c.terminals[:n_drl], False
+            c.terminals[:n_drl], c.channel_state != 0
         )
         legacy_states, legacy_actions = legacy_step(
             c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl + 1:],

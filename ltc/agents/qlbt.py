@@ -38,13 +38,10 @@ class QLBT(DDQN):
         states, _, rewards_tot, terminals, next_states = batch
 
         rewards_ind = next_states[..., -1, -1]
-        b, n = rewards_ind.shape
+        _, n = rewards_ind.shape
 
-        (q_values, _), net_state = forward(q_network, params, state.net_state, key, states, state.epsilon)
+        (q_values, _), net_state = forward(q_network, params, state.net_state, key, states)
         q_tot, q_ind = q_values[..., :1], q_values[..., 1:n + 1]
-        q_values = q_values[..., n + 1:].reshape(b, n, -1)
-        new_actions = jnp.argmax(q_values, axis=-1)
-        next_states = next_states.at[..., -1, 0].set(new_actions)
 
         (q_values_target, _), _ = forward(q_network, state.params_target, state.net_state_target, key, next_states)
         q_tot_target, q_ind_target = q_values_target[..., :1], q_values_target[..., 1:n + 1]
@@ -114,7 +111,12 @@ class QLBT(DDQN):
         batch_key, network_key = jax.random.split(key)
 
         loss_params = (network_key, state, er.sample(replay_buffer, batch_key))
-        params, net_state, opt_state = QLBT.gradient_step(state.params, loss_params, state.opt_state, env_state.shape[0])
+        params, net_state, opt_state = jax.lax.cond(
+            er.is_ready(replay_buffer),
+            lambda p, lp, os: QLBT.gradient_step(p, lp, os, env_state.shape[0]),
+            lambda p, lp, os: (p, lp[1].net_state, os),
+            state.params, loss_params, state.opt_state
+        )
         params_target, net_state_target = optax.incremental_update((params, net_state), (state.params_target, state.net_state_target), tau)
 
         return DDQNState(
