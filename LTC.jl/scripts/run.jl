@@ -5,7 +5,7 @@ ENV["JULIA_PYTHONCALL_EXE"] = joinpath(@__DIR__, "..","..",".venv","bin","python
 import Pkg
 
 Pkg.activate(joinpath(@__DIR__, ".."))  # activate LTC project
-Pkg.instantiate()
+# Pkg.instantiate()
 # Pkg.build("PythonCall")
 
 import LTC

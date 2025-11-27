@@ -13,14 +13,19 @@ begin
 	import Pkg
 	
 	Pkg.activate(joinpath(@__DIR__, ".."))  # activate LTC project
-	Pkg.instantiate()
-	# Pkg.build("PythonCall")
 	
-	import LTC
-	using PythonCall
-	using Revise
-	
-	
+	using PythonCall	
+
+end
+
+# ╔═╡ cdd1f98c-1f4e-4d9c-b3fc-2f759daebcee
+using Revise
+
+# ╔═╡ b7953b54-166a-47cf-b9f7-9a8400ea581e
+import LTC
+
+# ╔═╡ 77667d4b-874c-4de4-a5eb-bd7a4ddad8aa
+begin
 	ltcsym = pyimport("ltc.symbolic")
 	print("LTC symbolic imported:", ltcsym)
 	
@@ -28,14 +33,8 @@ begin
 	jnp = pyimport("jax.numpy")
 	jeden=jnp.ones((3,3))
 	print("JAX jnp.ones:",jeden)
-	
+	jnp.ones(4).sum()
 end
-
-# ╔═╡ 77667d4b-874c-4de4-a5eb-bd7a4ddad8aa
-jnp.ones(4).sum()
-
-# ╔═╡ 3cbcafbb-97f6-4d8c-b7dc-f85212697ef1
-
 
 # ╔═╡ a55e89a4-addf-43a8-a84d-ea8b2a098d8f
 LTC.my_loss
@@ -46,25 +45,24 @@ import SymbolicRegression: SRRegressor,MultitargetSRRegressor , Dataset, eval_tr
 # ╔═╡ fbb93a24-9b52-44d5-9f0e-f16314c4a178
 import MLJ: machine, fit!, predict, report
 
-# ╔═╡ 9ddad752-315b-47db-af00-2cf7f42feaee
+# ╔═╡ 44b114c7-61ed-4d9f-b899-9afeab8c8b72
 begin
-	 # Dataset with two named features:
-	 X = (a=rand(500), b=rand(500))
+	X = (a=rand(500), b=rand(500))
 	
 	 # and one target:
 	 y = @. 2 * cos(X.a * 23.5) - X.b^2
-	 # y = [y';y']'
-	
-	 # with some noise:
-	 y = y .+ randn(500) .* 1e-3
-	
-	 model = SRRegressor(
+end
+
+# ╔═╡ 9ddad752-315b-47db-af00-2cf7f42feaee
+# ╠═╡ disabled = true
+#=╠═╡
+model = SRRegressor(
 		 niterations=50,
 		 binary_operators=[+, -, *],
 		 unary_operators=[cos],
 		 # elementwise_loss=LTC.qloss
-	 )
-end
+)
+  ╠═╡ =#
 
 # ╔═╡ e3a12c8d-3fcc-4640-8f1e-db2a08fb48de
 ones_like(x)=ones(eltype(x), size(x)...)
@@ -73,14 +71,18 @@ ones_like(x)=ones(eltype(x), size(x)...)
 w=ones_like(y)[:,1]
 
 # ╔═╡ f7be3b67-754f-4f45-9387-c3f83909d0d0
+#=╠═╡
 begin
 	
 	 mach = machine(model, X, y, w)
 	
 	 fit!(mach)
 end
+  ╠═╡ =#
 
 # ╔═╡ b8598a79-6e67-4980-946d-284df6455c18
+# ╠═╡ disabled = true
+#=╠═╡
 begin
 	function my_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
 	    prediction, flag = eval_tree_array(tree, dataset.X, options)
@@ -102,6 +104,7 @@ begin
 	
 	fit!(mach2)
 end
+  ╠═╡ =#
 
 # ╔═╡ 4dae4a63-deb8-4a93-94d9-e564a24cc46f
 begin
@@ -113,20 +116,32 @@ begin
 	f()
 end
 
-# ╔═╡ 35292c16-bc42-4999-91e4-21819d7a3e2c
+# ╔═╡ 86e06118-67af-4aba-99ff-f331cad2f92f
+md"
+## Testy funkcji
+"
+
+# ╔═╡ 94f74723-71f6-4ea7-b208-2b32e53bb1ba
+LTC.f()
+
+# ╔═╡ bf7d7acb-366a-4034-a4be-76192e6ac1af
 
 
 # ╔═╡ Cell order:
 # ╠═94d01d6c-1177-4b83-b070-6c5f56162e6f
+# ╠═cdd1f98c-1f4e-4d9c-b3fc-2f759daebcee
+# ╠═b7953b54-166a-47cf-b9f7-9a8400ea581e
 # ╠═77667d4b-874c-4de4-a5eb-bd7a4ddad8aa
-# ╠═3cbcafbb-97f6-4d8c-b7dc-f85212697ef1
 # ╠═a55e89a4-addf-43a8-a84d-ea8b2a098d8f
 # ╠═7d773505-f248-4316-9eb2-b29c7b3bb01c
 # ╠═fbb93a24-9b52-44d5-9f0e-f16314c4a178
+# ╠═44b114c7-61ed-4d9f-b899-9afeab8c8b72
 # ╠═9ddad752-315b-47db-af00-2cf7f42feaee
 # ╠═e3a12c8d-3fcc-4640-8f1e-db2a08fb48de
 # ╠═1b22fab6-c920-47a3-922a-4916fc190fc3
 # ╠═f7be3b67-754f-4f45-9387-c3f83909d0d0
 # ╠═b8598a79-6e67-4980-946d-284df6455c18
 # ╠═4dae4a63-deb8-4a93-94d9-e564a24cc46f
-# ╠═35292c16-bc42-4999-91e4-21819d7a3e2c
+# ╠═86e06118-67af-4aba-99ff-f331cad2f92f
+# ╠═94f74723-71f6-4ea7-b208-2b32e53bb1ba
+# ╠═bf7d7acb-366a-4034-a4be-76192e6ac1af
