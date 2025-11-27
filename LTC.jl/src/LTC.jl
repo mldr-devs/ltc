@@ -1,5 +1,5 @@
 module LTC
-
+using SymbolicRegression
 
 function qloss(x, y, action)
     # xx = x[CartesianIndex.(1:length(action), action + 1)]
@@ -17,18 +17,13 @@ function my_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
     if !flag
         return L(Inf)
     end
-    print(options)
+    # print(options)
     return sum((prediction .- dataset.y) .^ 2) / dataset.n
 end
 
 function f()
-
-
-
-
-    return model
+    return 42
 end
-
 
 
 end # module LTC
