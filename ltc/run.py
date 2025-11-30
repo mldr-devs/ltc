@@ -1,9 +1,11 @@
 import os
+from typing import Callable
+
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 
 import argparse
-from dataclasses import replace
+from dataclasses import replace, dataclass
 from functools import partial
 
 import cloudpickle
@@ -18,6 +20,32 @@ from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
+
+
+def intercept(wrapped: Callable) -> Callable:
+    @jax.tree_util.register_dataclass
+    @dataclass
+    class Intercept:
+
+        @jax.jit
+        def __call__(self, *args, **kwargs):
+            gen = wrapped(*args, **kwargs)
+            intercepted = next(gen)
+            return gen.send(intercepted)
+
+        @jax.jit
+        def first(self, *args, **kwargs):
+            gen = wrapped(*args, **kwargs)
+            intercepted = next(gen)
+            return intercepted
+
+        @jax.jit
+        def second(self, intermediate, *args, **kwargs):
+            gen = wrapped(*args, **kwargs)
+            _ = next(gen)
+            return gen.send(intermediate)
+
+    return Intercept()
 
 
 def init_agents(agent, key, n):
@@ -52,13 +80,14 @@ def init_traffic(traffic, key, n):
 
 
 def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
-    def rl_step_fn(c, _):
+    def rl_step_gen(c, _):
         key, drl_keys, legacy_keys, traffic_key = jax.random.split(c.key, 4)
         drl_keys = jax.random.split(drl_keys, n_drl)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
         drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
+        yield (drl_states, drl_actions)
         legacy_states, legacy_actions = legacy_step(c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
@@ -84,12 +113,27 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
             (new_frames > 0).astype(int), channel_state, hist, bin_edges
         )
-        return c, o
+        yield c, o
 
-    return rl_step_fn
+    def rl_step_fn(*args, **kwargs):
+        gen = rl_step_gen(*args, **kwargs)
+        intercepted = next(gen)
+        return gen.send(intercepted)
 
+    def pre_rl_fn(*args, **kwargs):
+        gen = rl_step_gen(*args, **kwargs)
+        intercepted = next(gen)
+        return intercepted
 
-if __name__ == '__main__':
+    def post_rl_fn(intermediate,*args, **kwargs):
+
+        gen = rl_step_gen(*args, **kwargs)
+        # This will be DCE-ed
+        _ = next(gen)
+        return gen.send(intermediate)
+    return rl_step_fn, pre_rl_fn, post_rl_fn
+
+def steup_args(l:dict):
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
@@ -118,6 +162,10 @@ if __name__ == '__main__':
     obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
+    l.update(locals())
+
+if __name__ == '__main__':
+    steup_args(locals())
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
@@ -154,7 +202,8 @@ if __name__ == '__main__':
 
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl))
+    rl_step_fn,_,_ = rl_step(drl_step, legacy_step, traffic_step, n, n_drl)
+    rl_step_fn = jax.jit(rl_step_fn)
     init_carry = Carry(
         drl_states, legacy_states, traffic_states, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals
