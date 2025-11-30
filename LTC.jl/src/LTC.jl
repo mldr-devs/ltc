@@ -22,7 +22,11 @@ function my_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
 end
 
 function f()
-    return 42
+    # @info 43
+    # @warn  "This is a warning message."
+    # @show "test"
+
+    return 45
 end
 
 

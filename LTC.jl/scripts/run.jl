@@ -11,6 +11,7 @@ Pkg.activate(joinpath(@__DIR__, ".."))  # activate LTC project
 import LTC
 using PythonCall
 
+LTC.f()
 
 ltcsym = pyimport("ltc.symbolic")
 print("LTC symbolic imported:", ltcsym)
