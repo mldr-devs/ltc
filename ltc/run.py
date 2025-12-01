@@ -22,31 +22,6 @@ from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
 
 
-def intercept(wrapped: Callable) -> Callable:
-    @jax.tree_util.register_dataclass
-    @dataclass
-    class Intercept:
-
-        @jax.jit
-        def __call__(self, *args, **kwargs):
-            gen = wrapped(*args, **kwargs)
-            intercepted = next(gen)
-            return gen.send(intercepted)
-
-        @jax.jit
-        def first(self, *args, **kwargs):
-            gen = wrapped(*args, **kwargs)
-            intercepted = next(gen)
-            return intercepted
-
-        @jax.jit
-        def second(self, intermediate, *args, **kwargs):
-            gen = wrapped(*args, **kwargs)
-            _ = next(gen)
-            return gen.send(intermediate)
-
-    return Intercept()
-
 
 def init_agents(agent, key, n):
     keys = jax.random.split(key, n)
