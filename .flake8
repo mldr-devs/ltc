@@ -1,0 +1,8 @@
+# Source - https://stackoverflow.com/a
+# Posted by Ross MacArthur, modified by community. See post 'Timeline' for change history
+# Retrieved 2025-12-01, License - CC BY-SA 4.0
+
+[flake8]
+
+per-file-ignores =
+    ltc/run.py:F821
