@@ -108,7 +108,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         return gen.send(intermediate)
     return rl_step_fn, pre_rl_fn, post_rl_fn
 
-def steup_args(l:dict):
+def steup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
@@ -119,6 +119,11 @@ def steup_args(l:dict):
     parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
     args = parser.parse_args()
+    return args
+
+
+if __name__ == '__main__':
+    args = steup_args()
 
     n = args.n
     n_drl = args.n_drl
@@ -137,10 +142,7 @@ def steup_args(l:dict):
     obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
-    l.update(locals())
 
-if __name__ == '__main__':
-    steup_args(locals())
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
