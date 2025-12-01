@@ -80,7 +80,7 @@ def init_traffic(traffic, key, n):
 
 
 def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
-    def rl_step_gen(c, _):
+    def rl_step_coroutine(c, _):
         key, drl_keys, legacy_keys, traffic_key = jax.random.split(c.key, 4)
         drl_keys = jax.random.split(drl_keys, n_drl)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
@@ -116,19 +116,19 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         yield c, o
 
     def rl_step_fn(*args, **kwargs):
-        gen = rl_step_gen(*args, **kwargs)
+        gen = rl_step_coroutine(*args, **kwargs)
         intercepted = next(gen)
         return gen.send(intercepted)
 
     def pre_rl_fn(*args, **kwargs):
-        gen = rl_step_gen(*args, **kwargs)
+        gen = rl_step_coroutine(*args, **kwargs)
         intercepted = next(gen)
         return intercepted
 
     def post_rl_fn(intermediate,*args, **kwargs):
 
-        gen = rl_step_gen(*args, **kwargs)
-        # This will be DCE-ed
+        gen = rl_step_coroutine(*args, **kwargs)
+        # Unused computations will be DCE-ed
         _ = next(gen)
         return gen.send(intermediate)
     return rl_step_fn, pre_rl_fn, post_rl_fn
