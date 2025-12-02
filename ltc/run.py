@@ -61,8 +61,8 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
-        drl_states, drl_actions = drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
-        yield (drl_states, drl_actions)
+        drl_states, drl_actions = yield drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
+
         legacy_states, legacy_actions = legacy_step(c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
@@ -101,7 +101,6 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         return intercepted
 
     def post_rl_fn(intermediate,*args, **kwargs):
-
         gen = rl_step_coroutine(*args, **kwargs)
         # Unused computations will be DCE-ed
         _ = next(gen)
