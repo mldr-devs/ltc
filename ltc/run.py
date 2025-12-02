@@ -100,7 +100,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         intercepted = next(gen)
         return intercepted
 
-    def post_rl_fn(intermediate,*args, **kwargs):
+    def post_rl_fn(intermediate, *args, **kwargs):
         gen = rl_step_coroutine(*args, **kwargs)
         # Unused computations will be DCE-ed
         _ = next(gen)
