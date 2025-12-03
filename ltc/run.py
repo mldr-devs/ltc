@@ -107,7 +107,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         return gen.send(intermediate)
     return rl_step_fn, pre_rl_fn, post_rl_fn
 
-def steup_args():
+def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Total number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
@@ -122,7 +122,7 @@ def steup_args():
 
 
 if __name__ == '__main__':
-    args = steup_args()
+    args = setup_args()
 
     n = args.n
     n_drl = args.n_drl
