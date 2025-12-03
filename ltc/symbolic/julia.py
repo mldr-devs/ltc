@@ -22,7 +22,7 @@ from ltc.utils.plots import plot_all, plot_first
 
 
 from ltc.run import rl_step
-from ltc.run import steup_args
+from ltc.run import setup_args
 _len = len
 
 def make_obs(window_size, n):
