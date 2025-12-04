@@ -11,11 +11,6 @@ using PythonCall
 
 function main()
     P = pyimport("ltc.symbolic.julia")
-    # run everything for test
-
-    c = P.main()
-    print(c)
-    #     return
 
     jax = pyimport("jax")
     jnp = pyimport("jax.numpy")
