@@ -1,22 +1,27 @@
 ENV["JULIA_CONDAPKG_BACKEND"] = "Null"
-ENV["JULIA_PYTHONCALL_EXE"] = joinpath(@__DIR__, "..","..",".venv","bin","python")  # optional
+ENV["JULIA_PYTHONCALL_EXE"] = joinpath(@__DIR__, "..", "..", ".venv", "bin", "python")  # optional
 
 import Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))  # activate LTC project
-
+using Revise
 
 import LTC
 using PythonCall
 
-LTC.f()
 
 function main()
     P = pyimport("ltc.symbolic.julia")
+    # run everything for test
+
+    c = P.main()
+    print(c)
+    #     return
+
     jax = pyimport("jax")
     jnp = pyimport("jax.numpy")
     print(P)
-    args = P.steup_args()
-    
+    args = P.setup_args()
+
     n = args.n
     n_drl = args.n_drl
     n_epochs = args.n_epochs
@@ -26,7 +31,7 @@ function main()
     traffic_type = args.traffic_type
 
     key = jax.random.key(seed)
-    num_actions =  P._len(P.Actions)
+    num_actions = P._len(P.Actions)
     actions = jnp.zeros(n, dtype=jnp.int32)
     buffer_states = jnp.zeros(n, dtype=jnp.int32)
     power_states = jnp.full(n, P.INITIAL_CAPACITY, dtype=jnp.int32)
@@ -35,6 +40,7 @@ function main()
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, false, dtype=jnp.bool)
 
+    print([(name, getfield(Main, name)) for name in names(Main)])
 
 end
 
