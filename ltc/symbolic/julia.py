@@ -1,3 +1,4 @@
+import dataclasses
 import os
 from typing import Callable, NamedTuple
 
@@ -32,40 +33,37 @@ def make_obs(window_size, n):
 from ltc.symbolic.run import SymbolicAgents, main  # noqa: E402, F401
 
 
-class Sim(NamedTuple):
+class Sim:
     init: Callable
-    update: Callable
+    step: Callable
 
+    def __init__(
+        self,
+        args,
+    ):
+        n = args.n
+        n_drl = args.n_drl
+        n_epochs = args.n_epochs
+        n_steps = args.n_steps
+        window_size = args.window_size
+        seed = args.seed
+        traffic_type = args.traffic_type
 
-def make_sim(
-    n,
-    n_drl,
-    traffic_type,
-    channel_state,
-    obs,
-    actions,
-    rewards,
-    terminals,
-    buffer_states,
-    power_states,
-) -> Sim:
-    num_actions = len(Actions)
+        key = jax.random.key(seed)
+        num_actions = len(Actions)
+        actions = jnp.zeros(n, dtype=int)
+        buffer_states = jnp.zeros(n, dtype=int)
+        power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
+        channel_state = 0
+        obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
+        rewards = jnp.zeros(n)
+        terminals = jnp.full(n, False, dtype=bool)
 
-    def init(key):
-        key, init_key = jax.random.split(key)
         drl = SymbolicAgents(
             n_drl, obs_space_shape=obs.shape[1:], act_space_size=num_actions
         )
-        drl_states, drl_step = init_agents(drl, init_key, n_drl)
-        drl_states = drl_states.replace(
-            prev_env_state=drl_states.prev_env_state.astype(int)
-        )
 
         dcf = DCF()
-        key, init_key = jax.random.split(key)
-        legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
-
-        key, init_key = jax.random.split(key)
 
         if traffic_type == "constant":
             traffic = cox_traffic(
@@ -82,23 +80,80 @@ def make_sim(
         else:
             raise ValueError(f"Unknown traffic type: {traffic_type}")
 
-        traffic_states, traffic_step = init_traffic(traffic, init_key, n)
-        init_carry = Carry(
-            drl_states,
-            legacy_states,
-            traffic_states,
-            buffer_states,
-            power_states,
-            channel_state,
-            key,
-            obs,
-            actions,
-            rewards,
-            terminals,
-        )
-        return init_carry
+        def init(key: jax.Array) -> Carry:
+            key, init_key = jax.random.split(key)
+            drl_states, drl_step = init_agents(drl, init_key, n_drl)
+            drl_states = drl_states.replace(
+                prev_env_state=drl_states.prev_env_state.astype(int)
+            )
 
-    def update(carry, action):
-        pass
+            key, init_key = jax.random.split(key)
+            legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
 
-    return Sim(init, update)
+            key, init_key = jax.random.split(key)
+            traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+
+            init_carry = Carry(
+                drl_states,
+                legacy_states,
+                traffic_states,
+                buffer_states,
+                power_states,
+                channel_state,
+                key,
+                obs,
+                actions,
+                rewards,
+                terminals,
+            )
+            return init_carry
+
+        # self.action_shape = jax.eval_shape(pre_rl_fn, init(),None)
+
+        def step(carry: Carry, action: jax.Array) -> tuple[Carry, Output]:
+            key, init_key = jax.random.split(carry.key)
+            drl_states, drl_step = init_agents(drl, init_key, n_drl)
+            drl_states = drl_states.replace(
+                prev_env_state=drl_states.prev_env_state.astype(int)
+            )
+
+            key, init_key = jax.random.split(key)
+            legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
+
+            key, init_key = jax.random.split(key)
+            traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+
+            _, pre_rl_fn, post_rl_fn = rl_step(
+                drl_step, legacy_step, traffic_step, n, n_drl
+            )
+            c = dataclasses.replace(carry, key=key)
+            # Intenals is a tuple of states and actions
+            c, o = post_rl_fn((c.drl_states, action), c, None)
+
+            return c, o
+
+        def shape_fn(c):
+            def _f(c):
+                key, init_key = jax.random.split(c.key)
+                drl_states, drl_step = init_agents(drl, init_key, n_drl)
+                drl_states = drl_states.replace(
+                    prev_env_state=drl_states.prev_env_state.astype(int)
+                )
+
+                key, init_key = jax.random.split(key)
+                legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
+
+                key, init_key = jax.random.split(key)
+                traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+
+                _, pre_rl_fn, post_rl_fn = rl_step(
+                    drl_step, legacy_step, traffic_step, n, n_drl
+                )
+                a = pre_rl_fn(c, None)
+                return a
+
+            return jax.eval_shape(_f, c)
+
+        self.init = jax.jit(init)
+        self.step = jax.jit(step)
+        self.shape_fn = shape_fn
