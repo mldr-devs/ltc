@@ -35,7 +35,21 @@ function main()
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, false, dtype=jnp.bool)
 
-    print([(name, getfield(Main, name)) for name in names(Main)])
+    sim = P.make_sim(
+        n,
+        n_drl,
+        traffic_type,
+        actions,
+        buffer_states,
+        power_states,
+        channel_state,
+        obs,
+        rewards,
+        terminals,
+    )
+
+    key, k1, k2 = jax.random.split(key, 3)
+    c = sim.init(k1)
 
 end
 
