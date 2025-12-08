@@ -8,11 +8,10 @@ using Revise
 import LTC
 using PythonCall
 
-(jax, jnp, P) = LTC.ltc_imports()
-
 
 
 function main()
+    (jax, jnp, P) = LTC.ltc_imports()
     args = P.setup_args()
 
     n = args.n
@@ -37,8 +36,6 @@ function main()
     env = LTC.Env(args, key)
     sarsd = LTC.step!(env, ones(UInt32, 5))
     println(sarsd)
-
-
 
 end
 

@@ -1,29 +1,40 @@
 module LTC
+# TODO: disable precompilation while developing, remove later
+# __precompile__(false)
 using SymbolicRegression
 using PythonCall
 
+_pymods = nothing
+
+"""
+    ltc_imports()
+
+Returns a named tuple of necessary Python modules.
+"""
 function ltc_imports()
-    return (jax=pyimport("jax"), jnp=pyimport("jax.numpy"), P=pyimport("ltc.symbolic.julia"))
-
-end
-
-
-function my_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
-    prediction, flag = eval_tree_array(tree, dataset.X, options)
-    if !flag
-        return L(Inf)
+    global _pymods
+    if _pymods !== nothing
+        return _pymods
     end
-    # print(options)
-    return sum((prediction .- dataset.y) .^ 2) / dataset.n
+    _pymods = (jax=pyimport("jax"), jnp=pyimport("jax.numpy"), P=pyimport("ltc.symbolic.julia"))
+    return _pymods
+
 end
 
+"""
+    Env(args::Py, key::Union{Py,Nothing}=nothing)
+A wrapper around the LTC environment.
+"""
 mutable struct Env
     state::Py
     pysim::Py
 
-    function Env(args::Py, key::Py=jax.random.key(0))
-        (jax, jnp, P) = ltc_imports()
-        key, k1, k2 = jax.random.split(key, 3)
+    function Env(args::Py, key::Union{Py,Nothing}=nothing)
+        (jax, _, P) = ltc_imports()
+        if key === nothing
+            key = jax.random.key(0)
+        end
+        key, k1 = jax.random.split(key, 2)
         sim = P.Sim(args)
         c = sim.init(k1)
         new(c, sim)
@@ -31,6 +42,10 @@ mutable struct Env
     end
 end
 
+"""
+    SARSD
+A struct representing a single step transition in the environment.
+"""
 struct SARSD
     s::Array{Float32,3}
     a::Array{Int64,1}
@@ -39,10 +54,14 @@ struct SARSD
     done::Array{Bool,1}
 end
 
-function step!(env::Env, a::Vector{UInt32})
-    (jax, jnp, P) = ltc_imports()
+"""
+    step!(env::Env, a::Vector{UInt32})
+
+Advances the environment by one step.
+"""
+function step!(env::Env, a::Vector{UInt32})::SARSD
+    (_, jnp, _) = ltc_imports()
     c, o = env.pysim.step(env.state, jnp.asarray(a))
-    s_prev = pyconvert(Array{Float32,3}, pygetattr(env.state, "obs"))
     s_prev = pyconvert(Array{Float32,3}, env.state.obs)
     ret = SARSD(
         s_prev,
