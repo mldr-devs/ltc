@@ -42,15 +42,19 @@ mutable struct Env
     end
 end
 
+
+const Observations = Array{Float32,3}
+const Action = Array{Int64,1}
+
 """
     SARSD
 A struct representing a single step transition in the environment.
 """
 struct SARSD
-    s::Array{Float32,3}
-    a::Array{Int64,1}
+    s::Observations
+    a::Action
     r::Array{Float32,1}
-    s2::Array{Float32,3}
+    s2::Observations
     done::Array{Bool,1}
 end
 
@@ -74,5 +78,7 @@ function step!(env::Env, a::Vector{UInt32})::SARSD
     return ret
 
 end
+
+include("agent.jl")
 
 end # module LTC
