@@ -60,7 +60,7 @@ function take_action(agent::SRAgent, observations::Observations)::Action
     q = [best_eq(x, i) for i in 1:num_actions]
 
     # TODO sample
-    action = round(Int32, aggmax(q) - 1)  # assuming actions are 0-indexed  
+    action = round(Int32, argmax(q) - 1)  # assuming actions are 0-indexed  
     return action
     
 end
