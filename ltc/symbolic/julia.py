@@ -55,6 +55,7 @@ class Sim:
         buffer_states = jnp.zeros(n, dtype=int)
         power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
         channel_state = 0
+        #s,t,f
         obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
         rewards = jnp.zeros(n)
         terminals = jnp.full(n, False, dtype=bool)

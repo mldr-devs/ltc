@@ -51,32 +51,40 @@ const Observations = AbstractArray{Float32,3}
 const Action = Int32
 const Actions = Array{Action,1}
 
+
+
 """
-    SARSD
 A struct representing a single step transition in the environment.
 """
-struct SARSD
-    s::Observations
-    a::Actions
-    r::Array{Float32,1}
-    s2::Observations
-    done::Array{Bool,1}
+struct Transition
+    s::Observation
+    a::Action
+    r::Float32
+    s2::Observation
+    done::Bool
 end
+
+
+
 
 """
 Advances the environment by one step.
 """
-function step!(env::Env, a::Actions)::SARSD
+function step!(env::Env, a::Actions)::AbstractVector{Transition}
     (_, jnp, _) = ltc_imports()
     c, o = env.pysim.step(env.state, jnp.asarray(a))
-    s_prev = pyconvert(Array{Float32,3}, env.state.obs)
-    ret = SARSD(
-        s_prev,
-        a,
-        pyconvert(Array{Float32,1}, o.rewards),
-        pyconvert(Array{Float32,3}, o.observations),
-        pyconvert(Array{Bool,1}, o.terminals),
-    )
+    s = pyconvert(Observations, env.state.obs)
+    s2 = pyconvert(Observations, o.observations)
+    r = pyconvert(Vector{Float32}, o.rewards)
+    done = pyconvert(Vector{Bool}, o.terminals) 
+    ret = [Transition(
+        s[i, :, :],
+        a[i],
+        r[i],
+        s2[i, :, :],
+        done[i],
+    ) for i in eachindex(a)]
+    
     env.state = c
     return ret
 

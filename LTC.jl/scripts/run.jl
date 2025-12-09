@@ -30,10 +30,10 @@ function main()
     power_states = jnp.full(n, P.INITIAL_CAPACITY, dtype=jnp.int32)
     channel_state = 0
     obs = P.make_obs(window_size, n)
-    obs = pyconvert(Observations, obs)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, false, dtype=jnp.bool)
 
+    obs = pyconvert(Observations, obs)
     n = pyconvert(Int, args.n)
     n_drl = pyconvert(Int, args.n_drl)
     n_epochs = pyconvert(Int, args.n_epochs)
@@ -49,16 +49,18 @@ function main()
     
     for step in 1:n_steps
         a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]  
-        sarsd = step!(env, a)
-        for agent in agents
-            train!(agent)
+        transitions = step!(env, a)
+        for i in eachindex(agents)
+            train!(agents[i], transitions[i])
         end
-        println(sarsd)
-        break # TODO remove
+
+        println(transitions)
+        if step > 10
+            break # TODO remove
+        end
     end
     
 
 end
-
 
 main()
