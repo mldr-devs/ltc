@@ -15,7 +15,7 @@ function default_options()
 end
 
 struct SymQ
-    state::Union{Nothing, SearchState}
+    state::Union{Nothing, AbstractVector}
     hof::Union{Nothing, HallOfFame}
 end
 
@@ -34,11 +34,16 @@ mutable struct SRAgent
 end
 
 function train!(agent::SRAgent)
+    # TODO sample from the replay buffer
     X = randn(2, 100)
     y = 2 * cos.(X[2, :]) + X[1, :] .^ 2 .- 2
 
-    fit_result = equation_search(X, y; options=agent.options, n_epochs=1, return_state=true, saved_state=agent.model.state)
-    agent.model = SymQ(fit_result.state, fit_result.hof)
+    if agent.model === nothing
+        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true)
+    else
+        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=agent.model.state)
+    end
+    agent.model = SymQ(state, hof)
 
     
     agent.step += 1
@@ -48,7 +53,7 @@ function train!(agent::SRAgent)
     end
 end
 
-function take_action(agent::SRAgent, observations::Observations)::Action
+function take_action(agent::SRAgent, observations::Observation)::Action
     if agent.model === nothing || agent.model.hof === nothing || length(agent.model.hof) == 0
         return rand(0:3)
     end

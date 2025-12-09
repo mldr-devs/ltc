@@ -4,6 +4,10 @@ module LTC
 using SymbolicRegression
 using PythonCall
 
+export ltc_imports, Env, step!, SARSD, Observations, Action, Actions
+export SRAgent, train!, take_action, default_options
+
+
 _pymods = nothing
 
 """
@@ -42,9 +46,10 @@ mutable struct Env
     end
 end
 
-
-const Observations = Array{Float32,3}
-const Action = Array{Int64,1}
+const Observation = AbstractMatrix{Float32}
+const Observations = AbstractArray{Float32,3}
+const Action = Int32
+const Actions = Array{Action,1}
 
 """
     SARSD
@@ -52,18 +57,16 @@ A struct representing a single step transition in the environment.
 """
 struct SARSD
     s::Observations
-    a::Action
+    a::Actions
     r::Array{Float32,1}
     s2::Observations
     done::Array{Bool,1}
 end
 
 """
-    step!(env::Env, a::Vector{UInt32})
-
 Advances the environment by one step.
 """
-function step!(env::Env, a::Vector{UInt32})::SARSD
+function step!(env::Env, a::Actions)::SARSD
     (_, jnp, _) = ltc_imports()
     c, o = env.pysim.step(env.state, jnp.asarray(a))
     s_prev = pyconvert(Array{Float32,3}, env.state.obs)
