@@ -47,12 +47,16 @@ function main()
 
     agents = [SRAgent(default_options(), 1000) for _ in 1:n_drl]
     
-    a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]  
-    sarsd = step!(env, a)
-    for agent in agents
-        train!(agent)
+    for step in 1:n_steps
+        a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]  
+        sarsd = step!(env, a)
+        for agent in agents
+            train!(agent)
+        end
+        println(sarsd)
+        break # TODO remove
     end
-    println(sarsd)
+    
 
 end
 

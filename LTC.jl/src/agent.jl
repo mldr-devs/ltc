@@ -1,5 +1,5 @@
-import SymbolicRegression: Options, equation_search, HallOfFame, SearchState
-using Random, DataStructures
+import SymbolicRegression: Options, equation_search, HallOfFame
+using Random, DataStructures, OneHotArrays
 
 
 """Noise function for SR"""
@@ -15,15 +15,15 @@ function default_options()
 end
 
 struct SymQ
-    state::Union{Nothing, AbstractVector}
-    hof::Union{Nothing, HallOfFame}
+    state::Union{Nothing,AbstractVector}
+    hof::Union{Nothing,HallOfFame}
 end
 
 
 
 mutable struct SRAgent
-    model::Union{Nothing, SymQ}
-    target_model::Union{Nothing, SymQ}
+    model::Union{Nothing,SymQ}
+    target_model::Union{Nothing,SymQ}
     options::Options
     replay_buffer::CircularBuffer{SARSD}
     step::Int64
@@ -41,11 +41,11 @@ function train!(agent::SRAgent)
     if agent.model === nothing
         state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true)
     else
-        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=agent.model.state)
+        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=(agent.model.state, agent.model.hof))
     end
     agent.model = SymQ(state, hof)
 
-    
+
     agent.step += 1
 
     if agent.step % 10 == 0
@@ -54,18 +54,20 @@ function train!(agent::SRAgent)
 end
 
 function take_action(agent::SRAgent, observations::Observation)::Action
-    if agent.model === nothing || agent.model.hof === nothing || length(agent.model.hof) == 0
+    if agent.model === nothing || agent.model.hof === nothing || length(agent.model.hof.members) == 0
         return rand(0:3)
     end
     num_actions = 3
 
     # 3 for testing Teke better one from pareto frontier
     best_eq = agent.model.hof.members[3].tree
-    # For simplicity, we assume the equation takes no inputs and outputs an action index
-    q = [best_eq(x, i) for i in 1:num_actions]
+    
+    X = randn(2, 100)
+
+    q = [best_eq(X) for _ in 1:num_actions]
 
     # TODO sample
     action = round(Int32, argmax(q) - 1)  # assuming actions are 0-indexed  
     return action
-    
+
 end
