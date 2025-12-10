@@ -41,23 +41,26 @@ function main()
     window_size = pyconvert(Int, args.window_size)
     seed = pyconvert(Int, args.seed)
     traffic_type = pyconvert(String, args.traffic_type)   
+    num_actions = pyconvert(Int, num_actions)
 
 
     env = Env(args, key)
 
-    agents = [SRAgent(default_options(), 1000) for _ in 1:n_drl]
+    agents = [SRAgent(default_options(), 1000, num_actions) for _ in 1:n_drl]
+    rewards = zeros(Float32, n, n_steps)
     
     for step in 1:n_steps
         a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]  
         transitions = step!(env, a)
         for i in eachindex(agents)
-            train!(agents[i], transitions[i])
+            train!(agents[i], transitions[i], batch_size=128)
         end
 
-        println(transitions)
-        if step > 10
+        # println(transitions)
+        if step > 1000
             break # TODO remove
         end
+        rewards[:, step] = [t.r for t in transitions]
     end
     
 
