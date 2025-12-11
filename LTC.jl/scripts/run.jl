@@ -72,7 +72,7 @@ function main()
         end
         reset!(env)
     end
-    pyresults.save()
+    pyresults.save('.')
 
 
 end

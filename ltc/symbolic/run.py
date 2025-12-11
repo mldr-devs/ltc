@@ -16,7 +16,7 @@ from ltc.utils.scan_states import Carry
 
 @jax.tree_util.register_dataclass
 @dataclasses.dataclass
-class SymbolicAgenState:
+class SymbolicAgentState:
     params: dict
     prev_env_state: jax.Array
     replace = dataclasses.replace
@@ -37,7 +37,7 @@ class SymbolicAgents:
         self.act_space_size = act_space_size
 
         def init(key: jax.Array) -> SymbolicAgentState:
-            # DUmmy params to simulate dqn params
+            # Dummy params to simulate dqn params
             return SymbolicAgentState(params=dict(x=jnp.zeros((2,))),
                                      prev_env_state=jnp.zeros(obs_space_shape))
 

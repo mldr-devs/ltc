@@ -171,8 +171,9 @@ class Results:
     def append(self, result):
         self.all_results.append(result)
 
-    def save(self, path: str):
+    def save(self, path: str='.'):
         all_results = jax.tree.map(lambda *x: jnp.stack(x), *self.all_results)
         filename = f'history_{self.n}_{self.n_drl}_{self.seed}.pkl.lz4'
-        with lz4.frame.open(filename, 'wb') as f:
+        full_path = os.path.join(path, filename)
+        with lz4.frame.open(full_path, 'wb') as f:
             cloudpickle.dump((None, all_results), f)

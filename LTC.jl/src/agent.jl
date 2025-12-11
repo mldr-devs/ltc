@@ -117,6 +117,7 @@ function make_target(agent::SRAgent, batch::AbstractVector{Transition})::Vector{
     n = length(batch)
     targets = Vector{Float32}(undef, n)
     if agent.target_equation === nothing
+        # Alternative option: use immediate rewards only
         # for i in 1:n
         #     targets[i] = batch[i].r
         # end
