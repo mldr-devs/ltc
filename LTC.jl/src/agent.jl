@@ -93,8 +93,8 @@ function take_action(agent::SRAgent, observations::Observation)::Action
 
     q = [best_eq(make_X(observations, Int32(a)))[1] for a in 0:agent.num_actions-1]
 
-    minmax = extrema(q)
-    q = (q .- minmax[1]) ./ (minmax[2] - minmax[1] + 1e-6)
+    mq = maximum(q)
+    q = q==mq ? 1f0 : 0f0  
 
     action = sample(1:agent.num_actions, Weights(q)) - 1
 
