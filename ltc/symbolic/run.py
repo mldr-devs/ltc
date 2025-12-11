@@ -36,17 +36,17 @@ class SymbolicAgents:
             obs_space_shape) > 0 else (obs_space_shape,)
         self.act_space_size = act_space_size
 
-        def init(key: jax.Array) -> SymbolicAgenState:
+        def init(key: jax.Array) -> SymbolicAgentState:
             # DUmmy params to simulate dqn params
-            return SymbolicAgenState(params=dict(x=jnp.zeros((2,))),
+            return SymbolicAgentState(params=dict(x=jnp.zeros((2,))),
                                      prev_env_state=jnp.zeros(obs_space_shape))
 
-        def update(state: SymbolicAgenState, key: jax.Array, env_state: Array,
+        def update(state: SymbolicAgentState, key: jax.Array, env_state: Array,
                    action: Array, reward: Scalar,
-                   terminal: bool, ) -> SymbolicAgenState:
+                   terminal: bool, ) -> SymbolicAgentState:
             return state
 
-        def sample(state: SymbolicAgenState, key: jax.Array, X) -> any:
+        def sample(state: SymbolicAgentState, key: jax.Array, X) -> any:
             # precaution to avoid DCE
             return jnp.zeros((), jnp.int32)
 
