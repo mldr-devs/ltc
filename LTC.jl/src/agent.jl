@@ -117,10 +117,10 @@ function make_target(agent::SRAgent, batch::AbstractVector{Transition})::Vector{
     n = length(batch)
     targets = Vector{Float32}(undef, n)
     if agent.target_equation === nothing
-        for i in 1:n
-            targets[i] = batch[i].r
-        end
-        return targets
+        # for i in 1:n
+        #     targets[i] = batch[i].r
+        # end
+        return r(targets)
     end
 
     best_eq = agent.target_equation

@@ -24,6 +24,9 @@ function main()
 
     key = jax.random.key(seed)
     num_actions = P._len(P.Actions)
+
+    pyresults = P.Results(n, n_drl, seed)
+
     actions = jnp.zeros(n, dtype=jnp.int32)
 
     buffer_states = jnp.zeros(n, dtype=jnp.int32)
@@ -55,16 +58,21 @@ function main()
         for step in 1:n_steps
             @info "Step" step = step
             a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]
-            transitions = step!(env, a)
+            transitions, output = step!(env, a)
+            pyresults.append(output)
+
             @threads for i in eachindex(agents)
                 train!(agents[i], transitions[i], batch_size=128)
+                @debug "Agent $(i) best equation: " eq = agents[i].equation
             end
 
             rewards[:, step] = [t.r for t in transitions]
-            @info "Average reward" avg_reward = sum(transitions .|> t -> t.r)
+            @debug "Average reward" avg_reward = sum(transitions .|> t -> t.r)
+
         end
         reset!(env)
     end
+    pyresults.save()
 
 
 end

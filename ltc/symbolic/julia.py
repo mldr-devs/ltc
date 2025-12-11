@@ -8,9 +8,11 @@ from ltc.sim.traffic import InitialStateConf, cox_traffic
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_FLAGS"] = "--xla_gpu_enable_triton_gemm=false"
 
-
+import cloudpickle
 import jax
 import jax.numpy as jnp
+
+import lz4.frame
 
 
 from ltc.sim.constants import INITIAL_CAPACITY, Actions  # noqa: F401
@@ -119,12 +121,12 @@ class Sim:
             )
 
             key, init_key = jax.random.split(key)
-            legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
+            _, legacy_step = init_agents(dcf, init_key, n - n_drl)
 
             key, init_key = jax.random.split(key)
-            traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+            _, traffic_step = init_traffic(traffic, init_key, n)
 
-            _, pre_rl_fn, post_rl_fn = rl_step(
+            _, _, post_rl_fn = rl_step(
                 drl_step, legacy_step, traffic_step, n, n_drl
             )
             c = dataclasses.replace(carry, key=key)
@@ -142,12 +144,12 @@ class Sim:
                 )
 
                 key, init_key = jax.random.split(key)
-                legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
+                _, legacy_step = init_agents(dcf, init_key, n - n_drl)
 
                 key, init_key = jax.random.split(key)
-                traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+                _, traffic_step = init_traffic(traffic, init_key, n)
 
-                _, pre_rl_fn, post_rl_fn = rl_step(
+                _, pre_rl_fn, _ = rl_step(
                     drl_step, legacy_step, traffic_step, n, n_drl
                 )
                 a = pre_rl_fn(c, None)
@@ -158,3 +160,19 @@ class Sim:
         self.init = jax.jit(init)
         self.step = jax.jit(step)
         self.shape_fn = shape_fn
+
+@dataclasses.dataclass
+class Results:
+    n: int
+    n_drl: int
+    seed: int
+    all_results: list = dataclasses.field(default_factory=list)
+
+    def append(self, result):
+        self.all_results.append(result)
+
+    def save(self, path: str):
+        all_results = jax.tree.map(lambda *x: jnp.stack(x), *self.all_results)
+        filename = f'history_{self.n}_{self.n_drl}_{self.seed}.pkl.lz4'
+        with lz4.frame.open(filename, 'wb') as f:
+            cloudpickle.dump((None, all_results), f)

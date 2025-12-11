@@ -75,7 +75,7 @@ end
 """
 Advances the environment by one step.
 """
-function step!(env::Env, a::Actions)::AbstractVector{Transition}
+function step!(env::Env, a::Actions)::Tuple{AbstractVector{Transition}, Py}
     (_, jnp, _) = ltc_imports()
     c, o = env.pysim.step(env.state, jnp.asarray(a))
     s = pyconvert(Observations, env.state.obs)
@@ -91,7 +91,7 @@ function step!(env::Env, a::Actions)::AbstractVector{Transition}
     ) for i in eachindex(a)]
     
     env.state = c
-    return ret
+    return ret,o
 
 end
 
