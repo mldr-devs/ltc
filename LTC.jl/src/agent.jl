@@ -10,7 +10,8 @@ function default_options()
         binary_operators=[+, *, /, -],
         unary_operators=[cos, exp, sin, r],
         populations=20,
-        save_to_file=false
+        save_to_file=false,
+        verbosity=0,
     )
 end
 
@@ -54,13 +55,12 @@ function train!(agent::SRAgent, transition::Transition; batch_size::Int=2)
 
     batch = rand(agent.replay_buffer, batch_size)
     X = hcat([make_X(sarsd.s, sarsd.a) for sarsd in batch]...)
-    # @info "Training on batch X size: $(size(X))"
     y = make_target(agent, batch)
 
     if agent.model === nothing
-        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true)
+        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, parallelism=:serial)
     else
-        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=(agent.model.state, agent.model.hof))
+        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=(agent.model.state, agent.model.hof), parallelism=:serial)
     end
     agent.model = SymQ(state, hof)
 
@@ -72,6 +72,7 @@ function train!(agent::SRAgent, transition::Transition; batch_size::Int=2)
         agent.target_model = deepcopy(agent.model)
     end
 end
+
 
 function make_X(obs::Observation, action::Action, n_actions=3)::AbstractMatrix{Float32}
     hot1_act = zeros(eltype(obs), n_actions)
@@ -94,9 +95,9 @@ function take_action(agent::SRAgent, observations::Observation)::Action
     q = [best_eq(make_X(observations, Int32(a)))[1] for a in 0:agent.num_actions-1]
 
     mq = maximum(q)
-    q = q==mq ? 1f0 : 0f0  
+    weights = [x == mq ? 1.0f0 : 0.0f0 for x in q]  
 
-    action = sample(1:agent.num_actions, Weights(q)) - 1
+    action = sample(1:agent.num_actions, Weights(weights)) - 1
 
     # Explore
     if rand() < agent.epsilon
@@ -125,7 +126,7 @@ function make_target(agent::SRAgent, batch::AbstractVector{Transition})::Vector{
         else
             max_q_next = -Inf32
             for a in 0:agent.num_actions-1
-                q_next = best_eq(make_X(sarsd.s2, Int32(a)))[1]
+                q_next = best_eq(make_X(sarsd.s2, Int32(a)))[1] # vector output
                 if q_next > max_q_next
                     max_q_next = q_next
                 end

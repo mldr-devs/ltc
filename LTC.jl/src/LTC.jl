@@ -32,6 +32,7 @@ A wrapper around the LTC environment.
 mutable struct Env
     state::Py
     pysim::Py
+    initial_state::Py
 
     function Env(args::Py, key::Union{Py,Nothing}=nothing)
         (jax, _, P) = ltc_imports()
@@ -41,9 +42,13 @@ mutable struct Env
         key, k1 = jax.random.split(key, 2)
         sim = P.Sim(args)
         c = sim.init(k1)
-        new(c, sim)
+        new(c, sim, c)
 
     end
+end
+
+function reset!(env::Env)
+    env.state = env.initial_state
 end
 
 const Observation = AbstractMatrix{Float32}

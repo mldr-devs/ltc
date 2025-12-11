@@ -7,7 +7,7 @@ using Revise
 
 using LTC
 using PythonCall
-
+using Base.Threads
 
 
 function main()
@@ -40,7 +40,7 @@ function main()
     n_steps = pyconvert(Int, args.n_steps)
     window_size = pyconvert(Int, args.window_size)
     seed = pyconvert(Int, args.seed)
-    traffic_type = pyconvert(String, args.traffic_type)   
+    traffic_type = pyconvert(String, args.traffic_type)
     num_actions = pyconvert(Int, num_actions)
 
 
@@ -48,21 +48,27 @@ function main()
 
     agents = [SRAgent(default_options(), 1000, num_actions) for _ in 1:n_drl]
     rewards = zeros(Float32, n, n_steps)
-    
-    for step in 1:n_steps
-        a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]  
-        transitions = step!(env, a)
-        for i in eachindex(agents)
-            train!(agents[i], transitions[i], batch_size=128)
-        end
 
-        # println(transitions)
-        if step > 1000
-            break # TODO remove
+    for ep in 1:n_epochs
+        @info "Starting new epoch"  epoch=ep 
+
+        for step in 1:n_steps
+            @info "Step" step=step
+            a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]
+            transitions = step!(env, a)
+            @threads for i in eachindex(agents)
+                train!(agents[i], transitions[i], batch_size=128)
+            end
+
+            # println(transitions)
+            if step > 1000
+                break # TODO remove
+            end
+            rewards[:, step] = [t.r for t in transitions]
         end
-        rewards[:, step] = [t.r for t in transitions]
+        reset!(env)
     end
-    
+
 
 end
 
