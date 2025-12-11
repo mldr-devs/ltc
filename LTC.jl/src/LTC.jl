@@ -73,7 +73,20 @@ end
 
 
 """
-Advances the environment by one step.
+    step!(env::Env, a::Actions) -> Tuple{AbstractVector{Transition}, Py}
+
+Advances the environment by one step using the provided actions.
+
+# Arguments
+- `env::Env`: The environment to advance. This object will be mutated; its internal state will be updated to reflect the result of the step.
+- `a::Actions`: A vector of actions to apply to the environment.
+
+# Returns
+- `transitions::AbstractVector{Transition}`: A vector of `Transition` objects, each representing the result of applying an action to the environment.
+- `o::Py`: A Python object containing additional information about the step (e.g., observations, rewards, terminals).
+
+# Side Effects
+- Mutates `env.state` to the new state after the step.
 """
 function step!(env::Env, a::Actions)::Tuple{AbstractVector{Transition}, Py}
     (_, jnp, _) = ltc_imports()
