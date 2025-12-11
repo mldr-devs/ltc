@@ -50,21 +50,18 @@ function main()
     rewards = zeros(Float32, n, n_steps)
 
     for ep in 1:n_epochs
-        @info "Starting new epoch"  epoch=ep 
+        @info "Starting new epoch" epoch = ep
 
         for step in 1:n_steps
-            @info "Step" step=step
+            @info "Step" step = step
             a = [take_action(ag, ob) for (ag, ob) in zip(agents, eachslice(obs, dims=1))]
             transitions = step!(env, a)
             @threads for i in eachindex(agents)
                 train!(agents[i], transitions[i], batch_size=128)
             end
 
-            # println(transitions)
-            if step > 1000
-                break # TODO remove
-            end
             rewards[:, step] = [t.r for t in transitions]
+            @info "Average reward" avg_reward = sum(transitions .|> t -> t.r)
         end
         reset!(env)
     end

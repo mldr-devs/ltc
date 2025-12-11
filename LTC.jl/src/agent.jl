@@ -1,6 +1,7 @@
 import SymbolicRegression: Options, equation_search, HallOfFame
 using Random, DataStructures, StatsBase
-
+using SymbolicRegression.MLJInterfaceModule: choose_best
+using SymbolicRegression.HallOfFameModule: format_hall_of_fame
 
 """Noise function for SR"""
 r(x) = randn(eltype(x), size(x)...)
@@ -20,15 +21,24 @@ struct SymQ
     hof::Union{Nothing,HallOfFame}
 end
 
-function predict(model::SymQ, X::AbstractMatrix{Float32})::Vector{Float32}
-    best_eq = model.hof.members[1].tree
+function best_equation(model::SymQ, options::Options)
+    trees, scores, losses, complexities = format_hall_of_fame(model.hof, options)
+    best_idx = choose_best(trees=trees, losses=losses, scores=scores, complexities=complexities, options=options)
+    return trees[best_idx]
+end
+
+function predict(model::SymQ, X::AbstractMatrix{Float32}, options::Options)::Vector{Float32}
+
+    best_eq = best_equation(model, options)
     return best_eq(X)
 end
 
 
 mutable struct SRAgent
     model::Union{Nothing,SymQ}
-    target_model::Union{Nothing,SymQ}
+    equation::Union{Nothing,Any}
+    target_equation::Union{Nothing,Any}
+
     options::Options
     replay_buffer::CircularBuffer{Transition}
     step::Int64
@@ -36,8 +46,8 @@ mutable struct SRAgent
     gamma::Float32
     num_actions::Int
 
-    function SRAgent(options::Options, replay_buffer_capacity::Int, num_actions::Int=3,epsilon::Float32=1.0f0, gamma::Float32=0.99f0)
-        new(nothing, nothing, options, CircularBuffer{Transition}(replay_buffer_capacity), 0, epsilon, gamma, num_actions)
+    function SRAgent(options::Options, replay_buffer_capacity::Int, num_actions::Int=3, epsilon::Float32=1.0f0, gamma::Float32=0.99f0)
+        new(nothing, nothing,nothing, options, CircularBuffer{Transition}(replay_buffer_capacity), 0, epsilon, gamma, num_actions)
     end
 end
 
@@ -63,13 +73,14 @@ function train!(agent::SRAgent, transition::Transition; batch_size::Int=2)
         state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=(agent.model.state, agent.model.hof), parallelism=:serial)
     end
     agent.model = SymQ(state, hof)
+    agent.equation = best_equation(agent.model, agent.options)
 
 
     common!(agent)
 
 
-    if agent.step % 10 == 0 || agent.target_model === nothing
-        agent.target_model = deepcopy(agent.model)
+    if agent.step % 10 == 0 || agent.target_equation === nothing
+        agent.target_equation = deepcopy(agent.equation)
     end
 end
 
@@ -87,15 +98,10 @@ function take_action(agent::SRAgent, observations::Observation)::Action
         return rand(0:agent.num_actions-1)
     end
 
-
-    # 3 for testing Teke better one from pareto frontier
-    best_eq = agent.model.hof.members[3].tree
-
-
-    q = [best_eq(make_X(observations, Int32(a)))[1] for a in 0:agent.num_actions-1]
+    q = [agent.equation(make_X(observations, Int32(a)))[1] for a in 0:agent.num_actions-1]
 
     mq = maximum(q)
-    weights = [x == mq ? 1.0f0 : 0.0f0 for x in q]  
+    weights = [x == mq ? 1.0f0 : 0.0f0 for x in q]
 
     action = sample(1:agent.num_actions, Weights(weights)) - 1
 
@@ -110,14 +116,14 @@ end
 function make_target(agent::SRAgent, batch::AbstractVector{Transition})::Vector{Float32}
     n = length(batch)
     targets = Vector{Float32}(undef, n)
-    if agent.target_model === nothing
+    if agent.target_equation === nothing
         for i in 1:n
             targets[i] = batch[i].r
         end
         return targets
     end
 
-    best_eq = agent.target_model.hof.members[1].tree
+    best_eq = agent.target_equation
 
     for i in 1:n
         sarsd = batch[i]
