@@ -60,7 +60,7 @@ if __name__ == '__main__':
     observations, qvals = target()
 
     fo = np.squeeze(observations)
-    COLUMNS = 'buffer,channel,ret_c,no_tx,batter'.split(',')
+    COLUMNS = 'buffer,channel,ret_c,no_tx,battery'.split(',')
     hdf = pd.DataFrame(fo, columns=COLUMNS)
 
     model = Regressor()
