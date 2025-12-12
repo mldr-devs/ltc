@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+DynamicExpressions = "a40a106e-89c9-4ca8-8020-a735e8728b6b"
 MLJ = "add582a8-e3ab-11e8-2d5e-e98b27df1bc7"
 Pluto = "c3e4b0f8-55cb-11ea-2926-15256bba5781"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
@@ -15,6 +16,7 @@ SymbolicRegression = "8254be44-1295-4e6a-a16d-46603ac705cb"
 
 [compat]
 DataStructures = "0.19.3"
+DynamicExpressions = "1.10.3"
 MLJ = "0.22.0"
 Pluto = "0.20.21"
 PythonCall = "0.9.30"

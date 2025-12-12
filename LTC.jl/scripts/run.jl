@@ -49,7 +49,7 @@ function main()
 
     env = Env(args, key)
 
-    agents = [SRAgent(default_options(), 1000, num_actions) for _ in 1:n_drl]
+    agents = [SRAgent(default_options(), 1000, num_actions=num_actions) for _ in 1:n_drl]
     rewards = zeros(Float32, n, n_steps)
 
     for ep in 1:n_epochs
@@ -64,6 +64,7 @@ function main()
             @threads for i in eachindex(agents)
                 train!(agents[i], transitions[i], batch_size=128)
                 @debug "Agent $(i) best equation: " eq = agents[i].equation
+                # @debug "Agent $(i) target equation: " t = typeof(agents[i].target_equation)
             end
 
             rewards[:, step] = [t.r for t in transitions]

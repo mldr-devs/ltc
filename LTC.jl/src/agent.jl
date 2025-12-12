@@ -2,15 +2,17 @@ import SymbolicRegression: Options, equation_search, HallOfFame
 using Random, DataStructures, StatsBase
 using SymbolicRegression.MLJInterfaceModule: choose_best
 using SymbolicRegression.HallOfFameModule: format_hall_of_fame
+using DynamicExpressions.ExpressionModule: Expression
 
 """Noise function for SR"""
 r(x) = randn(eltype(x), size(x)...)
 
 function default_options()
     Options(
-        binary_operators=[+, *, /, -],
+        binary_operators=[+, *, /, -, ^],
         unary_operators=[cos, exp, sin, r],
         populations=20,
+        constraints=[(^)=>(-1, 1), (r)=>1, (sin)=>3, (cos)=>3, (exp)=>3],
         save_to_file=false,
         verbosity=0,
     )
@@ -36,8 +38,8 @@ end
 
 mutable struct SRAgent
     model::Union{Nothing,SymQ}
-    equation::Union{Nothing,Any}
-    target_equation::Union{Nothing,Any}
+    equation::Union{Nothing,Expression}
+    target_equation::Union{Nothing,Expression}
 
     options::Options
     replay_buffer::CircularBuffer{Transition}
@@ -46,12 +48,12 @@ mutable struct SRAgent
     gamma::Float32
     num_actions::Int
 
-    function SRAgent(options::Options, replay_buffer_capacity::Int, num_actions::Int=3, epsilon::Float32=1.0f0, gamma::Float32=0.99f0)
+    function SRAgent(options::Options, replay_buffer_capacity::Int; num_actions::Int=3, epsilon::Float32=1.0f0, gamma::Float32=0.99f0)
         new(nothing, nothing,nothing, options, CircularBuffer{Transition}(replay_buffer_capacity), 0, epsilon, gamma, num_actions)
     end
 end
 
-function train!(agent::SRAgent, transition::Transition; batch_size::Int=2)
+function train!(agent::SRAgent, transition::Transition; batch_size::Int, niterations::Int=20)
     push!(agent.replay_buffer, transition)
 
     function common!(agent::SRAgent)
@@ -70,7 +72,7 @@ function train!(agent::SRAgent, transition::Transition; batch_size::Int=2)
     if agent.model === nothing
         state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, parallelism=:serial)
     else
-        state, hof = equation_search(X, y; options=agent.options, niterations=1, return_state=true, saved_state=(agent.model.state, agent.model.hof), parallelism=:serial)
+        state, hof = equation_search(X, y; options=agent.options, niterations=niterations, return_state=true, saved_state=(agent.model.state, agent.model.hof), parallelism=:serial)
     end
     agent.model = SymQ(state, hof)
     agent.equation = best_equation(agent.model, agent.options)
