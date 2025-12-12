@@ -12,7 +12,7 @@ function default_options()
         binary_operators=[+, *, /, -, ^],
         unary_operators=[cos, exp, sin, r],
         populations=20,
-        constraints=[(^)=>(-1, 1), (r)=>1, (sin)=>3, (cos)=>3, (exp)=>3],
+        constraints=[(^) => (-1, 1), (r) => 1, (sin) => 3, (cos) => 3, (exp) => 3],
         save_to_file=false,
         verbosity=0,
     )
@@ -35,6 +35,16 @@ function predict(model::SymQ, X::AbstractMatrix{Float32}, options::Options)::Vec
     return best_eq(X)
 end
 
+abstract type AbstractFirstTarget end
+
+struct ZeroFirstTarget <: AbstractFirstTarget end
+struct RandomFirstTarget <: AbstractFirstTarget end
+struct RewardsFirstTarget <: AbstractFirstTarget end
+
+make(_::ZeroFirstTarget, x::AbstractVector) = zeros(eltype(x), size(x)...)
+make(_::RandomFirstTarget, x::AbstractVector) = r(x)
+make(_::RewardsFirstTarget, x::AbstractVector) = x
+
 
 mutable struct SRAgent
     model::Union{Nothing,SymQ}
@@ -48,8 +58,10 @@ mutable struct SRAgent
     gamma::Float32
     num_actions::Int
 
+    first_target::AbstractFirstTarget
+
     function SRAgent(options::Options, replay_buffer_capacity::Int; num_actions::Int=3, epsilon::Float32=1.0f0, gamma::Float32=0.99f0)
-        new(nothing, nothing,nothing, options, CircularBuffer{Transition}(replay_buffer_capacity), 0, epsilon, gamma, num_actions)
+        new(nothing, nothing, nothing, options, CircularBuffer{Transition}(replay_buffer_capacity), 0, epsilon, gamma, num_actions, ZeroFirstTarget())
     end
 end
 
@@ -119,11 +131,11 @@ function make_target(agent::SRAgent, batch::AbstractVector{Transition})::Vector{
     n = length(batch)
     targets = Vector{Float32}(undef, n)
     if agent.target_equation === nothing
-        # Alternative option: use immediate rewards only
-        # for i in 1:n
-        #     targets[i] = batch[i].r
-        # end
-        return r(targets)
+
+        for i in 1:n
+            targets[i] = batch[i].r
+        end
+        return make(agent.first_target, targets)
     end
 
     best_eq = agent.target_equation
