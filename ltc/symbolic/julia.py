@@ -1,12 +1,14 @@
 import dataclasses
 import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_FLAGS"] = "--xla_gpu_enable_triton_gemm=false"
+
 from typing import Callable, NamedTuple
 
 from ltc.agents.dcf import DCF
 from ltc.sim.traffic import InitialStateConf, cox_traffic
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-os.environ["XLA_FLAGS"] = "--xla_gpu_enable_triton_gemm=false"
+
 
 import cloudpickle
 import jax
