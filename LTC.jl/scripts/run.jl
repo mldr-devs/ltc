@@ -62,7 +62,7 @@ function main()
             pyresults.append(output)
 
             @threads for i in eachindex(agents)
-                train!(agents[i], transitions[i], batch_size=128, niterations=4)
+                train!(agents[i], transitions[i], batch_size=128, niterations=2)
                 @debug "Agent $(i) best equation: " eq = agents[i].equation
                 # @debug "Agent $(i) target equation: " t = typeof(agents[i].target_equation)
             end
@@ -71,7 +71,7 @@ function main()
             @debug "Total reward" total_reward = sum(transitions .|> t -> t.r)
 
         end
-        reset!(env)
+        LTC.reset!(env)
     end
     pyresults.save('.')
 
