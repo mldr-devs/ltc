@@ -10,7 +10,7 @@ r(x) = randn(eltype(x), size(x)...)
 function default_options()
     Options(
         binary_operators=[+, *, /, -, ^],
-        unary_operators=[cos, exp, sin, r],
+        unary_operators=[exp, r],
         populations=20,
         constraints=[(^) => (-1, 1), (r) => 1, (sin) => 3, (cos) => 3, (exp) => 3],
         save_to_file=false,
