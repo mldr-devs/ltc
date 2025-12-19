@@ -68,7 +68,7 @@ function main()
             end
 
             rewards[:, step] = [t.r for t in transitions]
-            @debug "Total reward" avg_reward = sum(transitions .|> t -> t.r)
+            @debug "Total reward" total_reward = sum(transitions .|> t -> t.r)
 
         end
         reset!(env)
