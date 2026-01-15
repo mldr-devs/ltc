@@ -58,10 +58,17 @@ if __name__ == '__main__':
     # TODO: Change the path to your data file
     target = Target("history_5_5_42.pkl.lz4")
     observations, qvals = target()
+    b,t,f = observations.shape
 
-    fo = np.squeeze(observations)
+    fo = np.reshape(observations,(b,t*f))
     COLUMNS = 'buffer,channel,ret_c,no_tx,battery'.split(',')
-    hdf = pd.DataFrame(fo, columns=COLUMNS)
+    assert len(COLUMNS) == f
+    C = []
+    for i in range(t):
+        for col in COLUMNS:
+            C.append(f'{col}_{i}')
+
+    hdf = pd.DataFrame(fo, columns=C)
 
     model = Regressor()
 
