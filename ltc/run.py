@@ -182,7 +182,7 @@ if __name__ == '__main__':
     rl_step_fn = scan_tqdm(n_steps)(rl_step_fn)
     init_carry = Carry(
         drl_states, legacy_states, traffic_states, buffer_states, power_states,
-        channel_state, key, obs, actions, rewards, terminals
+        channel_state, key, obs, actions, rewards, terminals, active
     )
     all_outputs = []
 
