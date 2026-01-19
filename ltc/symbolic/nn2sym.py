@@ -82,8 +82,10 @@ if __name__ == '__main__':
     target = Target("history_5_5_42.pkl.lz4")
     observations, qvals = target()
 
-    observations.to_netcdf("observations.nc")
-    qvals.to_netcdf("qvalues.nc")
+    ds = xr.Dataset({'observations':observations,
+                     'qvalues':qvals})
+
+    ds.to_netcdf("qnet.nc", engine="netcdf4")
 
 
     # b,t,f = observations.shape
