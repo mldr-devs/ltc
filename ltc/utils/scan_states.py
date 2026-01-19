@@ -20,6 +20,7 @@ class Carry:
     actions: jax.Array
     rewards: jax.Array
     terminals: jax.Array
+    active: jax.Array
 
 
 @jax.tree_util.register_dataclass
@@ -34,5 +35,6 @@ class Output:
     power_states: jax.Array
     new_frames: jax.Array
     channel_state: int
+    active: jax.Array
     weights_histogram: jax.Array
     weights_bin_edges: jax.Array
