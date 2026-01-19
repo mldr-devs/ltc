@@ -1,11 +1,9 @@
 import os
-from typing import Callable
-
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 
 import argparse
-from dataclasses import replace, dataclass
+from dataclasses import replace
 from functools import partial
 
 import cloudpickle
@@ -30,7 +28,7 @@ def init_agents(agent, key, n):
     return states, step_fn
 
 
-def agent_step(agent, state, key, obs, action, reward, terminal):
+def agent_step(agent, state, key, obs, action, reward, terminal, active):
     update_key, sample_key = jax.random.split(key)
 
     def power_on(state, update_key, sample_key, obs, action, reward, terminal):
@@ -42,7 +40,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal):
         return state, Actions.IDLE.value
 
     return jax.lax.cond(
-        terminal, power_off, power_on,
+        jnp.logical_or(~active, terminal), power_off, power_on,
         state, update_key, sample_key, obs, action, reward, terminal
     )
 
@@ -54,16 +52,24 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
-    def rl_step_coroutine(c, _):
+def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50, n_switch=None, n_final=None):
+    def rl_step_coroutine(c, step):
+        if n_switch is not None:
+            active = jnp.where(step == n_switch, jnp.ones_like(c.active).at[n_final:].set(False), c.active)
+        else:
+            active = c.active
+        
         key, drl_keys, legacy_keys, traffic_key = jax.random.split(c.key, 4)
         drl_keys = jax.random.split(drl_keys, n_drl)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
-        drl_states, drl_actions = yield drl_step(c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl])
-
-        legacy_states, legacy_actions = legacy_step(c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:])
+        drl_states, drl_actions = yield drl_step(
+            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
+        )
+        legacy_states, legacy_actions = legacy_step(
+            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
+        )
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
@@ -82,11 +88,11 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
 
         c = Carry(
             drl_states, legacy_states, traffic_states, buffer_states, powers,
-            channel_state, key, obs, actions, rewards, terminals
+            channel_state, key, obs, actions, rewards, terminals, active
         )
         o = Output(
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state, hist, bin_edges
+            (new_frames > 0).astype(int), channel_state, hist, bin_edges, active
         )
         yield c, o
 
@@ -105,17 +111,19 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50):
         # Unused computations will be DCE-ed
         _ = next(gen)
         return gen.send(intermediate)
+
     return rl_step_fn, pre_rl_fn, post_rl_fn
+
 
 def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
-    parser.add_argument('--n', type=int, default=5, help='Total number of agents in the simulation.')
-    parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents.')
-    parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=5000, help='Number of steps per epoch.')
+    parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
+    parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
+    parser.add_argument('--n_epochs', type=int, default=20, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=2500, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
-    parser.add_argument('--save-plots', action='store_true', default=False, help='Whether to save the generated plots.')
+    parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
     args = parser.parse_args()
     return args
@@ -124,8 +132,9 @@ def setup_args():
 if __name__ == '__main__':
     args = setup_args()
 
-    n = args.n
-    n_drl = args.n_drl
+    n_init = args.n
+    n_final = args.n_final if args.n_final is not None else n_init
+    n = max(n_init, n_final)
     n_epochs = args.n_epochs
     n_steps = args.n_steps
     window_size = args.window_size
@@ -141,7 +150,7 @@ if __name__ == '__main__':
     obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
-
+    active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
@@ -158,12 +167,12 @@ if __name__ == '__main__':
         tau=0.01
     )
     key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n_drl)
+    drl_states, drl_step = init_agents(drl, init_key, n)
     drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
-    legacy_states, legacy_step = init_agents(dcf, init_key, n - n_drl)
+    legacy_states, legacy_step = init_agents(dcf, init_key, 0)
 
     key, init_key = jax.random.split(key)
 
@@ -178,28 +187,26 @@ if __name__ == '__main__':
 
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn,_,_ = rl_step(drl_step, legacy_step, traffic_step, n, n_drl)
+    rl_step_fn, _, _ = rl_step(drl_step, legacy_step, traffic_step, n, n)
     rl_step_fn = jax.jit(rl_step_fn)
-    init_carry = Carry(
+    carry = Carry(
         drl_states, legacy_states, traffic_states, buffer_states, power_states,
-        channel_state, key, obs, actions, rewards, terminals
+        channel_state, key, obs, actions, rewards, terminals, active
     )
     all_outputs = []
 
-    for _ in trange(n_epochs):
-        carry, output = jax.lax.scan(rl_step_fn, init_carry, length=n_steps)
-        init_carry = replace(
-            init_carry,
-            drl_states=carry.drl_states,
-            key=carry.key
-        )
+    for epoch in trange(n_epochs):
+        if epoch == int(n_epochs / 2):
+            carry = replace(carry, active=jnp.ones_like(carry.active).at[n_final:].set(False))
+        
+        carry, output = jax.lax.scan(rl_step_fn, carry, length=n_steps)
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    filename = f'history_{n}_{n_drl}_{seed}.pkl.lz4'
+    filename = f'history_{n_init}_{n_final}_{seed}.pkl.lz4'
 
     with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((init_carry.drl_states, all_outputs), f)
+        cloudpickle.dump((carry.drl_states, all_outputs), f)
 
     if args.save_plots:
         plot_all(filename)
