@@ -92,7 +92,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50, n_switch=N
         )
         o = Output(
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state, hist, bin_edges, active
+            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges
         )
         yield c, o
 
@@ -119,8 +119,8 @@ def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
-    parser.add_argument('--n_epochs', type=int, default=20, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2500, help='Number of steps per epoch.')
+    parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
