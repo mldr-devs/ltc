@@ -34,6 +34,7 @@ notebook = [
     "seaborn~=0.13.2",
 ]
 distillation = [
+    "netcdf4>=1.7.4",
     "pysr>=1.5.9",
     "seaborn~=0.13.2",
     "sympy>=1.14.0",
