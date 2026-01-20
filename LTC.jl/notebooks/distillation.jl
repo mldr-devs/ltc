@@ -133,27 +133,6 @@ md"### rand"
 """Noise function for SR"""
 r(x) = x+randn(eltype(x), size(x)...)
 
-# ╔═╡ 344272e9-d39e-48f6-9ef3-1c30487a2527
-# ╠═╡ disabled = true
-#=╠═╡
-function default_options()
-    Options(
-        binary_operators=[+, *, /, -,^],
-        unary_operators=[exp, r],
-        populations=20,
-        constraints=[(^) => (-1, 1), (r) => 1, (sin) => 3, (cos) => 3, (exp) => 3],
-        save_to_file=false,
-        verbosity=0,
-		loss_function=w2_loss,
-    )
-end
-  ╠═╡ =#
-
-# ╔═╡ b64bca3c-d4a8-4b86-82c6-f732f8b1ccbb
-#=╠═╡
-op = default_options()
-  ╠═╡ =#
-
 # ╔═╡ b88d054b-540e-403a-bc20-4bda174d38c9
 N_pop=100
 
@@ -208,7 +187,7 @@ raport = report(mach)
 # ╔═╡ 857aa414-85e6-4d90-bf60-d235fb5a1e3f
 for (act,raport) in enumerate(raports)
 	for (e,c,s) in zip(raport.equations, raport.complexities, raport.losses)
-		@info(act)
+		@info(act, Q.qvalues.action[act])
 		@info("", e,c,s)
 	end
 end
@@ -285,25 +264,8 @@ end
 # ╔═╡ 2615f4dc-ac37-499d-9f5b-a9c89fb886e0
 md"# Scratch"
 
-# ╔═╡ 4b4e1337-1779-40bf-900e-24fc7299c312
-glob_var=3
-
-# ╔═╡ f6b4fbb1-adca-42ba-b8bb-a51585e85d8f
-function f(x)
-	x>glob_var
-end
-
-# ╔═╡ 634df1e9-5293-4286-8254-326b4c46b4ba
-f(2), f(4)
-
-# ╔═╡ dad4c026-e772-4257-9e3b-94e3b26c0749
-# ╠═╡ disabled = true
-#=╠═╡
-glob_var=40
-  ╠═╡ =#
-
-# ╔═╡ 14c80e98-e843-4165-91aa-1bbfd0b4aaec
-f(2), f(4)
+# ╔═╡ f8113785-e338-4310-af4a-cab50001b5f9
+Q.qvalues.action
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -3350,8 +3312,6 @@ version = "1.13.0+0"
 # ╠═d83ef270-5463-460b-9549-b40f51c74730
 # ╠═d28b6bd8-acaa-4e28-a51b-afe0a0f7045c
 # ╠═09cf9630-d48c-46f2-9156-cd528cdd8a9d
-# ╠═344272e9-d39e-48f6-9ef3-1c30487a2527
-# ╠═b64bca3c-d4a8-4b86-82c6-f732f8b1ccbb
 # ╠═b88d054b-540e-403a-bc20-4bda174d38c9
 # ╠═e9532c58-cb7c-4df5-aebf-16ff5ff782c3
 # ╠═69fdd434-fec9-4a82-aaaa-a851b9d05f65
@@ -3360,14 +3320,10 @@ version = "1.13.0+0"
 # ╠═857aa414-85e6-4d90-bf60-d235fb5a1e3f
 # ╠═05e5c54c-3409-4612-80d3-49ad70a6d968
 # ╠═6e765cf6-5927-4d7a-82f1-cd3b4b87fc40
-# ╟─fa41d810-2cbc-4f7a-8f02-50daee101a38
+# ╠═fa41d810-2cbc-4f7a-8f02-50daee101a38
 # ╠═cee12030-c6b0-42e7-9b9e-b2468f60b34e
 # ╟─374afc96-f23f-415d-bbde-be1aac491fdc
 # ╠═2615f4dc-ac37-499d-9f5b-a9c89fb886e0
-# ╠═4b4e1337-1779-40bf-900e-24fc7299c312
-# ╠═f6b4fbb1-adca-42ba-b8bb-a51585e85d8f
-# ╠═634df1e9-5293-4286-8254-326b4c46b4ba
-# ╠═dad4c026-e772-4257-9e3b-94e3b26c0749
-# ╠═14c80e98-e843-4165-91aa-1bbfd0b4aaec
+# ╠═f8113785-e338-4310-af4a-cab50001b5f9
 # ╟─00000000-0000-0000-0000-000000000001
 # ╟─00000000-0000-0000-0000-000000000002
