@@ -95,35 +95,43 @@ md" # Fit
 "
 
 # ╔═╡ a33df422-a59b-4522-b74c-6cf85e0f562f
-begin
-	N = length(Q.qvalues.sample)
-	F=1
-end
+N = length(Q.qvalues.sample)
+
+
+# ╔═╡ b7ddae96-1a11-405a-af99-7fbcc41120f0
+md"### loss"
 
 # ╔═╡ d83ef270-5463-460b-9549-b40f51c74730
-function w2_loss(tree, dataset::Dataset{T,L}, options)::L where {T,L}
-	function ff(i)
-		prediction, flag = eval_tree_array(tree, dataset.X, options)
-		if !flag
-			return L(Inf)
-		end
-		return prediction
-	end
+function w2_loss(flat_q_y,action,tree, dataset::Dataset{T,L}, options)::L where {T,L}
+	# function ff(i)
+	# 	prediction, flag = eval_tree_array(tree, dataset.X, options)
+	# 	if !flag
+	# 		return L(Inf)
+	# 	end
+	# 	return prediction
+	# end
 	predictions = zeros(size(dataset.y)[1],N)
 	for i in 1:N
-		predictions[:,i] .= ff(i)
+		prediction, flag = eval_tree_array(tree, dataset.X, options)
+		predictions[:,i] .= prediction
+		if !flag
+			predictions[:,i] .= L(Inf)
+		end
 	end
-	# predictions = reduce(hcat, map(ff, 1:N))
+
 	sorted_predictions = sort(predictions, dims = 2)
-	sorted_targets = sort(flat_q[dataset.y,F,:], dims = 2)
+	sorted_targets = sort(flat_q_y[dataset.y,action,:], dims = 2)
 
 	# capture true Y in loss function
 	return mean((sorted_predictions .- sorted_targets) .^ 2) 
 end
 
+# ╔═╡ d28b6bd8-acaa-4e28-a51b-afe0a0f7045c
+md"### rand"
+
 # ╔═╡ 09cf9630-d48c-46f2-9156-cd528cdd8a9d
 """Noise function for SR"""
-r(x) = randn(eltype(x), size(x)...)
+r(x) = x+randn(eltype(x), size(x)...)
 
 # ╔═╡ 344272e9-d39e-48f6-9ef3-1c30487a2527
 # ╠═╡ disabled = true
@@ -146,33 +154,63 @@ end
 op = default_options()
   ╠═╡ =#
 
-# ╔═╡ 69fdd434-fec9-4a82-aaaa-a851b9d05f65
-model = SRRegressor(
-		niterations=30,
-		binary_operators=[+, *, /, -, ^],
-        unary_operators=[exp, r],
-        populations=40,
-        constraints=[(^) => (-1, 1), (r) => 1, (sin) => 3, (cos) => 3, (exp) => 3],
-        save_to_file=false,
-        # verbosity=1,
-		loss_function=w2_loss,
+# ╔═╡ b88d054b-540e-403a-bc20-4bda174d38c9
+N_pop=100
 
-)
+# ╔═╡ e9532c58-cb7c-4df5-aebf-16ff5ff782c3
+N_it=20
+
+# ╔═╡ 69fdd434-fec9-4a82-aaaa-a851b9d05f65
+raports=let
+	raports=[]
+	yi = collect(1:size(flat_q)[1])
+	for act in 1:3
+		model = SRRegressor(
+				niterations=N_it,
+				binary_operators=[+, *, /, -, ^],
+		        unary_operators=[exp, r],
+		        populations=N_pop,
+		        constraints=[(^) => (-1, 1), (r) => 1, (sin) => 3, (cos) => 3, (exp) => 3],
+		        save_to_file=false,
+
+				loss_function=(tree, dataset, options) -> w2_loss(
+				    flat_q, 
+				    act, 
+				    tree, 
+				    dataset, 
+				    options
+				),
+		
+		)
+		mach = machine(model, X, yi,scitype_check_level=0)
+		fit!(mach)
+		push!(raports, report(mach))
+	end
+	raports
+end
 
 # ╔═╡ dd79da6b-7dc7-453d-a203-ee6067fee6e4
 # ╠═╡ show_logs = false
+# ╠═╡ disabled = true
+#=╠═╡
 begin
 	yi = collect(1:size(flat_q)[1])
 	mach = machine(model, X, yi,scitype_check_level=0)
 	fit!(mach)
 end
+  ╠═╡ =#
 
 # ╔═╡ c88d6a99-871f-48ec-90cf-2b37b0e8a994
+#=╠═╡
 raport = report(mach)
+  ╠═╡ =#
 
 # ╔═╡ 857aa414-85e6-4d90-bf60-d235fb5a1e3f
-for (e,c,s) in zip(raport.equations, raport.complexities, raport.losses)
-	@info("", e,c,s)
+for (act,raport) in enumerate(raports)
+	for (e,c,s) in zip(raport.equations, raport.complexities, raport.losses)
+		@info(act)
+		@info("", e,c,s)
+	end
 end
 
 # ╔═╡ 05e5c54c-3409-4612-80d3-49ad70a6d968
@@ -247,6 +285,9 @@ end
 # ╔═╡ 2615f4dc-ac37-499d-9f5b-a9c89fb886e0
 md"# Scratch"
 
+# ╔═╡ 4b4e1337-1779-40bf-900e-24fc7299c312
+glob_var=3
+
 # ╔═╡ f6b4fbb1-adca-42ba-b8bb-a51585e85d8f
 function f(x)
 	x>glob_var
@@ -255,17 +296,14 @@ end
 # ╔═╡ 634df1e9-5293-4286-8254-326b4c46b4ba
 f(2), f(4)
 
-# ╔═╡ 14c80e98-e843-4165-91aa-1bbfd0b4aaec
-f(2), f(4)
-
-# ╔═╡ 4b4e1337-1779-40bf-900e-24fc7299c312
-glob_var=3
-
 # ╔═╡ dad4c026-e772-4257-9e3b-94e3b26c0749
 # ╠═╡ disabled = true
 #=╠═╡
 glob_var=40
   ╠═╡ =#
+
+# ╔═╡ 14c80e98-e843-4165-91aa-1bbfd0b4aaec
+f(2), f(4)
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -3308,10 +3346,14 @@ version = "1.13.0+0"
 # ╠═af20c5ad-f5af-4a72-873b-3fc53f979d1d
 # ╠═3e563f85-a02b-40cc-94d6-5e9c97ab1de8
 # ╠═a33df422-a59b-4522-b74c-6cf85e0f562f
+# ╠═b7ddae96-1a11-405a-af99-7fbcc41120f0
 # ╠═d83ef270-5463-460b-9549-b40f51c74730
+# ╠═d28b6bd8-acaa-4e28-a51b-afe0a0f7045c
 # ╠═09cf9630-d48c-46f2-9156-cd528cdd8a9d
 # ╠═344272e9-d39e-48f6-9ef3-1c30487a2527
 # ╠═b64bca3c-d4a8-4b86-82c6-f732f8b1ccbb
+# ╠═b88d054b-540e-403a-bc20-4bda174d38c9
+# ╠═e9532c58-cb7c-4df5-aebf-16ff5ff782c3
 # ╠═69fdd434-fec9-4a82-aaaa-a851b9d05f65
 # ╠═dd79da6b-7dc7-453d-a203-ee6067fee6e4
 # ╠═c88d6a99-871f-48ec-90cf-2b37b0e8a994
