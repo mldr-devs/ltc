@@ -1,17 +1,15 @@
-from pysr import PySRRegressor
-
 import cloudpickle
 import jax
 import jax.numpy as jnp
 import lz4.frame
 import numpy as np
-import pandas as pd
-
-from ltc.sim.constants import Actions
-from .regressor import Regressor
+import xarray as xr
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 
 from ltc.agents import QNetwork, StochasticVariationalNetwork
-import xarray as xr
+from ltc.sim.constants import Actions
+
 
 # from ltc.agents.svi import
 
@@ -34,24 +32,13 @@ class Target:
             # acts = jnp.argmax(q_vals, axis=-1).astype(int)
             return q_vals
         self.pred = pred
-        # many_pred = jax.vmap(pred, in_axes=(None, None, None, 0))
-        #
-        # _pred = jax.vmap(many_pred, in_axes=(None, None, 0, 0))
-        # self.pred = jax.jit(_pred)
+
 
     def __call__(self):
-        # n_epochs, n_steps, n_agents, window_size, n_features = history.observations.shape
-        # features: buffer_state (0 or 1), channel_state (0 - idle, 1 - busy, -1 - unknown), retransmission_counter (N+), num_of_slots_with_no_tx (N+), power_left (0 - INITIAL_CAPACITY)
-
-        # params: agent, params...
 
         params, state = self.ddqn_state.params, self.ddqn_state.net_state
-        # params_0, state_0 = jax.tree.map(lambda x: x[0], (params,
-        #                                                   state))  # take the parameters and state of the first agent
-        # observations_ = self.history.observations[
-        #     -1, :, 0]  # last epoch, all steps, first agent
 
-        observations = self.history.observations[-1,-500:,...] # 500 samples, 5 agents,1 window, 5 features
+        observations = self.history.observations[-1,:,...] #  samples, 5 agents,1 window, 5 features
         observations = xr.DataArray(observations,
                                     dims=['step','agent','window','feature'],
                                     coords={'feature':['buffer','channel','ret_c','no_tx','battery']})
@@ -79,7 +66,7 @@ class Target:
 
 if __name__ == '__main__':
     # TODO: Change the path to your data file
-    target = Target("history_5_5_42.pkl.lz4")
+    target = Target("history_5_5_42.pkl.lz4",num_samples=128)
     observations, qvals = target()
 
     ds = xr.Dataset({'observations':observations,
@@ -87,32 +74,50 @@ if __name__ == '__main__':
 
     ds.to_netcdf("qnet.nc", engine="netcdf4")
 
+    fig, axs = plt.subplots(5, 1, figsize=(10, 12))
+    colors = plt.cm.tab10(np.linspace(0, 1, observations.agent.size))
 
-    # b,t,f = observations.shape
-    #
-    # fo = np.reshape(observations,(b,t*f))
-    # COLUMNS = 'buffer,channel,ret_c,no_tx,battery'.split(',')
-    # assert len(COLUMNS) == f
-    # C = []
-    # for i in range(t):
-    #     for col in COLUMNS:
-    #         C.append(f'{col}_{i}')
-    #
-    # hdf = pd.DataFrame(fo, columns=C)
-    #
-    # model = Regressor()
-    #
-    # # model.fit(hdf, qvals)
-    #
-    # def _pyjax_fit(X,Y):
-    #     hdf = pd.DataFrame(X,columns=COLUMNS)
-    #     model.fit(hdf, Y)
-    #
-    #
-    # @jax.jit
-    # def jax_fit(X,Y):
-    #     print('jit')
-    #     return jax.experimental.io_callback(_pyjax_fit, None, X, Y)
-    #
-    # jax_fit(jnp.asarray(fo), jnp.asarray(qvals))
-    # print(model)
+    with PdfPages("histogram.pdf") as pdf:
+
+        for i, feature in enumerate(observations.feature.values):
+            for agent_idx, agent in enumerate(observations.agent.values):
+                data = observations.sel(feature=feature,
+                                        agent=agent).values.flatten()
+                axs[i].hist(data,
+                            bins=120,
+                            alpha=0.5,
+                            color=colors[agent_idx],
+                            label=f'Agent {agent}')
+            axs[i].set_title(f'Feature: {feature}')
+            axs[i].set_xlabel('Value')
+            axs[i].set_ylabel('Frequency')
+            if i == 0:
+                axs[i].legend(loc='upper right')
+
+        plt.tight_layout()
+        pdf.savefig(bbox_inches='tight')
+        plt.show()
+
+        for sharex in [True, False]:
+
+            fig, axs = plt.subplots(qvals.agent.size, 1,
+                                    figsize=(8.27, 11.69 * qvals.agent.size / 5), sharex=sharex)
+            colors = plt.cm.tab10(np.linspace(0, 1, qvals.action.size))
+
+            for agent_idx, agent in enumerate(qvals.agent.values):
+                ax = axs[agent_idx] if qvals.agent.size > 1 else axs
+                for action_idx, action in enumerate(qvals.action.values):
+                    data = qvals.sel(agent=agent, action=action).values.flatten()
+                    ax.hist(data,
+                            bins=20,
+                            alpha=0.5,
+                            color=colors[action_idx],
+                            label=f'Action: {action}')
+                ax.set_title(f'Agent {agent}')
+                ax.set_xlabel('Q-value')
+                ax.set_ylabel('Frequency')
+                ax.legend(loc='upper right')
+
+            plt.tight_layout()
+            pdf.savefig(bbox_inches='tight')
+            plt.show()
