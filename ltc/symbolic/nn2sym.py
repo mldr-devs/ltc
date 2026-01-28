@@ -13,6 +13,36 @@ from ltc.sim.constants import Actions
 
 # from ltc.agents.svi import
 
+def clean_observations(observations: xr.DataArray) -> xr.DataArray:
+    """
+    Clean observations by capping ret_c and no_tx values.
+
+    Args:
+        observations: xarray DataArray with feature dimension
+
+    Returns:
+        Cleaned xarray DataArray
+    """
+    cleaned = observations.copy()
+
+    # Cap ret_c values > 8 to 9
+    ret_c_mask = cleaned.sel(feature='ret_c') > 8
+    cleaned.loc[dict(feature='ret_c')] = xr.where(
+        ret_c_mask,
+        9,
+        cleaned.sel(feature='ret_c')
+    )
+
+    # Cap no_tx values > 45 to 45
+    no_tx_mask = cleaned.sel(feature='no_tx') > 45
+    cleaned.loc[dict(feature='no_tx')] = xr.where(
+        no_tx_mask,
+        45,
+        cleaned.sel(feature='no_tx')
+    )
+
+    return cleaned
+
 
 class Target:
 
@@ -38,10 +68,14 @@ class Target:
 
         params, state = self.ddqn_state.params, self.ddqn_state.net_state
 
-        observations = self.history.observations[-1,:,...] #  samples, 5 agents,1 window, 5 features
-        observations = xr.DataArray(observations,
+        observations = self.history.observations[-1,...] #  samples, 5 agents,1 window, 5 features
+        observations = xr.DataArray(np.asarray(observations),
                                     dims=['step','agent','window','feature'],
                                     coords={'feature':['buffer','channel','ret_c','no_tx','battery']})
+
+        for i in range(observations.shape[-1]):
+            print(i,np.unique(observations[...,i],return_counts=True) )
+
         s,a,w,f = observations.shape
         key = jax.random.key(42)
 
@@ -53,7 +87,7 @@ class Target:
 
 
         qvals=jax.jit(pred)(params, state, observations.data, keys)
-        qvals = xr.DataArray(qvals,dims=['step','agent','action','sample'],
+        qvals = xr.DataArray(np.asarray(qvals),dims=['step','agent','action','sample'],
                              coords={'action':[a.name for a in Actions]})
 
 
@@ -68,11 +102,13 @@ if __name__ == '__main__':
     # TODO: Change the path to your data file
     target = Target("history_5_5_42.pkl.lz4",num_samples=128)
     observations, qvals = target()
+    observations = clean_observations(observations)
 
     ds = xr.Dataset({'observations':observations,
                      'qvalues':qvals})
 
     ds.to_netcdf("qnet.nc", engine="netcdf4")
+
 
     fig, axs = plt.subplots(5, 1, figsize=(10, 12))
     colors = plt.cm.tab10(np.linspace(0, 1, observations.agent.size))
@@ -121,3 +157,27 @@ if __name__ == '__main__':
             plt.tight_layout()
             pdf.savefig(bbox_inches='tight')
             plt.show()
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+        colors = plt.cm.tab10(np.linspace(0, 1, qvals.action.size))
+
+        # Normalize Q-values across all agents and samples for each action
+        for action_idx, action in enumerate(qvals.action.values):
+            data = qvals.sel(action=action).values.flatten()
+            # Normalize
+            data_normalized = (data - data.mean()) / data.std()
+            ax.hist(data_normalized,
+                    bins=130,
+                    alpha=0.5,
+                    color=colors[action_idx],
+                    label=f'Action: {action}')
+
+        ax.set_title('Normalized Q-values (All Agents)')
+        ax.set_xlabel('Normalized Q-value')
+        ax.set_ylabel('Frequency')
+        ax.legend(loc='upper right')
+
+        plt.tight_layout()
+        pdf.savefig(bbox_inches='tight')
+        plt.show()
+
