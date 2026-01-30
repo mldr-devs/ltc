@@ -106,7 +106,10 @@ def setup_args():
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
-    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
+    parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
+    parser.add_argument('--scale', type=float, default=0.0, help='scale traffic generator parameter')
+    parser.add_argument('--f3dB', type=float, default=1.0, help='f3dB traffic generator parameter')
+    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', or 'bursty'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
     args = parser.parse_args()
     return args
@@ -124,6 +127,10 @@ if __name__ == '__main__':
     seed = args.seed
     traffic_type = args.traffic_type
     legacy_type = args.legacy_type
+
+    loc = args.loc
+    scale = args.scale
+    f3dB = args.f3dB
 
     key = jax.random.key(seed)
     actions = jnp.zeros(n, dtype=int)
@@ -176,6 +183,8 @@ if __name__ == '__main__':
         traffic = cox_traffic(f3dB=1.0, loc=5.0, scale=0.0, initial_state=InitialStateConf.ZERO)
     elif traffic_type == 'bursty':
         traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
+    elif traffic_type == 'custom':
+        traffic = cox_traffic(f3dB=f3dB, loc=loc, scale=scale, initial_state=InitialStateConf.ZERO)
     else:
         raise ValueError(f'Unknown traffic type: {traffic_type}')
 
