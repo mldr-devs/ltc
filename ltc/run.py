@@ -142,7 +142,7 @@ if __name__ == '__main__':
     traffic_type = args.traffic_type
 
     key = jax.random.key(seed)
-    num_actions = len(Actions)
+    num_actions = 2
     actions = jnp.zeros(n, dtype=int)
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
@@ -152,11 +152,16 @@ if __name__ == '__main__':
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
+    lr_schedule = optax.join_schedules(
+        schedules=[optax.constant_schedule(3e-5), optax.constant_schedule(0)],
+        boundaries=[100000]
+    )
+
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
         obs_space_shape=obs.shape[1:],
         act_space_size=num_actions,
-        optimizer=optax.adam(3e-5, b1=0.95, b2=0.95),
+        optimizer=optax.adam(lr_schedule, b1=0.95, b2=0.95),
         experience_replay_buffer_size=10000,
         experience_replay_batch_size=128,
         experience_replay_steps=5,
