@@ -38,7 +38,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal, buffer_state, a
         return state, Actions.IDLE.value
 
     return jax.lax.cond(
-        jnp.logical_or(jnp.logical_or(~active, terminal), ~buffer_state), power_off, power_on,
+        jnp.logical_or(jnp.logical_or(~active, terminal), buffer_state == 0), power_off, power_on,
         state, update_key, sample_key, obs, action, reward, terminal
     )
 
