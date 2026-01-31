@@ -26,7 +26,7 @@ def init_agents(agent, key, n):
     return states, step_fn
 
 
-def agent_step(agent, state, key, obs, action, reward, terminal, active):
+def agent_step(agent, state, key, obs, action, reward, terminal, buffer_state, active):
     update_key, sample_key = jax.random.split(key)
 
     def power_on(state, update_key, sample_key, obs, action, reward, terminal):
@@ -38,7 +38,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal, active):
         return state, Actions.IDLE.value
 
     return jax.lax.cond(
-        jnp.logical_or(~active, terminal), power_off, power_on,
+        jnp.logical_or(jnp.logical_or(~active, terminal), ~buffer_state), power_off, power_on,
         state, update_key, sample_key, obs, action, reward, terminal
     )
 
@@ -63,10 +63,12 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50, n_switch=N
         traffic_keys = jax.random.split(traffic_key, n)
 
         drl_states, drl_actions = drl_step(
-            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
+            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], 
+            c.terminals[:n_drl], c.buffer_states[:n_drl], active[:n_drl]
         )
         legacy_states, legacy_actions = legacy_step(
-            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
+            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], 
+            c.terminals[n_drl:], c.buffer_states[n_drl:], active[n_drl:]
         )
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
