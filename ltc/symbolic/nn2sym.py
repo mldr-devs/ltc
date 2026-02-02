@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.stats as stats
 import xarray as xr
+import itertools as it
+import functools as ft
 from matplotlib.backends.backend_pdf import PdfPages
 
 from ltc.agents import QNetwork, StochasticVariationalNetwork
@@ -57,15 +59,21 @@ class Target:
         self.model = StochasticVariationalNetwork(
             QNetwork(num_actions=3, num_layers=4, dim=64, num_heads=4))
 
-        def pred(params, state, obs, key):
+        def pred(params, state, obs, root_key):
+            #obs [b,t,f]
+            key = map(ft.partial(jax.random.fold_in, root_key), it.count())
+            rngs = {'params': next(key), 'dropout': next(key),
+                    'rlib': next(key)}
+
             q_vals, _ = self.model.apply({'params': params, **state}, obs,
-                                         rngs=key, mutable=['loss'])
+                                         rngs=rngs, mutable=['loss'])
             # acts = jnp.argmax(q_vals, axis=-1).astype(int)
             return q_vals
 
         self.pred = pred
 
     def __call__(self):
+        #agent, layer...
         params, state = self.ddqn_state.params, self.ddqn_state.net_state
 
         observations = self.history.observations[
@@ -80,20 +88,23 @@ class Target:
 
         s, a, w, f = observations.shape
         key = jax.random.key(42)
+        obs = jnp.transpose(observations.data,(1,0,2,3)) # aswf
+
 
         keys = jax.random.split(key, num=a * self.num_samples)
         keys = jnp.reshape(keys, (self.num_samples, a))
-
-        pred = jax.vmap(self.pred, in_axes=(0, 0, 1, 0), out_axes=1)
+        pred = jax.vmap(self.pred)
         pred = jax.vmap(pred, in_axes=(None, None, None, 0), out_axes=-1)
 
-        qvals = jax.jit(pred)(params, state, observations.data, keys)
+        #pred = jax.vmap(self.pred, in_axes=(0, 0, 1, 0), out_axes=1)
+        #pred = jax.vmap(pred, in_axes=(None, None, None, 0), out_axes=-1)
+
+        qvals = jax.jit(pred)(params, state, obs, keys)
         qvals = xr.DataArray(np.asarray(qvals),
-                             dims=['step', 'agent', 'action', 'sample'],
+                             dims=['agent','step',  'action', 'sample'],
                              coords={'action': [a.name for a in Actions]})
 
-        # pred_fn = jax.vmap(self.pred, in_axes=(None, None, 0, 0))
-        # qvals = self.pred(params_0, state_0, observations, keys)
+
         return observations, qvals  # q_vals, _ = self.model.apply(  #     {"params": params_0, **state_0},  #     observations,  #     rngs=jax.random.key(42),  #     mutable=["loss"],  # )  # return observations, q_vals
 
 
