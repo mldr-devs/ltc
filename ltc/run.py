@@ -155,7 +155,7 @@ if __name__ == '__main__':
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=int).at[:, -1].set(INITIAL_CAPACITY)
+    obs = jnp.zeros((n, window_size, 5), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
@@ -225,4 +225,3 @@ if __name__ == '__main__':
 
     if args.save_plots:
         plot_all(filename)
-        plot_first(filename)

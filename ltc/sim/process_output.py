@@ -7,7 +7,7 @@ from ltc.sim.constants import *
 def no_transmission(args):
     action, buffer_state, _, _, no_tx = args
     return jax.lax.cond(
-        action == Actions.IDLE.value,
+        action != Actions.TX.value,
         lambda: jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args),
         lambda: jax.lax.cond(no_tx < SAFE_IDLE_PERIOD, no_transmission_short, no_transmission_long, args),
     )
@@ -106,7 +106,7 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
         )
     )
 
-    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, power])
+    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, action])
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 
