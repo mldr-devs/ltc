@@ -1,3 +1,5 @@
+import math
+
 import cloudpickle
 import jax
 import jax.numpy as jnp
@@ -46,7 +48,13 @@ randomization = {'ret_c': stats.geom(p=0.3, loc=-1),
                  'battery': stats.uniform(0, 10000.),
                  'channel': stats.randint(-1, 2),
                  'buffer': stats.randint(1, 2)}
-
+F_ORDER = ['buffer', 'channel', 'ret_c', 'no_tx', 'battery']
+def make_xr(observations) -> xr.DataArray:
+    observations = xr.DataArray(np.asarray(observations),
+                                dims=['step', 'agent', 'window',
+                                      'feature'], coords={
+            'feature':F_ORDER })
+    return observations
 
 class Target:
 
@@ -78,15 +86,22 @@ class Target:
 
         observations = self.history.observations[
             -1, -1000:, ...]  # last epoch, last 1000 samples, 5 agents,1 window, 5 features
-        observations = xr.DataArray(np.asarray(observations),
-                                    dims=['step', 'agent', 'window',
-                                          'feature'], coords={
-                'feature': ['buffer', 'channel', 'ret_c', 'no_tx', 'battery']})
+        # observations = xr.DataArray(np.asarray(observations),
+        #                             dims=['step', 'agent', 'window',
+        #                                   'feature'], coords={
+        #         'feature': ['buffer', 'channel', 'ret_c', 'no_tx', 'battery']})
 
         for i in range(observations.shape[-1]):
             print(i, np.unique(observations[..., i], return_counts=True))
 
         s, a, w, f = observations.shape
+
+        nel = math.prod(observations.shape[:-1])
+        samples = [ randomization[name].rvs(nel).astype(observations.dtype) for name in F_ORDER]
+        samples = np.stack(samples, axis=1)
+        samples = np.reshape(samples, observations.shape)
+        observations = make_xr(samples)
+
         key = jax.random.key(42)
         obs = jnp.transpose(observations.data,(1,0,2,3)) # aswf
 
