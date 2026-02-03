@@ -5,12 +5,8 @@ from ltc.sim.constants import *
 
 
 def no_transmission(args):
-    action, buffer_state, _, _, no_tx = args
-    return jax.lax.cond(
-        action != Actions.TX.value,
-        lambda: jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args),
-        lambda: jax.lax.cond(no_tx < SAFE_IDLE_PERIOD, no_transmission_short, no_transmission_long, args),
-    )
+    _, buffer_state, _, _, _ = args
+    return jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args)
 
 
 def idle_empty_buffer(_):
@@ -21,16 +17,14 @@ def idle_empty_buffer(_):
 
 
 def idle_full_buffer(args):
-    _, _, ret_c, _, no_tx = args
-    reward = NO_TX_REWARD
-    no_tx = no_tx + 1
-    return reward, ret_c, no_tx
+    _, _, _, _, no_tx = args
+    return jax.lax.cond(no_tx < SAFE_IDLE_PERIOD, no_transmission_short, no_transmission_long, args)
 
 
 def no_transmission_short(args):
     _, buffer_state, ret_c, _, no_tx = args
     reward = NO_TX_REWARD
-    no_tx = jnp.where(buffer_state == 0, 0, no_tx + 1)
+    no_tx = no_tx + 1
     return reward, ret_c, no_tx
 
 
