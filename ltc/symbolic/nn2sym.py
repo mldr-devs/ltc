@@ -65,7 +65,7 @@ class Target:
         self.num_samples = num_samples
 
         self.model = StochasticVariationalNetwork(
-            QNetwork(num_actions=3, num_layers=4, dim=64, num_heads=4))
+            QNetwork(num_actions=2, num_layers=1, dim=64, num_heads=4))
 
         def pred(params, state, obs, root_key):
             #obs [b,t,f]
@@ -117,7 +117,7 @@ class Target:
         qvals = jax.jit(pred)(params, state, obs, keys)
         qvals = xr.DataArray(np.asarray(qvals),
                              dims=['agent','step',  'action', 'sample'],
-                             coords={'action': [a.name for a in Actions]})
+                             coords={'action': [a.name for a in Actions][0:2]})
 
 
         return observations, qvals  # q_vals, _ = self.model.apply(  #     {"params": params_0, **state_0},  #     observations,  #     rngs=jax.random.key(42),  #     mutable=["loss"],  # )  # return observations, q_vals
