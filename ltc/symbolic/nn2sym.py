@@ -1,3 +1,4 @@
+import argparse
 import math
 
 import cloudpickle
@@ -58,11 +59,13 @@ def make_xr(observations) -> xr.DataArray:
 
 class Target:
 
-    def __init__(self, file_path: str, num_samples: int = 16):
+    def __init__(self, file_path: str, num_samples: int = 16, randomize=True,shuffle_agents=True):
         with lz4.frame.open(file_path, "rb") as f:
             self.ddqn_state, self.history = cloudpickle.load(f)
 
         self.num_samples = num_samples
+        self.randomize = randomize
+        self.shuffle_agents = shuffle_agents
 
         self.model = StochasticVariationalNetwork(
             QNetwork(num_actions=2, num_layers=1, dim=64, num_heads=4))
@@ -83,24 +86,27 @@ class Target:
     def __call__(self):
         #agent, layer...
         params, state = self.ddqn_state.params, self.ddqn_state.net_state
+        a = jax.tree.leaves(params)[0].shape[0]
+        if self.shuffle_agents:
+            perm = jnp.asarray(np.random.permutation(range(a)))
+            perm_fun = lambda x: x[perm]  # noqa: E731
+            params = jax.tree.map(perm_fun, params)
+            state = jax.tree.map(perm_fun, state)
 
         observations = self.history.observations[
             -1, -1000:, ...]  # last epoch, last 1000 samples, 5 agents,1 window, 5 features
-        # observations = xr.DataArray(np.asarray(observations),
-        #                             dims=['step', 'agent', 'window',
-        #                                   'feature'], coords={
-        #         'feature': ['buffer', 'channel', 'ret_c', 'no_tx', 'battery']})
 
-        for i in range(observations.shape[-1]):
-            print(i, np.unique(observations[..., i], return_counts=True))
 
         s, a, w, f = observations.shape
+        if self.randomize:
 
-        nel = math.prod(observations.shape[:-1])
-        samples = [ randomization[name].rvs(nel).astype(observations.dtype) for name in F_ORDER]
-        samples = np.stack(samples, axis=1)
-        samples = np.reshape(samples, observations.shape)
-        observations = make_xr(samples)
+            nel = math.prod(observations.shape[:-1])
+            samples = [ randomization[name].rvs(nel).astype(observations.dtype) for name in F_ORDER]
+            samples = np.stack(samples, axis=1)
+            samples = np.reshape(samples, observations.shape)
+            observations = make_xr(samples)
+        else:
+            observations = make_xr(observations)
 
         key = jax.random.key(42)
         obs = jnp.transpose(observations.data,(1,0,2,3)) # aswf
@@ -111,8 +117,6 @@ class Target:
         pred = jax.vmap(self.pred)
         pred = jax.vmap(pred, in_axes=(None, None, None, 0), out_axes=-1)
 
-        #pred = jax.vmap(self.pred, in_axes=(0, 0, 1, 0), out_axes=1)
-        #pred = jax.vmap(pred, in_axes=(None, None, None, 0), out_axes=-1)
 
         qvals = jax.jit(pred)(params, state, obs, keys)
         qvals = xr.DataArray(np.asarray(qvals),
@@ -120,23 +124,36 @@ class Target:
                              coords={'action': [a.name for a in Actions][0:2]})
 
 
-        return observations, qvals  # q_vals, _ = self.model.apply(  #     {"params": params_0, **state_0},  #     observations,  #     rngs=jax.random.key(42),  #     mutable=["loss"],  # )  # return observations, q_vals
-
+        return observations, qvals  
 
 if __name__ == '__main__':
-    # TODO: Change the path to your data file
-    target = Target("history_5_5_42.pkl.lz4", num_samples=128)
+    parser = argparse.ArgumentParser(description='Generate Q-network observations and Q-values from history file')
+    parser.add_argument('--target-file', '-f', type=str, default="history_5_5_42.pkl.lz4",
+                        help='Path to the history file (default: history_5_5_42.pkl.lz4)')
+    parser.add_argument('--num-samples', '-n', type=int, default=8,
+                        help='Number of samples (default: 8)')
+    parser.add_argument('--randomize', '-r', action='store_true', default=False,
+                        help='Randomize observations (default: False)')
+    parser.add_argument('--shuffle-agents', '-s', action='store_true', default=False,
+                        help='Shuffle agents (default: False)')
+    args = parser.parse_args()
+
+    target_file = args.target_file
+    N = args.num_samples
+    target = Target(target_file, num_samples=N, randomize=args.randomize, shuffle_agents=args.shuffle_agents)
+    out_name = f"{target_file}s{target.shuffle_agents}r{target.randomize}N{N}"
+
     observations, qvals = target()
     observations = clean_observations(observations)
 
     ds = xr.Dataset({'observations': observations, 'qvalues': qvals})
 
-    ds.to_netcdf("qnet.nc", engine="netcdf4")
+    ds.to_netcdf(f"qnet_{out_name}.nc", engine="netcdf4")
 
     fig, axs = plt.subplots(5, 1, figsize=(10, 12))
     colors = plt.cm.tab10(np.linspace(0, 1, observations.agent.size))
 
-    with PdfPages("histogram.pdf") as pdf:
+    with PdfPages(f"{out_name}.pdf") as pdf:
 
         for i, feature in enumerate(observations.feature.values):
             for agent_idx, agent in enumerate(observations.agent.values):
