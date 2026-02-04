@@ -27,7 +27,7 @@ def _debug(actions):
 
 def main():
     ds = xr.load_dataset(
-        '../explain/qnet_history_5_5_42.pkl.lz4sFalserFalseN8.nc')
+        '../explain/qnet_history_5_5_42.pkl.lz4sFalserTrueN8.nc')
     obs = ds['observations']
     qvals = ds['qvalues']
     actions = qvals.argmax('action')
