@@ -40,8 +40,6 @@ def main():
     plt.savefig('mean_action_along_step.pdf')
     plt.show()
 
-
-
     y = actions.sel(agent=3, sample=1)
     X = obs.sel(agent=3)
     X = X.stack(X=('window', 'feature'))
@@ -58,6 +56,30 @@ def main():
     plt.title(f'Feature importance, OOB score: {forest.oob_score_}')
     plt.tight_layout()
     plt.savefig("forest_importance_cherrypick.png")
+    plt.show()
+
+    y_all = actions.stack(flat=('agent', 'step', 'sample'))
+    X_all = obs.expand_dims(sample=actions.sample).stack(
+        flat=('agent', 'step', 'sample')).transpose('flat', 'window',
+                                                    'feature').stack(
+        y=('window', 'feature'))
+
+    flat_coords = X_all.flat
+    agent_ids = xr.DataArray([c[0] for c in flat_coords.values], dims='flat')
+    sample_ids = xr.DataArray([c[2] for c in flat_coords.values], dims='flat')
+
+    X_all_df = X_all.to_pandas()
+    X_all_df['agent_id'] = agent_ids.values
+    X_all_df['sample_id'] = sample_ids.values
+
+    forest = RandomForestClassifier(n_estimators=500, oob_score=True)
+    forest.fit(X_all_df, y_all)
+    print(forest.oob_score_)
+    importances = pd.DataFrame(forest.feature_importances_, index=X_all_df.columns)
+    importances.plot(kind='bar')
+    plt.title(f'Feature importance, OOB score: {forest.oob_score_}')
+    plt.tight_layout()
+    plt.savefig("forest_importance_agent_seed.png")
     plt.show()
     ...
 
