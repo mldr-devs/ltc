@@ -5,7 +5,7 @@ from ltc.sim.constants import *
 
 
 def no_transmission(args):
-    _, buffer_state, _, _, _ = args
+    _, buffer_state, _, _, _, _ = args
     return jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args)
 
 
@@ -17,32 +17,36 @@ def idle_empty_buffer(_):
 
 
 def idle_full_buffer(args):
-    _, _, _, _, no_tx = args
-    return jax.lax.cond(no_tx < SAFE_IDLE_PERIOD, no_transmission_short, no_transmission_long, args)
+    _, _, _, _, no_tx, key = args
+    rnd_factor = jax.random.normal(key) * SAFE_IDLE_PERIOD_STD
+    rnd_factor = jnp.round(rnd_factor).astype(int)
+    safe_period = SAFE_IDLE_PERIOD + rnd_factor
+    args += (safe_period,)
+    return jax.lax.cond(no_tx < safe_period, no_transmission_short, no_transmission_long, args)
 
 
 def no_transmission_short(args):
-    _, buffer_state, ret_c, _, no_tx = args
+    _, _, ret_c, _, no_tx, _, _ = args
     reward = NO_TX_REWARD
     no_tx = no_tx + 1
     return reward, ret_c, no_tx
 
 
 def no_transmission_long(args):
-    _, _, ret_c, _, no_tx = args
-    scale = jax.lax.min(1., (no_tx - SAFE_IDLE_PERIOD + 1) / PENALIZED_IDLE_PERIOD)
+    _, _, ret_c, _, no_tx, _, safe_period = args
+    scale = jax.lax.min(1., (no_tx - safe_period + 1) / PENALIZED_IDLE_PERIOD)
     reward = scale * NO_TX_PENALTY
     no_tx = no_tx + 1
     return reward, ret_c, no_tx
 
 
 def transmission(args):
-    _, _, _, channel_state, _ = args
+    _, _, _, channel_state, _, _ = args
     return jax.lax.cond(channel_state == 1, transmission_without_collision, transmission_with_collision, args)
 
 
 def transmission_with_collision(args):
-    _, _, ret_c, _, _ = args
+    _, _, ret_c, _, _, _ = args
     return jax.lax.cond(ret_c < MAX_RETRANSMISSION, retransmission, max_retransmission_collision, args)
 
 
@@ -54,7 +58,7 @@ def max_retransmission_collision(_):
 
 
 def retransmission(args):
-    _, _, ret_c, _, _ = args
+    _, _, ret_c, _, _, _ = args
     reward = COLLISION_PENALTY
     ret_c = ret_c + 1
     no_tx = 0
@@ -62,7 +66,7 @@ def retransmission(args):
 
 
 def transmission_without_collision(args):
-    _, buffer_state, _, _, _ = args
+    _, buffer_state, _, _, _, _ = args
     return jax.lax.cond(buffer_state > 0, successful_transmission, empty_buffer_transmission, args)
 
 
@@ -74,16 +78,16 @@ def empty_buffer_transmission(_):
 
 
 def successful_transmission(args):
-    _, _, ret_c, _, _ = args
+    _, _, ret_c, _, _, _ = args
     reward = TX_REWARD / (ret_c + 1)
     ret_c = 0
     no_tx = 0
     return reward, ret_c, no_tx
 
 
-def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal):
+def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal, key):
     _, _, ret_c, no_tx, _ = obs[-1]
-    args = (action, buffer_state, ret_c, channel_state, no_tx)
+    args = (action, buffer_state, ret_c, channel_state, no_tx, key)
 
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
     reward = jnp.where(terminal, 0., reward)
@@ -107,6 +111,7 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
     return obs, reward, power
 
 
-def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals):
-    channel_states = jnp.full(buffer_states.shape[0], channel_state)
-    return jax.vmap(process_output_i)(buffer_states, new_buffer_states, power_states, channel_states, obs, actions, terminals)
+def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key):
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, None, 0, 0, 0, None))(
+        buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key
+    )
