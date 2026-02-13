@@ -33,6 +33,6 @@ class BayesianDDQN(DDQN):
         assert len(kl.shape) == 0
 
         target = jax.lax.stop_gradient(target)
-        loss = optax.l2_loss(q_values, target).mean() + kl / state.replay_buffer.rewards.shape[0]
+        loss = optax.l2_loss(q_values, target).mean() + 0.1 * kl / state.replay_buffer.rewards.shape[0]
 
         return loss, net_state
