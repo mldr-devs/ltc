@@ -79,7 +79,7 @@ def empty_buffer_transmission(_):
 
 def successful_transmission(args):
     _, _, ret_c, _, _, _ = args
-    reward = TX_REWARD / (ret_c + 1)
+    reward = TX_REWARD
     ret_c = 0
     no_tx = 0
     return reward, ret_c, no_tx
