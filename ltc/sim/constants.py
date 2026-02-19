@@ -14,8 +14,9 @@ class Actions(Enum):
 Simulation parameters
 """
 MAX_RETRANSMISSION = 8
-SAFE_IDLE_PERIOD = 32
-PENALIZED_IDLE_PERIOD = 32
+SAFE_IDLE_PERIOD = 25
+SAFE_IDLE_PERIOD_STD = 3
+PENALIZED_IDLE_PERIOD = 25
 
 """
 Rewards and penalties

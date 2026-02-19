@@ -59,7 +59,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50, n_switch=N
         else:
             active = c.active
         
-        key, drl_keys, legacy_keys, traffic_key = jax.random.split(c.key, 4)
+        key, drl_keys, legacy_keys, traffic_key, reward_key = jax.random.split(c.key, 5)
         drl_keys = jax.random.split(drl_keys, n_drl)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
@@ -74,7 +74,9 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50, n_switch=N
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
-        obs, rewards, powers = process_output(c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals)
+        obs, rewards, powers = process_output(
+            c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals, reward_key
+        )
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
         if n_drl > 0:
@@ -160,24 +162,25 @@ if __name__ == '__main__':
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
-    lr_schedule = optax.join_schedules(
-        schedules=[optax.constant_schedule(3e-5), optax.constant_schedule(0)],
-        boundaries=[100000]
+    lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=60000, alpha=0.01)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0),
+        optax.adam(lr_schedule, b1=0.95, b2=0.95)
     )
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
         obs_space_shape=obs.shape[1:],
         act_space_size=num_actions,
-        optimizer=optax.adam(lr_schedule, b1=0.95, b2=0.95),
-        experience_replay_buffer_size=10000,
+        optimizer=optimizer,
+        experience_replay_buffer_size=30000,
         experience_replay_batch_size=128,
         experience_replay_steps=5,
-        discount=1.0,
+        discount=0.95,
         epsilon=1.0,
         epsilon_decay=0.999,
-        epsilon_min=0.001,
-        tau=0.01
+        epsilon_min=0.0,
+        tau=0.05
     )
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(drl, init_key, n)
