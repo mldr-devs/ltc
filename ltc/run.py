@@ -3,7 +3,6 @@ os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 
 import argparse
-from dataclasses import replace
 from functools import partial
 
 import cloudpickle
@@ -52,13 +51,68 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50, n_switch=None, n_final=None):
+def schedule_active_stations(
+    active,
+    step,
+    *,
+    one_shot_step=None,
+    one_shot_target=None,
+    station_change_interval=None,
+    station_change_delta=0,
+    station_change_start_step=0,
+    station_change_stop_step=None,
+    station_change_target=None,
+):
+    n = active.shape[0]
+    next_active = active
+
+    if one_shot_step is not None and one_shot_target is not None:
+        target = jnp.asarray(one_shot_target, dtype=jnp.int32)
+        one_shot_active = jnp.arange(n) < target
+        next_active = jnp.where(step == one_shot_step, one_shot_active, next_active)
+
+    if station_change_interval is not None and station_change_delta != 0:
+        should_change = step >= station_change_start_step
+        if station_change_stop_step is not None:
+            should_change = jnp.logical_and(should_change, step <= station_change_stop_step)
+        should_change = jnp.logical_and(
+            should_change, (step - station_change_start_step) % station_change_interval == 0
+        )
+
+        current_count = jnp.sum(next_active.astype(jnp.int32))
+        updated_count = jnp.clip(current_count + station_change_delta, 0, n)
+        if station_change_target is not None:
+            target = jnp.asarray(station_change_target, dtype=jnp.int32)
+            updated_count = jnp.where(
+                station_change_delta > 0,
+                jnp.minimum(updated_count, target),
+                jnp.maximum(updated_count, target),
+            )
+
+        changed_active = jnp.arange(n) < updated_count
+        next_active = jnp.where(should_change, changed_active, next_active)
+
+    return next_active
+
+
+def rl_step(
+    drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
+    one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
+    station_change_start_step=0, station_change_stop_step=None, station_change_target=None,
+):
     def rl_step_coroutine(c, step):
-        if n_switch is not None:
-            active = jnp.where(step == n_switch, jnp.ones_like(c.active).at[n_final:].set(False), c.active)
-        else:
-            active = c.active
-        
+        active = schedule_active_stations(
+            c.active,
+            step,
+            one_shot_step=one_shot_step,
+            one_shot_target=one_shot_target,
+            station_change_interval=station_change_interval,
+            station_change_delta=station_change_delta,
+            station_change_start_step=station_change_start_step,
+            station_change_stop_step=station_change_stop_step,
+            station_change_target=station_change_target,
+        )
+
         key, drl_keys, legacy_keys, traffic_key, reward_key = jax.random.split(c.key, 5)
         drl_keys = jax.random.split(drl_keys, n_drl)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
@@ -129,6 +183,10 @@ def setup_args():
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
     parser.add_argument('--scale', type=float, default=0.0, help='scale traffic generator parameter')
     parser.add_argument('--f3dB', type=float, default=1.0, help='f3dB traffic generator parameter')
+    parser.add_argument('--station_change_interval', type=int, help='Apply periodic station-count changes every N global steps.')
+    parser.add_argument('--station_change_delta', type=int, default=0, help='Stations to add/remove per interval tick. Negative values remove stations.')
+    parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
+    parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
     args = parser.parse_args()
@@ -139,10 +197,12 @@ if __name__ == '__main__':
     args = setup_args()
 
     n_init = args.n
-    n_final = args.n_final if args.n_final is not None else n_init
+    has_n_final = args.n_final is not None
+    n_final = args.n_final if has_n_final else n_init
     n = max(n_init, n_final)
     n_epochs = args.n_epochs
     n_steps = args.n_steps
+    total_steps = n_epochs * n_steps
     window_size = args.window_size
     seed = args.seed
     traffic_type = args.traffic_type
@@ -150,6 +210,28 @@ if __name__ == '__main__':
     loc = args.loc
     scale = args.scale
     f3dB = args.f3dB
+    station_change_interval = args.station_change_interval
+    station_change_delta = args.station_change_delta
+    station_change_start_step = args.station_change_start_step
+    station_change_stop_step = args.station_change_stop_step
+
+    if station_change_interval is not None and station_change_interval <= 0:
+        raise ValueError('--station_change_interval must be positive.')
+    if station_change_interval is None:
+        if station_change_start_step is not None or station_change_stop_step is not None:
+            raise ValueError('--station_change_start_step/--station_change_stop_step require --station_change_interval.')
+    else:
+        if station_change_delta == 0:
+            raise ValueError('--station_change_delta must be non-zero when --station_change_interval is used.')
+        if station_change_start_step is None:
+            station_change_start_step = station_change_interval
+
+    one_shot_step = None
+    one_shot_target = None
+    station_change_target = n_final if has_n_final else None
+    if station_change_interval is None and n_final != n_init:
+        one_shot_step = total_steps // 2
+        one_shot_target = n_final
 
     key = jax.random.key(seed)
     num_actions = 2
@@ -205,7 +287,20 @@ if __name__ == '__main__':
 
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn, _, _ = rl_step(drl_step, legacy_step, traffic_step, n, n)
+    rl_step_fn, _, _ = rl_step(
+        drl_step,
+        legacy_step,
+        traffic_step,
+        n,
+        n,
+        one_shot_step=one_shot_step,
+        one_shot_target=one_shot_target,
+        station_change_interval=station_change_interval,
+        station_change_delta=station_change_delta,
+        station_change_start_step=station_change_start_step,
+        station_change_stop_step=station_change_stop_step,
+        station_change_target=station_change_target,
+    )
     rl_step_fn = jax.jit(rl_step_fn)
     carry = Carry(
         drl_states, legacy_states, traffic_states, buffer_states, power_states,
@@ -214,10 +309,8 @@ if __name__ == '__main__':
     all_outputs = []
 
     for epoch in trange(n_epochs):
-        if epoch == int(n_epochs / 2):
-            carry = replace(carry, active=jnp.ones_like(carry.active).at[n_final:].set(False))
-        
-        carry, output = jax.lax.scan(rl_step_fn, carry, length=n_steps)
+        global_steps = jnp.arange(epoch * n_steps, (epoch + 1) * n_steps, dtype=jnp.int32)
+        carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
