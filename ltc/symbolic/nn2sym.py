@@ -130,8 +130,8 @@ class Target:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Generate Q-network observations and Q-values from history file')
-    parser.add_argument('--target-file', '-f', type=str, default="history_5_5_42.pkl.lz4",
-                        help='Path to the history file (default: history_5_5_42.pkl.lz4)')
+    parser.add_argument('--target-file', '-f', type=str, default="history_5_5_42.pkl 2.lz4",
+                        help='Path to the history file (default: history_5_5_42.pkl 2.lz4)')
     parser.add_argument('--num-samples', '-n', type=int, default=8,
                         help='Number of samples (default: 8)')
     parser.add_argument('--randomize', '-r', action='store_true', default=False,

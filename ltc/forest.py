@@ -1,3 +1,4 @@
+import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -26,8 +27,11 @@ def _debug(actions):
 
 
 def main():
-    ds = xr.load_dataset(
-        '../explain/qnet_history_5_5_42.pkl.lz4sFalserTrueN8.nc')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input_file', type=str, help='Path to the input netCDF file')
+    args = parser.parse_args()
+
+    ds = xr.load_dataset(args.input_file)
     obs = ds['observations']
     qvals = ds['qvalues']
     actions = qvals.argmax('action')
@@ -55,7 +59,7 @@ def main():
     importances.plot(kind='bar')
     plt.title(f'Feature importance, OOB score: {forest.oob_score_}')
     plt.tight_layout()
-    plt.savefig("forest_importance_cherrypick.png")
+    plt.savefig("forest_importance_cherrypick.pdf")
     plt.show()
 
     y_all = actions.stack(flat=('agent', 'step', 'sample'))
@@ -79,7 +83,7 @@ def main():
     importances.plot(kind='bar')
     plt.title(f'Feature importance, OOB score: {forest.oob_score_}')
     plt.tight_layout()
-    plt.savefig("forest_importance_agent_seed.png")
+    plt.savefig(f"forest_importance_agent_seed{args.input_file.split('.')[-2]}.pdf")
     plt.show()
     ...
 
