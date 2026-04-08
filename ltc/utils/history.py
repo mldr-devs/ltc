@@ -73,3 +73,12 @@ def resolve_history_file(
     raise FileNotFoundError(
         f"No history file found for n={n}, n_drl={n_drl}, seed={seed} in current directory."
     )
+
+
+def unpack_history(payload: tuple) -> tuple[object, object, dict | None]:
+    if not isinstance(payload, tuple) or len(payload) < 2:
+        raise ValueError("Unsupported history payload format.")
+
+    drl_state, history = payload[:2]
+    metadata = payload[2] if len(payload) > 2 and isinstance(payload[2], dict) else None
+    return drl_state, history, metadata

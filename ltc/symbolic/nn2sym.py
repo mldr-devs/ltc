@@ -11,7 +11,7 @@ import pandas as pd
 from .regressor import Regressor
 
 from ltc.agents import QNetwork, StochasticVariationalNetwork
-from ltc.utils.history import resolve_history_file
+from ltc.utils.history import resolve_history_file, unpack_history
 
 
 # from ltc.agents.svi import
@@ -21,7 +21,7 @@ class Target:
 
     def __init__(self, file_path: str):
         with lz4.frame.open(file_path, "rb") as f:
-            self.ddqn_state, self.history = cloudpickle.load(f)
+            self.ddqn_state, self.history, _ = unpack_history(cloudpickle.load(f))
 
         self.model = StochasticVariationalNetwork(
             QNetwork(num_actions=3, num_layers=4, dim=64, num_heads=4))
