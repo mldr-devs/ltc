@@ -16,10 +16,10 @@ def _run_git_command(*args: str) -> str:
 
 
 def ensure_clean_git_worktree() -> None:
-    status = _run_git_command("status", "--porcelain")
+    status = _run_git_command("status", "--porcelain", "--untracked-files=no")
     if status:
         raise RuntimeError(
-            "Refusing to run with uncommitted changes. Commit or stash changes first."
+            "Refusing to run with tracked uncommitted changes. Commit or stash changes first."
         )
 
 
