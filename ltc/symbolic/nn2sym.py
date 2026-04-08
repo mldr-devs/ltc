@@ -1,3 +1,5 @@
+import argparse
+
 from pysr import PySRRegressor
 
 import cloudpickle
@@ -9,6 +11,7 @@ import pandas as pd
 from .regressor import Regressor
 
 from ltc.agents import QNetwork, StochasticVariationalNetwork
+from ltc.utils.history import resolve_history_file
 
 
 # from ltc.agents.svi import
@@ -55,8 +58,15 @@ class Target:
 
 
 if __name__ == '__main__':
-    # TODO: Change the path to your data file
-    target = Target("history_5_5_42.pkl.lz4")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--file', type=str, help='Path to history .pkl.lz4 file')
+    parser.add_argument('--n', type=int, default=5, help='Number of agents used for filename matching')
+    parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents used for filename matching')
+    parser.add_argument('--seed', type=int, default=42, help='Seed used for filename matching')
+    args = parser.parse_args()
+
+    history_file = resolve_history_file(n=args.n, n_drl=args.n_drl, seed=args.seed, file_path=args.file)
+    target = Target(str(history_file))
     observations, qvals = target()
 
     fo = np.squeeze(observations)

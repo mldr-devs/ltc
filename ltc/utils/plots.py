@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ltc.utils.scan_states import Output
+from ltc.utils.history import parse_history_filename
 from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY
 
 SAVE_FORMAT = 'normal'
@@ -607,9 +608,7 @@ def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history = cloudpickle.load(f)
 
-    _, n, n_drl, seed_r, *_ = filename.split('_')
-    seed, *_ = seed_r.split('.')
-    n, n_drl, seed = int(n), int(n_drl), int(seed)
+    n, n_drl, seed, _ = parse_history_filename(filename)
 
     plot_powers(history.power_states, n, n_drl, seed, PlotType.ALL)
     plot_power_per_tx(history.actions, history.channel_state, history.power_states, n, n_drl, seed, PlotType.ALL)
@@ -638,9 +637,7 @@ def plot_first(filename, n_epochs=10, aggregation=1000):
         history = jax.tree.map(lambda x: x.reshape(-1, aggregation, *x.shape[2:]), history)
         history = Output(**history)
 
-    _, n, n_drl, seed_r, *_ = filename.split('_')
-    seed, *_ = seed_r.split('.')
-    n, n_drl, seed = int(n), int(n_drl), int(seed)
+    n, n_drl, seed, _ = parse_history_filename(filename)
 
     plot_powers(history.power_states, n, n_drl, seed, PlotType.FIRST)
     plot_power_per_tx(history.actions, history.channel_state, history.power_states, n, n_drl, seed, PlotType.FIRST)

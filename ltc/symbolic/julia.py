@@ -23,6 +23,7 @@ from ltc.utils.scan_states import Carry, Output  # noqa: F401
 
 from ltc.run import init_agents, init_traffic, rl_step as rl_step
 from ltc.run import setup_args as setup_args
+from ltc.utils.history import build_history_filename, get_short_commit_hash
 
 _len = len
 
@@ -175,7 +176,7 @@ class Results:
 
     def save(self, path: str='.'):
         all_results = jax.tree.map(lambda *x: jnp.stack(x), *self.all_results)
-        filename = f'history_{self.n}_{self.n_drl}_{self.seed}.pkl.lz4'
+        filename = build_history_filename(self.n, self.n_drl, self.seed, get_short_commit_hash())
         full_path = os.path.join(path, filename)
         with lz4.frame.open(full_path, 'wb') as f:
             cloudpickle.dump((None, all_results), f)
