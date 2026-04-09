@@ -1,56 +1,59 @@
 import unittest
 
+import jax
 import jax.numpy as jnp
 
 from ltc.sim.constants import *
 from ltc.sim.process_output import *
 
+KEY = jax.random.PRNGKey(0)
+
 
 class ProcessOutputTestCase(unittest.TestCase):
     def test_no_transmission(self):
-        args = (Actions.IDLE.value, 1, 5, 0, 1)
+        args = (Actions.IDLE.value, 1, 5, 0, 1, KEY)
         reward, r, no_tx = no_transmission(args)
         self.assertEqual(reward, 0.0)
         self.assertEqual(r, 5)
 
     def test_transmission_without_collision_empty_buffer(self):
-        args = (Actions.TX.value, 0, 3, 1, 1)
+        args = (Actions.TX.value, 0, 3, 1, 1, KEY)
         reward, r, no_tx = transmission_without_collision(args)
         self.assertEqual(reward, EMPTY_TX_PENALTY)
         self.assertEqual(r, 0)
 
     def test_transmission_without_collision_successful(self):
-        args = (Actions.TX.value, 1, 2, 1, 1)
+        args = (Actions.TX.value, 1, 2, 1, 1, KEY)
         reward, r, no_tx = transmission_without_collision(args)
-        self.assertAlmostEqual(reward, TX_REWARD / (2 + 1))
+        self.assertAlmostEqual(reward, TX_REWARD)
         self.assertEqual(r, 0)
 
     def test_transmission_with_collision_retransmission(self):
-        args = (Actions.TX.value, 1, 2, -1, 1)
+        args = (Actions.TX.value, 1, 2, -1, 1, KEY)
         reward, r, no_tx = transmission_with_collision(args)
         self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(r, 3)
 
     def test_transmission_with_collision_max_retransmission(self):
-        args = (Actions.TX.value, 1, MAX_RETRANSMISSION, -1, 1)
+        args = (Actions.TX.value, 1, MAX_RETRANSMISSION, -1, 1, KEY)
         reward, r, no_tx = transmission_with_collision(args)
         self.assertEqual(reward, MAX_RETRANSMISSION_PENALTY)
         self.assertEqual(r, 0)
 
     def test_transmission_collision_path(self):
-        args = (Actions.TX.value, 1, 7, -1, 1)
+        args = (Actions.TX.value, 1, 7, -1, 1, KEY)
         reward, r, no_tx = transmission(args)
         self.assertEqual(reward, COLLISION_PENALTY)
         self.assertEqual(r, 8)
 
     def test_transmission_successful_path(self):
-        args = (Actions.TX.value, 1, 1, 1, 1)
+        args = (Actions.TX.value, 1, 1, 1, 1, KEY)
         reward, r, no_tx = transmission(args)
-        self.assertAlmostEqual(reward, TX_REWARD / (1 + 1))
+        self.assertAlmostEqual(reward, TX_REWARD)
         self.assertEqual(r, 0)
 
     def test_transmission_empty_buffer(self):
-        args = (Actions.TX.value, 0, 1, 1, 1)
+        args = (Actions.TX.value, 0, 1, 1, 1, KEY)
         reward, r, no_tx = transmission(args)
         self.assertEqual(reward, EMPTY_TX_PENALTY)
         self.assertEqual(r, 0)
@@ -71,13 +74,13 @@ class ProcessOutputTestCase(unittest.TestCase):
         expected_obs_0 = jnp.array([
             [1, 1, 7, 0, 100],
             [1, 1, 8, 0, 100],
-            [0, -1, 0, 0, 100 - TX_CONSUMPTION],
+            [0, -1, 0, 0, Actions.TX.value],
         ])
         expected_R_0 = -1.0
         expected_power = power_states + jnp.array([-TX_CONSUMPTION, -CS_CONSUMPTION, -TX_CONSUMPTION, -TX_CONSUMPTION])
 
         result_obs, result_R, power = process_output(
-            buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals
+            buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, KEY
         )
 
         self.assertTrue(jnp.array_equal(result_obs[0], expected_obs_0))
