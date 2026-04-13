@@ -91,7 +91,7 @@ class Target:
             state = jax.tree.map(perm_fun, state)
 
         observations = self.history.observations[
-            -1, -1000:, ...]  # last epoch, last 1000 samples, 5 agents,1 window, 5 features
+            -1, ...]  # last epoch, last 1000 samples, 5 agents,1 window, 5 features
 
 
         s, n_agents, w, f = observations.shape
