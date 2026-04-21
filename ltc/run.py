@@ -14,7 +14,7 @@ from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
-from ltc.sim.constants import INITIAL_CAPACITY, Actions
+from ltc.sim.constants import INITIAL_CAPACITY, Actions, EMPTY_PACKET_ID
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
@@ -128,7 +128,7 @@ def rl_step(
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
+        buffer_states, channel_state, packet_seqs = simulate(c.buffer_states, new_frames, actions, c.packet_seqs)
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals, reward_key
         )
@@ -144,12 +144,12 @@ def rl_step(
             hist, bin_edges = None, None
 
         c = Carry(
-            drl_states, legacy_states, traffic_states, buffer_states, powers,
+            drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, powers,
             channel_state, key, obs, actions, rewards, terminals, active
         )
         o = Output(
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges
+            new_frames, channel_state, active, hist, bin_edges
         )
         yield c, o
 
@@ -179,6 +179,7 @@ def setup_args():
     parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
+    parser.add_argument('--queue_size', type=int, default=16, help='Fixed packet-queue length for each station.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
@@ -207,6 +208,7 @@ if __name__ == '__main__':
     n_steps = args.n_steps
     total_steps = n_epochs * n_steps
     window_size = args.window_size
+    queue_size = args.queue_size
     seed = args.seed
     traffic_type = args.traffic_type
 
@@ -239,10 +241,11 @@ if __name__ == '__main__':
     key = jax.random.key(seed)
     num_actions = 2
     actions = jnp.zeros(n, dtype=int)
-    buffer_states = jnp.zeros(n, dtype=int)
+    packet_seqs = jnp.zeros(n, dtype=jnp.int32)
+    buffer_states = jnp.full((n, queue_size), EMPTY_PACKET_ID, dtype=jnp.int32)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=int)
+    obs = jnp.zeros((n, window_size, 5), dtype=jnp.int32)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
@@ -306,7 +309,7 @@ if __name__ == '__main__':
     )
     rl_step_fn = jax.jit(rl_step_fn)
     carry = Carry(
-        drl_states, legacy_states, traffic_states, buffer_states, power_states,
+        drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
     )
     all_outputs = []

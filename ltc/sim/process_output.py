@@ -2,11 +2,12 @@ import jax
 import jax.numpy as jnp
 
 from ltc.sim.constants import *
+from ltc.sim.sim import is_buffer_empty
 
 
 def no_transmission(args):
     _, buffer_state, _, _, _, _ = args
-    return jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args)
+    return jax.lax.cond(is_buffer_empty(buffer_state), idle_empty_buffer, idle_full_buffer, args)
 
 
 def idle_empty_buffer(_):
@@ -67,7 +68,7 @@ def retransmission(args):
 
 def transmission_without_collision(args):
     _, buffer_state, _, _, _, _ = args
-    return jax.lax.cond(buffer_state > 0, successful_transmission, empty_buffer_transmission, args)
+    return jax.lax.cond(~is_buffer_empty(buffer_state), successful_transmission, empty_buffer_transmission, args)
 
 
 def empty_buffer_transmission(_):
@@ -104,7 +105,8 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
         )
     )
 
-    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, action])
+    buffer_count = jnp.sum((new_buffer_state != EMPTY_PACKET_ID).astype(jnp.int32))
+    obs_t = jnp.array([buffer_count, channel_state, ret_c, no_tx, action], dtype=jnp.int32)
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 

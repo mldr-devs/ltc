@@ -10,7 +10,7 @@ import numpy as np
 
 from ltc.utils.scan_states import Output
 from ltc.utils.history import parse_history_filename, unpack_history
-from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY
+from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY, EMPTY_PACKET_ID
 
 SAVE_FORMAT = 'normal'
 
@@ -304,14 +304,15 @@ def plot_buffer_states(buffer_states, terminals, n, n_drl, seed, name):
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    buffer_states = np.where(1 - terminals, buffer_states, 0).sum(axis=1)
-    buffer_states = buffer_states / (1 - terminals).sum(axis=1)
+    queue_fill = np.count_nonzero(buffer_states != EMPTY_PACKET_ID, axis=-1) / buffer_states.shape[-1]
+    queue_fill = np.where(1 - terminals, queue_fill, 0).sum(axis=1)
+    queue_fill = queue_fill / (1 - terminals).sum(axis=1)
 
     for i in range(n_drl):
-        plt.plot(xs, buffer_states[:, i], color='red')
+        plt.plot(xs, queue_fill[:, i], color='red')
 
     for i in range(n_drl, n):
-        plt.plot(xs, buffer_states[:, i], color='blue', linestyle='--')
+        plt.plot(xs, queue_fill[:, i], color='blue', linestyle='--')
 
     plt.plot([], color='blue', linestyle='--', label='Legacy')
     plt.plot([], color='red', label='DRL')
@@ -507,8 +508,9 @@ def plot_channel_access_delay(buffer_states, new_frames, terminals, n, n_drl, se
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
-    buffer_states, new_frames = (1 - terminals) * buffer_states, (1 - terminals) * new_frames
-    cad = buffer_states.sum(axis=1) / (new_frames.sum(axis=1) + 1e-6)
+    queue_fill = np.count_nonzero(buffer_states != EMPTY_PACKET_ID, axis=-1)
+    queue_fill, new_frames = (1 - terminals) * queue_fill, (1 - terminals) * new_frames
+    cad = queue_fill.sum(axis=1) / (new_frames.sum(axis=1) + 1e-6)
 
     for i in range(n_drl):
         plt.plot(xs, cad[:, i], color='red')
@@ -539,13 +541,15 @@ def plot_xnor(actions, channel_states, buffer_states, terminals, n, n_drl, seed,
     else:
         xs = np.linspace(0, n_epochs * n_steps, n_epochs) + 1
 
+    empty = np.all(buffer_states == EMPTY_PACKET_ID, axis=-1)
+    non_empty = ~empty
     idle_and_empty = jax.lax.bitwise_and(
         jax.lax.bitwise_not(terminals),
-        jax.lax.bitwise_and(actions == Actions.IDLE.value, buffer_states == 0)
+        jax.lax.bitwise_and(actions == Actions.IDLE.value, empty)
     ).sum(axis=1)
     tx_and_full = jax.lax.bitwise_and(
         jax.lax.bitwise_and(jax.lax.bitwise_not(terminals), np.expand_dims(channel_states, axis=-1) == 1),
-        jax.lax.bitwise_and(actions == Actions.TX.value, buffer_states != 0)
+        jax.lax.bitwise_and(actions == Actions.TX.value, non_empty)
     ).sum(axis=1)
     xnor = idle_and_empty + tx_and_full
 

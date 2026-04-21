@@ -12,6 +12,7 @@ class Carry:
     drl_states: AgentState
     legacy_states: AgentState
     traffic_states: ModelState
+    packet_seqs: jax.Array
     buffer_states: jax.Array
     power_states: jax.Array
     channel_state: int

@@ -44,10 +44,10 @@ class DCF(BaseAgent):
             backoff = jax.random.randint(key, (), 0, state.cw)
             return DCFState(cw=cw, backoff=backoff)
 
-        buffer, channel, ret_c, _, _ = env_state[-1]
+        buffer_count, channel, ret_c, _, _ = env_state[-1]
 
         return jax.lax.cond(
-            buffer == 0,
+            buffer_count == 0,
             reset,
             lambda: jax.lax.cond(
                 jax.lax.bitwise_and(state.backoff > 0, channel == 0),
@@ -70,10 +70,10 @@ class DCF(BaseAgent):
 
     @staticmethod
     def sample(state, key, env_state):
-        buffer, channel, _, _, _ = env_state[-1]
+        buffer_count, channel, _, _, _ = env_state[-1]
 
         return jnp.where(
-            buffer == 0,
+            buffer_count == 0,
             Actions.IDLE.value,
             jnp.where(
                 jax.lax.bitwise_and(state.backoff == 0, channel == 0),

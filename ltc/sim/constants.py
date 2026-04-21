@@ -42,3 +42,6 @@ Tx slot duration (s)
 https://ieeexplore.ieee.org/document/8930559
 """
 TAU = 5.484 * 1e-3
+
+# Queue representation
+EMPTY_PACKET_ID = -1
