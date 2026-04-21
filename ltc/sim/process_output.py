@@ -202,7 +202,8 @@ def process_output(
     enable_tx_collision_other,
     roll_obs=True,
 ):
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, None, 0, None, 0, 0, None, None, None))(
+    roll_obs = jnp.broadcast_to(jnp.asarray(roll_obs), actions.shape)
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, None, 0, None, 0, 0, None, None, 0))(
         buffer_states,
         new_buffer_states,
         new_buffer_birth_states,
