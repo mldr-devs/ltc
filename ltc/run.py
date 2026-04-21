@@ -35,6 +35,7 @@ from ltc.sim.constants import (
 )
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
+from ltc.utils.state_structs import MacroActionState, ObsTrackerState
 from ltc.utils.plots import plot_all, plot_first
 
 
@@ -178,6 +179,59 @@ def decode_legacy_actions(raw_actions, legacy_tx_duration):
     return action_type, duration
 
 
+# ============================================================================
+# Macro-Action State Management
+# ============================================================================
+
+def _update_macro_state_from_ready_agents(
+    macro_state, obs_tracker, ready_drl, ready_legacy,
+    drl_action_types, drl_durations, drl_staged_next,
+    legacy_action_types, legacy_durations,
+    n_drl
+):
+    """Update macro-action state for agents that are ready to choose new actions.
+    
+    Ready DRL agents: update with decoded DRL actions
+    Ready legacy agents: update with decoded legacy actions
+    Non-ready agents: keep existing macro state
+    """
+    macro_action_types = macro_state.action_types
+    macro_remaining = macro_state.remaining
+    staged_tx = obs_tracker.staged_tx
+
+    # DRL agents
+    macro_action_types = macro_action_types.at[:n_drl].set(
+        jnp.where(ready_drl, drl_action_types, macro_state.action_types[:n_drl])
+    )
+    macro_remaining = macro_remaining.at[:n_drl].set(
+        jnp.where(ready_drl, drl_durations, macro_state.remaining[:n_drl])
+    )
+    staged_tx = staged_tx.at[:n_drl].set(
+        jnp.where(ready_drl, drl_staged_next, obs_tracker.staged_tx[:n_drl])
+    )
+
+    # Legacy agents
+    macro_action_types = macro_action_types.at[n_drl:].set(
+        jnp.where(ready_legacy, legacy_action_types, macro_state.action_types[n_drl:])
+    )
+    macro_remaining = macro_remaining.at[n_drl:].set(
+        jnp.where(ready_legacy, legacy_durations, macro_state.remaining[n_drl:])
+    )
+
+    return macro_action_types, macro_remaining, staged_tx
+
+
+def _finalize_macro_accumulators(macro_state, done_now, macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum):
+    """Reset macro accumulators for agents completing their macro-action.
+    
+    Agents that are done_now get their accumulators zeroed for the next macro-action.
+    """
+    macro_tx_success_accum = jnp.where(done_now, 0.0, macro_tx_success_accum)
+    macro_tx_collision_accum = jnp.where(done_now, 0.0, macro_tx_collision_accum)
+    macro_reward_accum = jnp.where(done_now, 0.0, macro_reward_accum)
+    return macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
+
+
 def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now):
     tx_executing = slot_actions == Actions.TX.value
     tx_success = jnp.logical_and(tx_executing, successful_packets > 0)
@@ -229,7 +283,7 @@ def rl_step(
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
-        ready = c.macro_remaining == 0
+        ready = c.macro.remaining == 0
         drl_ready = jnp.logical_and(active[:n_drl], ready[:n_drl])
         legacy_ready = jnp.logical_and(active[n_drl:], ready[n_drl:])
 
@@ -245,29 +299,15 @@ def rl_step(
         raw_actions = raw_actions.at[n_drl:].set(jnp.where(legacy_ready, legacy_actions_raw, c.actions[n_drl:]))
 
         drl_action_types, drl_durations, drl_staged_next = decode_drl_actions(
-            raw_actions[:n_drl], c.staged_tx[:n_drl], drl_keys, action_space_variant, max_duration
+            raw_actions[:n_drl], c.obs_tracker.staged_tx[:n_drl], drl_keys, action_space_variant, max_duration
         )
         legacy_action_types, legacy_durations = decode_legacy_actions(raw_actions[n_drl:], legacy_tx_duration)
 
-        macro_action_types = c.macro_action_types
-        macro_remaining = c.macro_remaining
-        staged_tx = c.staged_tx
-
-        macro_action_types = macro_action_types.at[:n_drl].set(
-            jnp.where(drl_ready, drl_action_types, c.macro_action_types[:n_drl])
-        )
-        macro_remaining = macro_remaining.at[:n_drl].set(
-            jnp.where(drl_ready, drl_durations, c.macro_remaining[:n_drl])
-        )
-        staged_tx = staged_tx.at[:n_drl].set(
-            jnp.where(drl_ready, drl_staged_next, c.staged_tx[:n_drl])
-        )
-
-        macro_action_types = macro_action_types.at[n_drl:].set(
-            jnp.where(legacy_ready, legacy_action_types, c.macro_action_types[n_drl:])
-        )
-        macro_remaining = macro_remaining.at[n_drl:].set(
-            jnp.where(legacy_ready, legacy_durations, c.macro_remaining[n_drl:])
+        macro_action_types, macro_remaining, staged_tx = _update_macro_state_from_ready_agents(
+            c.macro, c.obs_tracker, drl_ready, legacy_ready,
+            drl_action_types, drl_durations, drl_staged_next,
+            legacy_action_types, legacy_durations,
+            n_drl
         )
 
         slot_executing = macro_remaining > 0
@@ -281,7 +321,7 @@ def rl_step(
             packet_seqs,
             planned_packets,
             successful_packets,
-        ) = simulate(c.buffer_states, c.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step)
+        ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step)
 
         is_ltc = jnp.arange(n) < n_drl
         tx_mask = slot_actions == Actions.TX.value
@@ -291,11 +331,11 @@ def rl_step(
         diff_type = is_ltc[:, None] != is_ltc[None, :]
         tx_collision_other_now = jnp.any(diff_type & tx_mask[None, :], axis=1).astype(jnp.float32)
 
-        arrival_hist = jnp.roll(c.arrival_hist, -1, axis=1).at[:, -1].set(new_frames.astype(jnp.float32))
-        planned_tx_hist = jnp.roll(c.planned_tx_hist, -1, axis=1).at[:, -1].set(planned_packets.astype(jnp.float32))
-        success_tx_hist = jnp.roll(c.success_tx_hist, -1, axis=1).at[:, -1].set(successful_packets.astype(jnp.float32))
-        channel_busy_hist = jnp.roll(c.channel_busy_hist, -1).at[-1].set((channel_state != 0).astype(jnp.float32))
-        collision_hist = jnp.roll(c.collision_hist, -1).at[-1].set((channel_state == -1).astype(jnp.float32))
+        arrival_hist = jnp.roll(c.obs_tracker.arrival_hist, -1, axis=1).at[:, -1].set(new_frames.astype(jnp.float32))
+        planned_tx_hist = jnp.roll(c.obs_tracker.planned_tx_hist, -1, axis=1).at[:, -1].set(planned_packets.astype(jnp.float32))
+        success_tx_hist = jnp.roll(c.obs_tracker.success_tx_hist, -1, axis=1).at[:, -1].set(successful_packets.astype(jnp.float32))
+        channel_busy_hist = jnp.roll(c.obs_tracker.channel_busy_hist, -1).at[-1].set((channel_state != 0).astype(jnp.float32))
+        collision_hist = jnp.roll(c.obs_tracker.collision_hist, -1).at[-1].set((channel_state == -1).astype(jnp.float32))
         tx_hist = jnp.roll(c.tx_hist, -1, axis=0).at[-1].set(tx_mask.astype(jnp.int32))
 
         arrival_valid = arrival_hist >= 0.0
@@ -350,9 +390,9 @@ def rl_step(
         # TODO: Implement "Else: max 6 ms" clause once precise behavior is finalized.
         slot_reward_upgraded = jnp.where(tx_executing, tx_slot_reward, slot_rewards)
 
-        macro_tx_success_accum = c.macro_tx_success_accum + jnp.where(slot_executing, k_tx_slot, 0.0)
-        macro_tx_collision_accum = c.macro_tx_collision_accum + jnp.where(slot_executing, k_coll_slot, 0.0)
-        macro_reward_accum = c.macro_reward_accum + jnp.where(slot_executing, slot_reward_upgraded, 0.0)
+        macro_tx_success_accum = c.macro.tx_success_accum + jnp.where(slot_executing, k_tx_slot, 0.0)
+        macro_tx_collision_accum = c.macro.tx_collision_accum + jnp.where(slot_executing, k_coll_slot, 0.0)
+        macro_reward_accum = c.macro.reward_accum + jnp.where(slot_executing, slot_reward_upgraded, 0.0)
 
         size_penalty = TX_SIZE_PENALTY * jnp.minimum(
             1.0, (macro_tx_success_accum - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW
@@ -360,9 +400,9 @@ def rl_step(
         size_penalty = jnp.where(macro_tx_success_accum >= TX_SIZE_THRESHOLD, size_penalty, 0.0)
         rewards = jnp.where(done_now, macro_reward_accum + size_penalty, c.rewards)
 
-        macro_reward_accum = jnp.where(done_now, 0.0, macro_reward_accum)
-        macro_tx_success_accum = jnp.where(done_now, 0.0, macro_tx_success_accum)
-        macro_tx_collision_accum = jnp.where(done_now, 0.0, macro_tx_collision_accum)
+        macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum = _finalize_macro_accumulators(
+            c.macro, done_now, macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
+        )
         macro_remaining = jnp.where(slot_executing, macro_remaining - 1, macro_remaining)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
@@ -375,11 +415,26 @@ def rl_step(
         else:
             hist, bin_edges = None, None
 
+        macro_state = MacroActionState(
+            remaining=macro_remaining,
+            action_types=macro_action_types,
+            reward_accum=macro_reward_accum,
+            tx_success_accum=macro_tx_success_accum,
+            tx_collision_accum=macro_tx_collision_accum,
+        )
+        obs_tracker_state = ObsTrackerState(
+            buffer_birth_steps=c.obs_tracker.buffer_birth_steps,
+            arrival_hist=arrival_hist,
+            planned_tx_hist=planned_tx_hist,
+            success_tx_hist=success_tx_hist,
+            channel_busy_hist=channel_busy_hist,
+            collision_hist=collision_hist,
+            staged_tx=staged_tx,
+        )
         c = Carry(
-            drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, buffer_birth_steps,
-            arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist, staged_tx,
-            macro_remaining, macro_action_types, macro_reward_accum, macro_tx_success_accum, macro_tx_collision_accum, powers,
-            channel_state, key, obs, raw_actions, rewards, terminals, active
+            drl_states, legacy_states, traffic_states, packet_seqs, buffer_states,
+            tx_hist, powers, channel_state, key, obs, raw_actions, rewards, terminals, active,
+            macro_state, obs_tracker_state
         )
         o = Output(
             legacy_states, obs, raw_actions, rewards, terminals, buffer_states, powers,
@@ -585,11 +640,26 @@ if __name__ == '__main__':
         legacy_tx_duration=LEGACY_TX_DURATION,
     )
     rl_step_fn = jax.jit(rl_step_fn)
+    macro_state = MacroActionState(
+        remaining=macro_remaining,
+        action_types=macro_action_types,
+        reward_accum=macro_reward_accum,
+        tx_success_accum=macro_tx_success_accum,
+        tx_collision_accum=macro_tx_collision_accum,
+    )
+    obs_tracker_state = ObsTrackerState(
+        buffer_birth_steps=buffer_birth_steps,
+        arrival_hist=arrival_hist,
+        planned_tx_hist=planned_tx_hist,
+        success_tx_hist=success_tx_hist,
+        channel_busy_hist=channel_busy_hist,
+        collision_hist=collision_hist,
+        staged_tx=staged_tx,
+    )
     carry = Carry(
-        drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, buffer_birth_steps,
-        arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist, staged_tx,
-        macro_remaining, macro_action_types, macro_reward_accum, macro_tx_success_accum, macro_tx_collision_accum, power_states,
-        channel_state, key, obs, actions, rewards, terminals, active
+        drl_states, legacy_states, traffic_states, packet_seqs, buffer_states,
+        tx_hist, power_states, channel_state, key, obs, actions, rewards, terminals, active,
+        macro_state, obs_tracker_state
     )
     all_outputs = []
 
