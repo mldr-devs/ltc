@@ -5,13 +5,6 @@ from ltc.sim.constants import Actions, EMPTY_PACKET_ID
 
 
 def channel_state_selector(actions):
-    """
-    Returns a state of the channel due to how many STA transmit in the same time.
-    :param actions: vector of stations that transmit at a given time
-    :return:
-    int: -1 if more than one STA transmit, 1 if exactly one STA transmit, 0 if noone transmit at the moment.
-    """
-
     ones_count = jnp.sum(actions == Actions.TX.value)
     return jnp.where(
         ones_count > 1, -1,
@@ -29,15 +22,11 @@ def is_buffer_empty(buffer_state):
 
 
 def remove_packets_from_queue(queue_state, remove_mask):
-    """
-    Removes packets selected by remove_mask and compacts remaining packets to queue head.
-    """
     n = queue_state.shape[0]
     valid = queue_state != EMPTY_PACKET_ID
     remove_mask = jnp.asarray(remove_mask, dtype=bool)
     keep = valid & ~remove_mask
 
-    # Stable compaction using argsort over static-size keys.
     idx = jnp.arange(n)
     sort_key = jnp.where(keep, idx, n + idx)
     order = jnp.argsort(sort_key)
@@ -52,12 +41,6 @@ def remove_transmitted_packets(buffer_states, tx_masks):
 
 
 def enqueue_generated_packets(buffer_state, buffer_birth_state, new_frames, station_id, packet_seq, current_step):
-    """
-    Queue semantics:
-    - transmitted packets are removed elsewhere,
-    - arrivals are appended at queue tail,
-    - if overflow occurs, oldest packets are dropped.
-    """
     q = buffer_state.shape[0]
     new_frames = jnp.maximum(new_frames.astype(jnp.int32), 0)
     occupied = jnp.sum((buffer_state != EMPTY_PACKET_ID).astype(jnp.int32))
@@ -94,10 +77,6 @@ def add_new_frames(buffer_states, buffer_birth_steps, new_frames, packet_seqs, c
 
 
 def simulate(buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step):
-    """
-    One simulation step with fixed-size packet queues.
-    On successful TX, one packet from queue head is removed for transmitting station.
-    """
     channel_state = channel_state_selector(actions)
     pre_nonempty = jnp.any(buffer_states != EMPTY_PACKET_ID, axis=1)
     success_tx = (actions == Actions.TX.value) & (channel_state == 1)

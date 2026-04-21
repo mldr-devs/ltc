@@ -3,40 +3,8 @@ import jax.numpy as jnp
 
 from ltc.sim.constants import *
 from ltc.sim.sim import is_buffer_empty
+from ltc.utils.structs import ObsFeatureInputs, ObsFeatureConfig
 
-
-# ============================================================================
-# Reward Computation Helpers
-# ============================================================================
-
-def _compute_cs_reward(buffer_state, channel_state, no_tx, ret_c, key):
-    """Compute reward for CS (channel sensing) action.
-    
-    CS reward branches on whether buffer is empty or full:
-      - Empty buffer: EMPTY_BUFFER_REWARD
-      - Full buffer with short idle: NO_TX_REWARD
-      - Full buffer with long idle: NO_TX_PENALTY (scaled)
-    """
-    return jax.lax.cond(is_buffer_empty(buffer_state), idle_empty_buffer, idle_full_buffer,
-                        (buffer_state, ret_c, no_tx, key))
-
-
-def _compute_tx_reward(buffer_state, channel_state, ret_c, no_tx, key):
-    """Compute reward for TX (transmission) action.
-    
-    TX reward branches on channel outcome:
-      - Collision with collision_count < MAX_RETRANSMISSION: COLLISION_PENALTY, ret_c+1
-      - Collision with collision_count >= MAX_RETRANSMISSION: MAX_RETRANSMISSION_PENALTY, reset
-      - Success with empty buffer: EMPTY_TX_PENALTY
-      - Success with full buffer: TX_REWARD, ret_c=0
-    """
-    args = (buffer_state, ret_c, channel_state, no_tx, key)
-    return jax.lax.cond(channel_state == 1, transmission_without_collision, transmission_with_collision, args)
-
-
-# ============================================================================
-# Legacy Reward Branch Functions (organized for clarity)
-# ============================================================================
 
 def no_transmission(args):
     _, buffer_state, _, _, _, _ = args
@@ -127,59 +95,42 @@ def _oldest_packet_age_norm(buffer_state, buffer_birth_state, current_step):
     return jnp.where(age >= 0, age.astype(jnp.float32) / queue_size, -1.0)
 
 
-# ============================================================================
-# Observation Construction
-# ============================================================================
-
 def _build_observation_entry(
     buffer_state, new_buffer_state, new_buffer_birth_state, action, channel_state,
-    current_step, traffic_mean_arrival_rate, channel_occupancy_pct_window,
-    channel_collisions_pct_window, back_pct, unique_ltc_tx_window,
-    cs_tx_same_type_now, tx_collision_other_now,
-    enable_cs_tx_same_type, enable_tx_collision_other,
-    ret_c, no_tx
+    current_step, obs_features, obs_config, ret_c, no_tx
 ):
-    """Build the observation entry as a 14-element feature vector."""
     buffer_count = jnp.sum((new_buffer_state != EMPTY_PACKET_ID).astype(jnp.int32))
     buffer_occupancy_pct = buffer_count.astype(jnp.float32) / new_buffer_state.shape[0]
     oldest_packet_age_norm = _oldest_packet_age_norm(new_buffer_state, new_buffer_birth_state, current_step)
 
     cs_busy = jnp.where(action == Actions.CS.value, channel_state != 0, -1).astype(jnp.float32)
     cs_tx_same_type = jnp.where(
-        enable_cs_tx_same_type,
-        jnp.where(jnp.logical_and(action == Actions.CS.value, channel_state == 1), cs_tx_same_type_now, -1.0),
+        obs_config.enable_cs_tx_same_type,
+        jnp.where(jnp.logical_and(action == Actions.CS.value, channel_state == 1), obs_features.cs_tx_same_type_now, -1.0),
         -1.0,
     )
     tx_collision_other = jnp.where(
-        enable_tx_collision_other,
-        jnp.where(jnp.logical_and(action == Actions.TX.value, channel_state == -1), tx_collision_other_now, -1.0),
+        obs_config.enable_tx_collision_other,
+        jnp.where(jnp.logical_and(action == Actions.TX.value, channel_state == -1), obs_features.tx_collision_other_now, -1.0),
         -1.0,
     )
 
-    return jnp.array(
-        [
-            buffer_occupancy_pct,
-            buffer_count.astype(jnp.float32),
-            oldest_packet_age_norm,
-            traffic_mean_arrival_rate,
-            cs_busy,
-            cs_tx_same_type.astype(jnp.float32),
-            tx_collision_other.astype(jnp.float32),
-            channel_occupancy_pct_window,
-            channel_collisions_pct_window,
-            action.astype(jnp.float32),
-            back_pct,
-            ret_c.astype(jnp.float32),
-            no_tx.astype(jnp.float32),
-            unique_ltc_tx_window,
-        ],
-        dtype=jnp.float32,
-    )
-
-
-# ============================================================================
-# Main Per-Agent Output Processing
-# ============================================================================
+    return jnp.array([
+        buffer_occupancy_pct,
+        buffer_count.astype(jnp.float32),
+        oldest_packet_age_norm,
+        obs_features.traffic_mean_arrival_rate,
+        cs_busy,
+        cs_tx_same_type.astype(jnp.float32),
+        tx_collision_other.astype(jnp.float32),
+        obs_features.channel_occupancy_pct_window,
+        obs_features.channel_collisions_pct_window,
+        action.astype(jnp.float32),
+        obs_features.back_pct,
+        ret_c.astype(jnp.float32),
+        no_tx.astype(jnp.float32),
+        obs_features.unique_ltc_tx_window,
+    ], dtype=jnp.float32)
 
 
 def process_output_i(
@@ -193,15 +144,8 @@ def process_output_i(
     terminal,
     key,
     current_step,
-    traffic_mean_arrival_rate,
-    channel_occupancy_pct_window,
-    channel_collisions_pct_window,
-    back_pct,
-    unique_ltc_tx_window,
-    cs_tx_same_type_now,
-    tx_collision_other_now,
-    enable_cs_tx_same_type,
-    enable_tx_collision_other,
+    obs_features,
+    obs_config,
     roll_obs,
 ):
     ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
@@ -225,11 +169,7 @@ def process_output_i(
 
     obs_t = _build_observation_entry(
         buffer_state, new_buffer_state, new_buffer_birth_state, action, channel_state,
-        current_step, traffic_mean_arrival_rate, channel_occupancy_pct_window,
-        channel_collisions_pct_window, back_pct, unique_ltc_tx_window,
-        cs_tx_same_type_now, tx_collision_other_now,
-        enable_cs_tx_same_type, enable_tx_collision_other,
-        ret_c, no_tx
+        current_step, obs_features, obs_config, ret_c, no_tx
     )
     obs = jax.lax.cond(
         roll_obs,
@@ -252,19 +192,12 @@ def process_output(
     terminals,
     key,
     current_step,
-    traffic_mean_arrival_rate,
-    channel_occupancy_pct_window,
-    channel_collisions_pct_window,
-    back_pct,
-    unique_ltc_tx_window,
-    cs_tx_same_type_now,
-    tx_collision_other_now,
-    enable_cs_tx_same_type,
-    enable_tx_collision_other,
+    obs_features,
+    obs_config,
     roll_obs=True,
 ):
     roll_obs = jnp.broadcast_to(jnp.asarray(roll_obs), actions.shape)
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, None, 0, None, 0, 0, None, None, 0))(
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, 0))(
         buffer_states,
         new_buffer_states,
         new_buffer_birth_states,
@@ -275,14 +208,7 @@ def process_output(
         terminals,
         key,
         current_step,
-        traffic_mean_arrival_rate,
-        channel_occupancy_pct_window,
-        channel_collisions_pct_window,
-        back_pct,
-        unique_ltc_tx_window,
-        cs_tx_same_type_now,
-        tx_collision_other_now,
-        enable_cs_tx_same_type,
-        enable_tx_collision_other,
+        obs_features,
+        obs_config,
         roll_obs,
     )

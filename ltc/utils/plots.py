@@ -8,7 +8,7 @@ import lz4.frame
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ltc.utils.scan_states import Output
+from ltc.utils.structs import Output
 from ltc.utils.history import parse_history_filename, unpack_history
 from ltc.sim.constants import NO_TX_REWARD, Actions, INITIAL_CAPACITY, EMPTY_PACKET_ID
 

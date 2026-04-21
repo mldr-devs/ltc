@@ -5,6 +5,7 @@ import jax.numpy as jnp
 
 from ltc.sim.constants import *
 from ltc.sim.process_output import *
+from ltc.utils.structs import ObsFeatureInputs, ObsFeatureConfig
 
 KEY = jax.random.PRNGKey(0)
 EMPTY = EMPTY_PACKET_ID
@@ -87,6 +88,20 @@ class ProcessOutputTestCase(unittest.TestCase):
         expected_R_0 = -1.0
         expected_power = power_states + jnp.array([-TX_CONSUMPTION, -CS_CONSUMPTION, -TX_CONSUMPTION, -TX_CONSUMPTION])
 
+        obs_features = ObsFeatureInputs(
+            traffic_mean_arrival_rate=jnp.array([1.0, 2.0, 3.0, 4.0], dtype=jnp.float32),
+            channel_occupancy_pct_window=jnp.full((4,), 0.25, dtype=jnp.float32),
+            channel_collisions_pct_window=jnp.full((4,), 0.5, dtype=jnp.float32),
+            back_pct=jnp.array([0.0, 0.6, 1.0, 0.0], dtype=jnp.float32),
+            unique_ltc_tx_window=jnp.full((4,), 2.0, dtype=jnp.float32),
+            cs_tx_same_type_now=jnp.array([0.0, 1.0, 0.0, 0.0], dtype=jnp.float32),
+            tx_collision_other_now=jnp.array([1.0, 0.0, 1.0, 1.0], dtype=jnp.float32),
+        )
+        obs_config = ObsFeatureConfig(
+            enable_cs_tx_same_type=True,
+            enable_tx_collision_other=True,
+        )
+
         result_obs, result_R, power = process_output(
             buffer_states=buffer_states,
             new_buffer_states=new_buffer_states,
@@ -98,15 +113,8 @@ class ProcessOutputTestCase(unittest.TestCase):
             terminals=terminals,
             key=KEY,
             current_step=10,
-            traffic_mean_arrival_rate=jnp.array([1.0, 2.0, 3.0, 4.0], dtype=jnp.float32),
-            channel_occupancy_pct_window=0.25,
-            channel_collisions_pct_window=0.5,
-            back_pct=jnp.array([0.0, 0.6, 1.0, 0.0], dtype=jnp.float32),
-            unique_ltc_tx_window=2.0,
-            cs_tx_same_type_now=jnp.array([0.0, 1.0, 0.0, 0.0], dtype=jnp.float32),
-            tx_collision_other_now=jnp.array([1.0, 0.0, 1.0, 1.0], dtype=jnp.float32),
-            enable_cs_tx_same_type=True,
-            enable_tx_collision_other=True,
+            obs_features=obs_features,
+            obs_config=obs_config,
         )
 
         self.assertEqual(result_obs.shape[-1], OBS_SIZE)

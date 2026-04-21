@@ -14,30 +14,10 @@ from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
-from ltc.sim.constants import (
-    INITIAL_CAPACITY,
-    Actions,
-    EMPTY_PACKET_ID,
-    OBS_SIZE,
-    MAX_MACRO_DURATION,
-    LEGACY_TX_DURATION,
-    TX_REWARD_LENGTH,
-    TX_SIZE_THRESHOLD,
-    TX_SIZE_PENALTY_WINDOW,
-    TX_SIZE_PENALTY,
-    TX_LTC_COLLISION_PENALTY,
-    TX_COEX_COLLISION_PENALTY,
-    TX_EMPTY_BUFFER_PENALTY,
-    TX_MAX_RETRANSMISSION_PENALTY,
-    MAX_RETRANSMISSION,
-    ObsIdx,
-    TX_REWARD,
-)
+from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
-from ltc.utils.scan_states import Carry, Output
-from ltc.utils.state_structs import MacroActionState, ObsTrackerState
+from ltc.utils.structs import MacroActionState, ObsTrackerState, ActionDecodingResults, Carry, Output
 from ltc.utils.plots import plot_all, plot_first
-
 
 
 def init_agents(agent, key, n):
@@ -179,53 +159,35 @@ def decode_legacy_actions(raw_actions, legacy_tx_duration):
     return action_type, duration
 
 
-# ============================================================================
-# Macro-Action State Management
-# ============================================================================
-
 def _update_macro_state_from_ready_agents(
     macro_state, obs_tracker, ready_drl, ready_legacy,
-    drl_action_types, drl_durations, drl_staged_next,
-    legacy_action_types, legacy_durations,
-    n_drl
+    decoded_actions, n_drl
 ):
-    """Update macro-action state for agents that are ready to choose new actions.
-    
-    Ready DRL agents: update with decoded DRL actions
-    Ready legacy agents: update with decoded legacy actions
-    Non-ready agents: keep existing macro state
-    """
     macro_action_types = macro_state.action_types
     macro_remaining = macro_state.remaining
     staged_tx = obs_tracker.staged_tx
 
-    # DRL agents
     macro_action_types = macro_action_types.at[:n_drl].set(
-        jnp.where(ready_drl, drl_action_types, macro_state.action_types[:n_drl])
+        jnp.where(ready_drl, decoded_actions.drl_action_types, macro_state.action_types[:n_drl])
     )
     macro_remaining = macro_remaining.at[:n_drl].set(
-        jnp.where(ready_drl, drl_durations, macro_state.remaining[:n_drl])
+        jnp.where(ready_drl, decoded_actions.drl_durations, macro_state.remaining[:n_drl])
     )
     staged_tx = staged_tx.at[:n_drl].set(
-        jnp.where(ready_drl, drl_staged_next, obs_tracker.staged_tx[:n_drl])
+        jnp.where(ready_drl, decoded_actions.drl_staged_next, obs_tracker.staged_tx[:n_drl])
     )
 
-    # Legacy agents
     macro_action_types = macro_action_types.at[n_drl:].set(
-        jnp.where(ready_legacy, legacy_action_types, macro_state.action_types[n_drl:])
+        jnp.where(ready_legacy, decoded_actions.legacy_action_types, macro_state.action_types[n_drl:])
     )
     macro_remaining = macro_remaining.at[n_drl:].set(
-        jnp.where(ready_legacy, legacy_durations, macro_state.remaining[n_drl:])
+        jnp.where(ready_legacy, decoded_actions.legacy_durations, macro_state.remaining[n_drl:])
     )
 
     return macro_action_types, macro_remaining, staged_tx
 
 
 def _finalize_macro_accumulators(macro_state, done_now, macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum):
-    """Reset macro accumulators for agents completing their macro-action.
-    
-    Agents that are done_now get their accumulators zeroed for the next macro-action.
-    """
     macro_tx_success_accum = jnp.where(done_now, 0.0, macro_tx_success_accum)
     macro_tx_collision_accum = jnp.where(done_now, 0.0, macro_tx_collision_accum)
     macro_reward_accum = jnp.where(done_now, 0.0, macro_reward_accum)
@@ -303,11 +265,17 @@ def rl_step(
         )
         legacy_action_types, legacy_durations = decode_legacy_actions(raw_actions[n_drl:], legacy_tx_duration)
 
+        decoded_actions = ActionDecodingResults(
+            drl_action_types=drl_action_types,
+            drl_durations=drl_durations,
+            drl_staged_next=drl_staged_next,
+            legacy_action_types=legacy_action_types,
+            legacy_durations=legacy_durations,
+        )
+
         macro_action_types, macro_remaining, staged_tx = _update_macro_state_from_ready_agents(
             c.macro, c.obs_tracker, drl_ready, legacy_ready,
-            drl_action_types, drl_durations, drl_staged_next,
-            legacy_action_types, legacy_durations,
-            n_drl
+            decoded_actions, n_drl
         )
 
         slot_executing = macro_remaining > 0
@@ -387,7 +355,6 @@ def rl_step(
             slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now
         )
 
-        # TODO: Implement "Else: max 6 ms" clause once precise behavior is finalized.
         slot_reward_upgraded = jnp.where(tx_executing, tx_slot_reward, slot_rewards)
 
         macro_tx_success_accum = c.macro.tx_success_accum + jnp.where(slot_executing, k_tx_slot, 0.0)
@@ -454,7 +421,6 @@ def rl_step(
 
     def post_rl_fn(intermediate, *args, **kwargs):
         gen = rl_step_coroutine(*args, **kwargs)
-        # Unused computations will be DCE-ed
         _ = next(gen)
         return gen.send(intermediate)
 
