@@ -14,6 +14,13 @@ class Carry:
     traffic_states: ModelState
     packet_seqs: jax.Array
     buffer_states: jax.Array
+    buffer_birth_steps: jax.Array
+    arrival_hist: jax.Array
+    planned_tx_hist: jax.Array
+    success_tx_hist: jax.Array
+    channel_busy_hist: jax.Array
+    collision_hist: jax.Array
+    tx_hist: jax.Array
     power_states: jax.Array
     channel_state: int
     key: jax.random.PRNGKey

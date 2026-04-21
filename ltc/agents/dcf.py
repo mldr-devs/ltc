@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from chex import dataclass
 from reinforced_lib.agents import BaseAgent, AgentState
 
+from ltc.sim.observation import ObsIdx
 from ltc.sim.constants import Actions
 
 
@@ -44,16 +45,18 @@ class DCF(BaseAgent):
             backoff = jax.random.randint(key, (), 0, state.cw)
             return DCFState(cw=cw, backoff=backoff)
 
-        buffer_count, channel, ret_c, _, _ = env_state[-1]
+        buffer_count = env_state[-1][ObsIdx.BUFFER_PACKET_COUNT]
+        channel_busy = env_state[-1][ObsIdx.CHANNEL_LAST_CS_BUSY]
+        ret_c = env_state[-1][ObsIdx.STATUS_RETRY_COUNTER]
 
         return jax.lax.cond(
             buffer_count == 0,
             reset,
             lambda: jax.lax.cond(
-                jax.lax.bitwise_and(state.backoff > 0, channel == 0),
+                jax.lax.bitwise_and(state.backoff > 0, channel_busy == 0),
                 countdown,
                 lambda: jax.lax.cond(
-                    jax.lax.bitwise_and(state.backoff > 0, channel != 0),
+                    jax.lax.bitwise_and(state.backoff > 0, channel_busy != 0),
                     freeze,
                     lambda: jax.lax.cond(
                         jax.lax.bitwise_or(reward > 0, ret_c == 0),
@@ -70,13 +73,14 @@ class DCF(BaseAgent):
 
     @staticmethod
     def sample(state, key, env_state):
-        buffer_count, channel, _, _, _ = env_state[-1]
+        buffer_count = env_state[-1][ObsIdx.BUFFER_PACKET_COUNT]
+        channel_busy = env_state[-1][ObsIdx.CHANNEL_LAST_CS_BUSY]
 
         return jnp.where(
             buffer_count == 0,
             Actions.IDLE.value,
             jnp.where(
-                jax.lax.bitwise_and(state.backoff == 0, channel == 0),
+                jax.lax.bitwise_and(state.backoff == 0, channel_busy == 0),
                 Actions.TX.value,
                 Actions.CS.value
             )

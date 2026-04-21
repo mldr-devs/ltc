@@ -13,6 +13,7 @@ import optax
 from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
+from ltc.sim.observation import OBS_SIZE
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions, EMPTY_PACKET_ID
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
@@ -100,6 +101,7 @@ def rl_step(
     drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
     station_change_start_step=0, station_change_stop_step=None, station_change_target=None,
+    obs_enable_cs_tx_same_type=False, obs_enable_tx_collision_other=False,
 ):
     def rl_step_coroutine(c, step):
         active = schedule_active_stations(
@@ -128,9 +130,71 @@ def rl_step(
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state, packet_seqs = simulate(c.buffer_states, new_frames, actions, c.packet_seqs)
+        (
+            buffer_states,
+            buffer_birth_steps,
+            channel_state,
+            packet_seqs,
+            planned_packets,
+            successful_packets,
+        ) = simulate(c.buffer_states, c.buffer_birth_steps, new_frames, actions, c.packet_seqs, step)
+
+        is_ltc = jnp.arange(n) < n_drl
+        tx_mask = actions == Actions.TX.value
+        tx_idx = jnp.argmax(tx_mask.astype(jnp.int32))
+        tx_is_ltc = is_ltc[tx_idx]
+        cs_tx_same_type_now = (tx_is_ltc == is_ltc).astype(jnp.float32)
+        diff_type = is_ltc[:, None] != is_ltc[None, :]
+        tx_collision_other_now = jnp.any(diff_type & tx_mask[None, :], axis=1).astype(jnp.float32)
+
+        arrival_hist = jnp.roll(c.arrival_hist, -1, axis=1).at[:, -1].set(new_frames.astype(jnp.float32))
+        planned_tx_hist = jnp.roll(c.planned_tx_hist, -1, axis=1).at[:, -1].set(planned_packets.astype(jnp.float32))
+        success_tx_hist = jnp.roll(c.success_tx_hist, -1, axis=1).at[:, -1].set(successful_packets.astype(jnp.float32))
+        channel_busy_hist = jnp.roll(c.channel_busy_hist, -1).at[-1].set((channel_state != 0).astype(jnp.float32))
+        collision_hist = jnp.roll(c.collision_hist, -1).at[-1].set((channel_state == -1).astype(jnp.float32))
+        tx_hist = jnp.roll(c.tx_hist, -1, axis=0).at[-1].set(tx_mask.astype(jnp.int32))
+
+        arrival_valid = arrival_hist >= 0.0
+        arrival_count = jnp.sum(arrival_valid, axis=1)
+        traffic_mean_arrival_rate = jnp.where(
+            arrival_count > 0,
+            jnp.sum(jnp.where(arrival_valid, arrival_hist, 0.0), axis=1) / arrival_count,
+            -1.0,
+        )
+
+        busy_valid = channel_busy_hist >= 0.0
+        busy_count = jnp.sum(busy_valid)
+        channel_occupancy_pct_window = jnp.where(
+            busy_count > 0,
+            jnp.sum(jnp.where(busy_valid, channel_busy_hist, 0.0)) / busy_count,
+            -1.0,
+        )
+
+        coll_valid = collision_hist >= 0.0
+        coll_count = jnp.sum(coll_valid)
+        channel_collisions_pct_window = jnp.where(
+            coll_count > 0,
+            jnp.sum(jnp.where(coll_valid, collision_hist, 0.0)) / coll_count,
+            -1.0,
+        )
+
+        planned_valid = planned_tx_hist >= 0.0
+        planned_sum = jnp.sum(jnp.where(planned_valid, planned_tx_hist, 0.0), axis=1)
+        success_sum = jnp.sum(jnp.where(planned_valid, success_tx_hist, 0.0), axis=1)
+        back_pct = jnp.where(planned_sum > 0, success_sum / planned_sum, -1.0)
+
+        tx_valid_rows = tx_hist[:, 0] >= 0
+        unique_ltc_tx_window = jnp.where(
+            jnp.any(tx_valid_rows),
+            jnp.sum(jnp.any(jnp.where(tx_valid_rows[:, None], tx_hist[:, :n_drl], 0) > 0, axis=0).astype(jnp.float32)),
+            -1.0,
+        )
+
         obs, rewards, powers = process_output(
-            c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals, reward_key
+            c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, actions,
+            c.terminals, reward_key, step, traffic_mean_arrival_rate, channel_occupancy_pct_window,
+            channel_collisions_pct_window, back_pct, unique_ltc_tx_window, cs_tx_same_type_now,
+            tx_collision_other_now, obs_enable_cs_tx_same_type, obs_enable_tx_collision_other
         )
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
@@ -144,7 +208,8 @@ def rl_step(
             hist, bin_edges = None, None
 
         c = Carry(
-            drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, powers,
+            drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, buffer_birth_steps,
+            arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist, powers,
             channel_state, key, obs, actions, rewards, terminals, active
         )
         o = Output(
@@ -180,6 +245,9 @@ def setup_args():
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--queue_size', type=int, default=16, help='Fixed packet-queue length for each station.')
+    parser.add_argument('--obs_stats_window', type=int, default=1000, help='Window length for rolling observation statistics.')
+    parser.add_argument('--obs_enable_cs_tx_same_type', action='store_true', default=False, help='Enable CS me-vs-other transmitter feature.')
+    parser.add_argument('--obs_enable_tx_collision_other', action='store_true', default=False, help='Enable TX collision-involves-other feature.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
@@ -209,6 +277,7 @@ if __name__ == '__main__':
     total_steps = n_epochs * n_steps
     window_size = args.window_size
     queue_size = args.queue_size
+    obs_stats_window = args.obs_stats_window
     seed = args.seed
     traffic_type = args.traffic_type
 
@@ -219,6 +288,13 @@ if __name__ == '__main__':
     station_change_delta = args.station_change_delta
     station_change_start_step = args.station_change_start_step
     station_change_stop_step = args.station_change_stop_step
+    obs_enable_cs_tx_same_type = args.obs_enable_cs_tx_same_type
+    obs_enable_tx_collision_other = args.obs_enable_tx_collision_other
+
+    if queue_size <= 0:
+        raise ValueError('--queue_size must be positive.')
+    if obs_stats_window <= 0:
+        raise ValueError('--obs_stats_window must be positive.')
 
     if station_change_interval is not None and station_change_interval <= 0:
         raise ValueError('--station_change_interval must be positive.')
@@ -243,9 +319,16 @@ if __name__ == '__main__':
     actions = jnp.zeros(n, dtype=int)
     packet_seqs = jnp.zeros(n, dtype=jnp.int32)
     buffer_states = jnp.full((n, queue_size), EMPTY_PACKET_ID, dtype=jnp.int32)
+    buffer_birth_steps = jnp.full((n, queue_size), -1, dtype=jnp.int32)
+    arrival_hist = jnp.full((n, obs_stats_window), -1.0, dtype=jnp.float32)
+    planned_tx_hist = jnp.full((n, obs_stats_window), -1.0, dtype=jnp.float32)
+    success_tx_hist = jnp.full((n, obs_stats_window), -1.0, dtype=jnp.float32)
+    channel_busy_hist = jnp.full(obs_stats_window, -1.0, dtype=jnp.float32)
+    collision_hist = jnp.full(obs_stats_window, -1.0, dtype=jnp.float32)
+    tx_hist = jnp.full((obs_stats_window, n), -1, dtype=jnp.int32)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=jnp.int32)
+    obs = jnp.zeros((n, window_size, OBS_SIZE), dtype=jnp.float32)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
@@ -272,7 +355,7 @@ if __name__ == '__main__':
     )
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(drl, init_key, n)
-    drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
+    drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(jnp.float32))
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
@@ -306,10 +389,13 @@ if __name__ == '__main__':
         station_change_start_step=station_change_start_step,
         station_change_stop_step=station_change_stop_step,
         station_change_target=station_change_target,
+        obs_enable_cs_tx_same_type=obs_enable_cs_tx_same_type,
+        obs_enable_tx_collision_other=obs_enable_tx_collision_other,
     )
     rl_step_fn = jax.jit(rl_step_fn)
     carry = Carry(
-        drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, power_states,
+        drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, buffer_birth_steps,
+        arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
     )
     all_outputs = []

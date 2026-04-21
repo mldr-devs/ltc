@@ -3,6 +3,7 @@ import unittest
 import jax
 import jax.numpy as jnp
 
+from ltc.sim.observation import ObsIdx, OBS_SIZE
 from ltc.sim.constants import *
 from ltc.sim.process_output import *
 
@@ -66,6 +67,12 @@ class ProcessOutputTestCase(unittest.TestCase):
             [9, EMPTY, EMPTY],
             [EMPTY, EMPTY, EMPTY],
         ])
+        new_buffer_birth_states = jnp.array([
+            [-1, -1, -1],
+            [-1, -1, -1],
+            [3, -1, -1],
+            [-1, -1, -1],
+        ], dtype=jnp.int32)
         new_buffer_states = jnp.array([
             [EMPTY, EMPTY, EMPTY],
             [EMPTY, EMPTY, EMPTY],
@@ -76,25 +83,39 @@ class ProcessOutputTestCase(unittest.TestCase):
         actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.TX.value, Actions.TX.value])
         terminals = jnp.array([False, False, False, False])
         channel_state = -1
-        obs = jnp.array([[
-            [1, 1, 6, 0, 100],
-            [1, 1, 7, 0, 100],
-            [1, 1, 8, 0, 100]
-        ]] * 4)
-
-        expected_obs_0 = jnp.array([
-            [1, 1, 7, 0, 100],
-            [1, 1, 8, 0, 100],
-            [0, -1, 0, 0, Actions.TX.value],
-        ])
+        obs = jnp.zeros((4, 3, OBS_SIZE), dtype=jnp.float32)
+        obs = obs.at[:, -1, ObsIdx.STATUS_RETRY_COUNTER].set(8)
         expected_R_0 = -1.0
         expected_power = power_states + jnp.array([-TX_CONSUMPTION, -CS_CONSUMPTION, -TX_CONSUMPTION, -TX_CONSUMPTION])
 
         result_obs, result_R, power = process_output(
-            buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, KEY
+            buffer_states=buffer_states,
+            new_buffer_states=new_buffer_states,
+            new_buffer_birth_states=new_buffer_birth_states,
+            power_states=power_states,
+            channel_state=channel_state,
+            obs=obs,
+            actions=actions,
+            terminals=terminals,
+            key=KEY,
+            current_step=10,
+            traffic_mean_arrival_rate=jnp.array([1.0, 2.0, 3.0, 4.0], dtype=jnp.float32),
+            channel_occupancy_pct_window=0.25,
+            channel_collisions_pct_window=0.5,
+            back_pct=jnp.array([0.0, 0.6, 1.0, 0.0], dtype=jnp.float32),
+            unique_ltc_tx_window=2.0,
+            cs_tx_same_type_now=jnp.array([0.0, 1.0, 0.0, 0.0], dtype=jnp.float32),
+            tx_collision_other_now=jnp.array([1.0, 0.0, 1.0, 1.0], dtype=jnp.float32),
+            enable_cs_tx_same_type=True,
+            enable_tx_collision_other=True,
         )
 
-        self.assertTrue(jnp.array_equal(result_obs[0], expected_obs_0))
+        self.assertEqual(result_obs.shape[-1], OBS_SIZE)
+        self.assertEqual(result_obs[1, -1, ObsIdx.CHANNEL_LAST_CS_BUSY], 1.0)
+        self.assertEqual(result_obs[1, -1, ObsIdx.CHANNEL_LAST_CS_TX_SAME_TYPE], -1.0)
+        self.assertEqual(result_obs[0, -1, ObsIdx.CHANNEL_LAST_TX_COLLISION_OTHER], 1.0)
+        self.assertEqual(result_obs[2, -1, ObsIdx.BUFFER_PACKET_COUNT], 1.0)
+        self.assertEqual(result_obs[2, -1, ObsIdx.ACTION_BACK_PCT], 1.0)
         self.assertEqual(result_R[0], expected_R_0)
         self.assertTrue(jnp.array_equal(power, expected_power))
 

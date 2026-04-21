@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 
+from ltc.sim.observation import ObsIdx
 from ltc.sim.constants import *
 from ltc.sim.sim import is_buffer_empty
 
@@ -86,8 +87,37 @@ def successful_transmission(args):
     return reward, ret_c, no_tx
 
 
-def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal, key):
-    _, _, ret_c, no_tx, _ = obs[-1]
+def _oldest_packet_age_norm(buffer_state, buffer_birth_state, current_step):
+    valid = buffer_state != EMPTY_PACKET_ID
+    oldest_birth = jnp.min(jnp.where(valid, buffer_birth_state, current_step))
+    age = jnp.where(jnp.any(valid), current_step - oldest_birth, -1)
+    queue_size = jnp.maximum(buffer_state.shape[0], 1)
+    return jnp.where(age >= 0, age.astype(jnp.float32) / queue_size, -1.0)
+
+
+def process_output_i(
+    buffer_state,
+    new_buffer_state,
+    new_buffer_birth_state,
+    power_state,
+    channel_state,
+    obs,
+    action,
+    terminal,
+    key,
+    current_step,
+    traffic_mean_arrival_rate,
+    channel_occupancy_pct_window,
+    channel_collisions_pct_window,
+    back_pct,
+    unique_ltc_tx_window,
+    cs_tx_same_type_now,
+    tx_collision_other_now,
+    enable_cs_tx_same_type,
+    enable_tx_collision_other,
+):
+    ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
+    no_tx = obs[-1, ObsIdx.STATUS_NO_TX_COUNTER].astype(jnp.int32)
     args = (action, buffer_state, ret_c, channel_state, no_tx, key)
 
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
@@ -106,14 +136,85 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
     )
 
     buffer_count = jnp.sum((new_buffer_state != EMPTY_PACKET_ID).astype(jnp.int32))
-    obs_t = jnp.array([buffer_count, channel_state, ret_c, no_tx, action], dtype=jnp.int32)
+    buffer_occupancy_pct = buffer_count.astype(jnp.float32) / new_buffer_state.shape[0]
+    oldest_packet_age_norm = _oldest_packet_age_norm(new_buffer_state, new_buffer_birth_state, current_step)
+
+    cs_busy = jnp.where(action == Actions.CS.value, channel_state != 0, -1).astype(jnp.float32)
+    cs_tx_same_type = jnp.where(
+        enable_cs_tx_same_type,
+        jnp.where(jnp.logical_and(action == Actions.CS.value, channel_state == 1), cs_tx_same_type_now, -1.0),
+        -1.0,
+    )
+    tx_collision_other = jnp.where(
+        enable_tx_collision_other,
+        jnp.where(jnp.logical_and(action == Actions.TX.value, channel_state == -1), tx_collision_other_now, -1.0),
+        -1.0,
+    )
+
+    obs_t = jnp.array(
+        [
+            buffer_occupancy_pct,
+            buffer_count.astype(jnp.float32),
+            oldest_packet_age_norm,
+            traffic_mean_arrival_rate,
+            cs_busy,
+            cs_tx_same_type.astype(jnp.float32),
+            tx_collision_other.astype(jnp.float32),
+            channel_occupancy_pct_window,
+            channel_collisions_pct_window,
+            action.astype(jnp.float32),
+            back_pct,
+            ret_c.astype(jnp.float32),
+            no_tx.astype(jnp.float32),
+            unique_ltc_tx_window,
+        ],
+        dtype=jnp.float32,
+    )
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 
     return obs, reward, power
 
 
-def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key):
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, None, 0, 0, 0, None))(
-        buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key
+def process_output(
+    buffer_states,
+    new_buffer_states,
+    new_buffer_birth_states,
+    power_states,
+    channel_state,
+    obs,
+    actions,
+    terminals,
+    key,
+    current_step,
+    traffic_mean_arrival_rate,
+    channel_occupancy_pct_window,
+    channel_collisions_pct_window,
+    back_pct,
+    unique_ltc_tx_window,
+    cs_tx_same_type_now,
+    tx_collision_other_now,
+    enable_cs_tx_same_type,
+    enable_tx_collision_other,
+):
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, None, 0, None, 0, 0, None, None))(
+        buffer_states,
+        new_buffer_states,
+        new_buffer_birth_states,
+        power_states,
+        channel_state,
+        obs,
+        actions,
+        terminals,
+        key,
+        current_step,
+        traffic_mean_arrival_rate,
+        channel_occupancy_pct_window,
+        channel_collisions_pct_window,
+        back_pct,
+        unique_ltc_tx_window,
+        cs_tx_same_type_now,
+        tx_collision_other_now,
+        enable_cs_tx_same_type,
+        enable_tx_collision_other,
     )
