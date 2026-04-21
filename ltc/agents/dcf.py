@@ -3,8 +3,7 @@ import jax.numpy as jnp
 from chex import dataclass
 from reinforced_lib.agents import BaseAgent, AgentState
 
-from ltc.sim.observation import ObsIdx
-from ltc.sim.constants import Actions
+from ltc.sim.constants import Actions, ObsIdx
 
 
 @dataclass

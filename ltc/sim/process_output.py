@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 
-from ltc.sim.observation import ObsIdx
 from ltc.sim.constants import *
 from ltc.sim.sim import is_buffer_empty
 
@@ -115,6 +114,7 @@ def process_output_i(
     tx_collision_other_now,
     enable_cs_tx_same_type,
     enable_tx_collision_other,
+    roll_obs,
 ):
     ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
     no_tx = obs[-1, ObsIdx.STATUS_NO_TX_COUNTER].astype(jnp.int32)
@@ -170,8 +170,12 @@ def process_output_i(
         ],
         dtype=jnp.float32,
     )
-    obs = jnp.roll(obs, -1, axis=0)
-    obs = obs.at[-1].set(obs_t)
+    obs = jax.lax.cond(
+        roll_obs,
+        lambda x: jnp.roll(x, -1, axis=0).at[-1].set(obs_t),
+        lambda x: x.at[-1].set(obs_t),
+        obs,
+    )
 
     return obs, reward, power
 
@@ -196,8 +200,9 @@ def process_output(
     tx_collision_other_now,
     enable_cs_tx_same_type,
     enable_tx_collision_other,
+    roll_obs=True,
 ):
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, None, 0, None, 0, 0, None, None))(
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, None, 0, None, 0, 0, None, None, None))(
         buffer_states,
         new_buffer_states,
         new_buffer_birth_states,
@@ -217,4 +222,5 @@ def process_output(
         tx_collision_other_now,
         enable_cs_tx_same_type,
         enable_tx_collision_other,
+        roll_obs,
     )

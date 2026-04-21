@@ -21,6 +21,7 @@ class Carry:
     channel_busy_hist: jax.Array
     collision_hist: jax.Array
     tx_hist: jax.Array
+    staged_tx: jax.Array
     power_states: jax.Array
     channel_state: int
     key: jax.random.PRNGKey

@@ -3,7 +3,6 @@ import unittest
 import jax
 import jax.numpy as jnp
 
-from ltc.sim.observation import ObsIdx, OBS_SIZE
 from ltc.sim.constants import *
 from ltc.sim.process_output import *
 
