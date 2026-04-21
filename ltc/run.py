@@ -15,6 +15,7 @@ from tqdm import trange
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
+from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
 
@@ -195,6 +196,8 @@ def setup_args():
 
 if __name__ == '__main__':
     args = setup_args()
+    ensure_clean_git_worktree()
+    commit_hash = get_short_commit_hash()
 
     n_init = args.n
     has_n_final = args.n_final is not None
@@ -314,10 +317,10 @@ if __name__ == '__main__':
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    filename = f'history_{n_init}_{n_final}_{seed}.pkl.lz4'
+    filename = build_history_filename(n_init, n_final, seed, commit_hash)
 
     with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((carry.drl_states, all_outputs), f)
+        cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)
 
     if args.save_plots:
         plot_all(filename)
