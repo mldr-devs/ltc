@@ -21,6 +21,17 @@ from ltc.sim.constants import (
     OBS_SIZE,
     MAX_MACRO_DURATION,
     LEGACY_TX_DURATION,
+    TX_REWARD_LENGTH,
+    TX_SIZE_THRESHOLD,
+    TX_SIZE_PENALTY_WINDOW,
+    TX_SIZE_PENALTY,
+    TX_LTC_COLLISION_PENALTY,
+    TX_COEX_COLLISION_PENALTY,
+    TX_EMPTY_BUFFER_PENALTY,
+    TX_MAX_RETRANSMISSION_PENALTY,
+    MAX_RETRANSMISSION,
+    ObsIdx,
+    TX_REWARD,
 )
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
@@ -167,6 +178,32 @@ def decode_legacy_actions(raw_actions, legacy_tx_duration):
     return action_type, duration
 
 
+def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now):
+    tx_executing = slot_actions == Actions.TX.value
+    tx_success = jnp.logical_and(tx_executing, successful_packets > 0)
+    tx_collision = jnp.logical_and(tx_executing, channel_state == -1)
+    tx_collision_max = jnp.logical_and(tx_collision, prev_ret_c >= MAX_RETRANSMISSION)
+    tx_collision_normal = jnp.logical_and(tx_collision, prev_ret_c < MAX_RETRANSMISSION)
+    tx_collision_coex = jnp.logical_and(tx_collision_normal, tx_collision_other_now > 0.5)
+    tx_collision_ltc = jnp.logical_and(tx_collision_normal, tx_collision_other_now <= 0.5)
+    tx_empty = jnp.logical_and(
+        tx_executing,
+        jnp.logical_and(channel_state == 1, successful_packets == 0),
+    )
+
+    k_tx_slot = successful_packets.astype(jnp.float32)
+    k_coll_slot = tx_collision.astype(jnp.float32)
+
+    tx_success_reward = TX_REWARD * (k_tx_slot * TX_REWARD_LENGTH - 2.0) / TX_REWARD_LENGTH
+    tx_collision_reward = (
+        tx_collision_ltc.astype(jnp.float32) * (TX_LTC_COLLISION_PENALTY * k_coll_slot)
+        + tx_collision_coex.astype(jnp.float32) * (TX_COEX_COLLISION_PENALTY * k_coll_slot)
+        + tx_collision_max.astype(jnp.float32) * TX_MAX_RETRANSMISSION_PENALTY
+    )
+    tx_slot_reward = jnp.where(tx_success, tx_success_reward, 0.0) + tx_collision_reward + jnp.where(tx_empty, TX_EMPTY_BUFFER_PENALTY, 0.0)
+    return tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing
+
+
 def rl_step(
     drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
@@ -298,6 +335,7 @@ def rl_step(
         )
 
         done_now = jnp.logical_and(slot_executing, macro_remaining == 1)
+        prev_ret_c = c.obs[:, -1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
         obs, slot_rewards, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
             c.terminals, reward_key, step, traffic_mean_arrival_rate, channel_occupancy_pct_window,
@@ -305,9 +343,26 @@ def rl_step(
             tx_collision_other_now, obs_enable_cs_tx_same_type, obs_enable_tx_collision_other, roll_obs=done_now
         )
 
-        macro_reward_accum = c.macro_reward_accum + jnp.where(slot_executing, slot_rewards, 0.0)
-        rewards = jnp.where(done_now, macro_reward_accum, c.rewards)
+        tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing = upgraded_tx_slot_reward(
+            slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now
+        )
+
+        # TODO: Implement "Else: max 6 ms" clause once precise behavior is finalized.
+        slot_reward_upgraded = jnp.where(tx_executing, tx_slot_reward, slot_rewards)
+
+        macro_tx_success_accum = c.macro_tx_success_accum + jnp.where(slot_executing, k_tx_slot, 0.0)
+        macro_tx_collision_accum = c.macro_tx_collision_accum + jnp.where(slot_executing, k_coll_slot, 0.0)
+        macro_reward_accum = c.macro_reward_accum + jnp.where(slot_executing, slot_reward_upgraded, 0.0)
+
+        size_penalty = TX_SIZE_PENALTY * jnp.minimum(
+            1.0, (macro_tx_success_accum - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW
+        )
+        size_penalty = jnp.where(macro_tx_success_accum >= TX_SIZE_THRESHOLD, size_penalty, 0.0)
+        rewards = jnp.where(done_now, macro_reward_accum + size_penalty, c.rewards)
+
         macro_reward_accum = jnp.where(done_now, 0.0, macro_reward_accum)
+        macro_tx_success_accum = jnp.where(done_now, 0.0, macro_tx_success_accum)
+        macro_tx_collision_accum = jnp.where(done_now, 0.0, macro_tx_collision_accum)
         macro_remaining = jnp.where(slot_executing, macro_remaining - 1, macro_remaining)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
@@ -323,7 +378,7 @@ def rl_step(
         c = Carry(
             drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, buffer_birth_steps,
             arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist, staged_tx,
-            macro_remaining, macro_action_types, macro_reward_accum, powers,
+            macro_remaining, macro_action_types, macro_reward_accum, macro_tx_success_accum, macro_tx_collision_accum, powers,
             channel_state, key, obs, raw_actions, rewards, terminals, active
         )
         o = Output(
@@ -458,6 +513,8 @@ if __name__ == '__main__':
     macro_remaining = jnp.zeros(n, dtype=jnp.int32)
     macro_action_types = jnp.full(n, Actions.IDLE.value, dtype=jnp.int32)
     macro_reward_accum = jnp.zeros(n, dtype=jnp.float32)
+    macro_tx_success_accum = jnp.zeros(n, dtype=jnp.float32)
+    macro_tx_collision_accum = jnp.zeros(n, dtype=jnp.float32)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
     obs = jnp.zeros((n, window_size, OBS_SIZE), dtype=jnp.float32)
@@ -531,7 +588,7 @@ if __name__ == '__main__':
     carry = Carry(
         drl_states, legacy_states, traffic_states, packet_seqs, buffer_states, buffer_birth_steps,
         arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist, staged_tx,
-        macro_remaining, macro_action_types, macro_reward_accum, power_states,
+        macro_remaining, macro_action_types, macro_reward_accum, macro_tx_success_accum, macro_tx_collision_accum, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
     )
     all_outputs = []

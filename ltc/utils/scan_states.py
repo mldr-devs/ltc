@@ -25,6 +25,8 @@ class Carry:
     macro_remaining: jax.Array
     macro_action_types: jax.Array
     macro_reward_accum: jax.Array
+    macro_tx_success_accum: jax.Array
+    macro_tx_collision_accum: jax.Array
     power_states: jax.Array
     channel_state: int
     key: jax.random.PRNGKey
