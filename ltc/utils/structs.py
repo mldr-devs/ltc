@@ -1,8 +1,7 @@
 from dataclasses import dataclass
+from typing import Any
 import jax
 from reinforced_lib.agents import AgentState
-
-from ltc.sim import ModelState
 
 
 @jax.tree_util.register_dataclass
@@ -61,7 +60,7 @@ class ActionDecodingResults:
 class Carry:
     drl_states: AgentState
     legacy_states: AgentState
-    traffic_states: ModelState
+    traffic_states: Any
     packet_seqs: jax.Array
     buffer_states: jax.Array
     tx_hist: jax.Array
