@@ -204,7 +204,7 @@ def _finalize_macro_accumulators(macro_state, done_now, macro_tx_success_accum, 
     return macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
 
 
-def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now):
+def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask):
     tx_executing = slot_actions == Actions.TX.value
     tx_success = jnp.logical_and(tx_executing, successful_packets > 0)
     tx_collision = jnp.logical_and(tx_executing, channel_state == -1)
@@ -213,7 +213,7 @@ def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, pre
     tx_collision_coex = jnp.logical_and(tx_collision_normal, tx_collision_other_now > 0.5)
     tx_collision_ltc = jnp.logical_and(tx_collision_normal, tx_collision_other_now <= 0.5)
     tx_empty = jnp.logical_and(
-        tx_executing,
+        tx_executing & tx_packet_mask,
         jnp.logical_and(channel_state == 1, successful_packets == 0),
     )
 
@@ -376,7 +376,7 @@ def rl_step(
         )
 
         tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing = upgraded_tx_slot_reward(
-            slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now
+            slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask
         )
 
         slot_reward_upgraded = jnp.where(tx_executing, tx_slot_reward, slot_rewards)
