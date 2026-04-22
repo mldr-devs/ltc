@@ -91,3 +91,4 @@ class Output:
     active: jax.Array
     weights_histogram: jax.Array
     weights_bin_edges: jax.Array
+    successful_packets: jax.Array

@@ -207,7 +207,7 @@ def _finalize_macro_accumulators(macro_state, done_now, macro_tx_success_accum, 
 def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask):
     tx_executing = slot_actions == Actions.TX.value
     tx_success = jnp.logical_and(tx_executing, successful_packets > 0)
-    tx_collision = jnp.logical_and(tx_executing, channel_state == -1)
+    tx_collision = jnp.logical_and(tx_executing & tx_packet_mask, channel_state == -1)
     tx_collision_max = jnp.logical_and(tx_collision, prev_ret_c >= MAX_RETRANSMISSION)
     tx_collision_normal = jnp.logical_and(tx_collision, prev_ret_c < MAX_RETRANSMISSION)
     tx_collision_coex = jnp.logical_and(tx_collision_normal, tx_collision_other_now > 0.5)
@@ -429,7 +429,7 @@ def rl_step(
         )
         o = Output(
             legacy_states, obs, raw_actions, rewards, terminals, buffer_states, powers,
-            new_frames, channel_state, active, hist, bin_edges
+            new_frames, channel_state, active, hist, bin_edges, successful_packets
         )
         yield c, o
 

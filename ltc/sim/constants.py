@@ -11,12 +11,18 @@ class Actions(Enum):
 
 
 """
+Time scaling: one TX slot occupies TX_SLOTS mini-slots.
+During one TX, CS agents can observe TX_SLOTS times.
+"""
+TX_SLOTS = 3
+
+"""
 Simulation parameters
 """
 MAX_RETRANSMISSION = 8
-SAFE_IDLE_PERIOD = 25
+SAFE_IDLE_PERIOD = 25 * TX_SLOTS
 SAFE_IDLE_PERIOD_STD = 3
-PENALIZED_IDLE_PERIOD = 25
+PENALIZED_IDLE_PERIOD = 25 * TX_SLOTS
 
 """
 Rewards and penalties
@@ -31,7 +37,7 @@ MAX_RETRANSMISSION_PENALTY = -1.0
 
 TX_REWARD_LENGTH = 5
 TX_SIZE_THRESHOLD = 5
-TX_SIZE_PENALTY_WINDOW = 25
+TX_SIZE_PENALTY_WINDOW = 25 * TX_SLOTS
 TX_SIZE_PENALTY = -1.0
 TX_LTC_COLLISION_PENALTY = -1.0
 TX_COEX_COLLISION_PENALTY = -5.0
@@ -60,12 +66,6 @@ Macro-action defaults
 """
 MAX_MACRO_DURATION = 5
 LEGACY_TX_DURATION = 5
-
-"""
-Time scaling: one TX slot occupies TX_SLOTS mini-slots.
-During one TX, CS agents can observe TX_SLOTS times.
-"""
-TX_SLOTS = 3
 
 
 class ObsIdx:
