@@ -170,8 +170,13 @@ def _update_macro_state_from_ready_agents(
     macro_action_types = macro_action_types.at[:n_drl].set(
         jnp.where(ready_drl, decoded_actions.drl_action_types, macro_state.action_types[:n_drl])
     )
+    drl_scaled_durations = jnp.where(
+        decoded_actions.drl_action_types == Actions.TX.value,
+        decoded_actions.drl_durations * TX_SLOTS,
+        decoded_actions.drl_durations,
+    )
     macro_remaining = macro_remaining.at[:n_drl].set(
-        jnp.where(ready_drl, decoded_actions.drl_durations, macro_state.remaining[:n_drl])
+        jnp.where(ready_drl, drl_scaled_durations, macro_state.remaining[:n_drl])
     )
     staged_tx = staged_tx.at[:n_drl].set(
         jnp.where(ready_drl, decoded_actions.drl_staged_next, obs_tracker.staged_tx[:n_drl])
@@ -180,8 +185,13 @@ def _update_macro_state_from_ready_agents(
     macro_action_types = macro_action_types.at[n_drl:].set(
         jnp.where(ready_legacy, decoded_actions.legacy_action_types, macro_state.action_types[n_drl:])
     )
+    legacy_scaled_durations = jnp.where(
+        decoded_actions.legacy_action_types == Actions.TX.value,
+        decoded_actions.legacy_durations * TX_SLOTS,
+        decoded_actions.legacy_durations,
+    )
     macro_remaining = macro_remaining.at[n_drl:].set(
-        jnp.where(ready_legacy, decoded_actions.legacy_durations, macro_state.remaining[n_drl:])
+        jnp.where(ready_legacy, legacy_scaled_durations, macro_state.remaining[n_drl:])
     )
 
     return macro_action_types, macro_remaining, staged_tx
@@ -281,6 +291,9 @@ def rl_step(
         slot_executing = macro_remaining > 0
         slot_actions = jnp.where(slot_executing, macro_action_types, Actions.IDLE.value)
 
+        # TX transmits a packet only at the first mini-slot of each TX unit
+        tx_packet_mask = (macro_remaining % TX_SLOTS == 0) & (slot_actions == Actions.TX.value)
+
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         (
             buffer_states,
@@ -289,7 +302,7 @@ def rl_step(
             packet_seqs,
             planned_packets,
             successful_packets,
-        ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step)
+        ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step, tx_packet_mask)
 
         is_ltc = jnp.arange(n) < n_drl
         tx_mask = slot_actions == Actions.TX.value

@@ -61,6 +61,12 @@ Macro-action defaults
 MAX_MACRO_DURATION = 5
 LEGACY_TX_DURATION = 5
 
+"""
+Time scaling: one TX slot occupies TX_SLOTS mini-slots.
+During one TX, CS agents can observe TX_SLOTS times.
+"""
+TX_SLOTS = 3
+
 
 class ObsIdx:
     BUFFER_OCCUPANCY_PCT = 0

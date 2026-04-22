@@ -78,6 +78,7 @@ class SimulateTestCase(unittest.TestCase):
         new_frames = jnp.array([0, 2, 1, 0], dtype=jnp.int32)
         actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
 
+        tx_packet_mask = jnp.array([True, False, False, False])
         (
             result_buffer_states,
             result_buffer_birth_steps,
@@ -86,7 +87,8 @@ class SimulateTestCase(unittest.TestCase):
             planned_packets,
             successful_packets,
         ) = simulate(
-            buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step=10
+            buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step=10,
+            tx_packet_mask=tx_packet_mask,
         )
 
         self.assertEqual(result_channel_state, 1)
