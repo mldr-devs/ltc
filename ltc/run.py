@@ -16,7 +16,7 @@ from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
-from ltc.utils.structs import MacroActionState, ObsTrackerState, ActionDecodingResults, Carry, Output
+from ltc.utils.structs import MacroActionState, ObsTrackerState, ActionDecodingResults, Carry, Output, ObsFeatureInputs, ObsFeatureConfig
 from ltc.utils.plots import plot_all, plot_first
 
 
@@ -344,11 +344,22 @@ def rl_step(
 
         done_now = jnp.logical_and(slot_executing, macro_remaining == 1)
         prev_ret_c = c.obs[:, -1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
+        obs_features = ObsFeatureInputs(
+            traffic_mean_arrival_rate=traffic_mean_arrival_rate,
+            channel_occupancy_pct_window=jnp.broadcast_to(channel_occupancy_pct_window, (n,)),
+            channel_collisions_pct_window=jnp.broadcast_to(channel_collisions_pct_window, (n,)),
+            back_pct=back_pct,
+            unique_ltc_tx_window=jnp.broadcast_to(unique_ltc_tx_window, (n,)),
+            cs_tx_same_type_now=cs_tx_same_type_now,
+            tx_collision_other_now=tx_collision_other_now,
+        )
+        obs_config = ObsFeatureConfig(
+            enable_cs_tx_same_type=obs_enable_cs_tx_same_type,
+            enable_tx_collision_other=obs_enable_tx_collision_other,
+        )
         obs, slot_rewards, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
-            c.terminals, reward_key, step, traffic_mean_arrival_rate, channel_occupancy_pct_window,
-            channel_collisions_pct_window, back_pct, unique_ltc_tx_window, cs_tx_same_type_now,
-            tx_collision_other_now, obs_enable_cs_tx_same_type, obs_enable_tx_collision_other, roll_obs=done_now
+            c.terminals, reward_key, step, obs_features, obs_config, roll_obs=done_now
         )
 
         tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing = upgraded_tx_slot_reward(
@@ -390,7 +401,7 @@ def rl_step(
             tx_collision_accum=macro_tx_collision_accum,
         )
         obs_tracker_state = ObsTrackerState(
-            buffer_birth_steps=c.obs_tracker.buffer_birth_steps,
+            buffer_birth_steps=buffer_birth_steps,
             arrival_hist=arrival_hist,
             planned_tx_hist=planned_tx_hist,
             success_tx_hist=success_tx_hist,
