@@ -12,6 +12,7 @@ class MacroActionState:
     reward_accum: jax.Array
     tx_success_accum: jax.Array
     tx_collision_accum: jax.Array
+    sub_collision_flag: jax.Array  # True if any collision in current TX_SLOTS sub-window
 
 
 @jax.tree_util.register_dataclass

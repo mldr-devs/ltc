@@ -14,7 +14,7 @@ class Actions(Enum):
 Time scaling: one TX slot occupies TX_SLOTS mini-slots.
 During one TX, CS agents can observe TX_SLOTS times.
 """
-TX_SLOTS = 3
+TX_SLOTS = 20
 
 """
 Simulation parameters

@@ -13,7 +13,7 @@ import optax
 from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
-from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
+from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate, channel_state_selector
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.structs import MacroActionState, ObsTrackerState, ActionDecodingResults, Carry, Output, ObsFeatureInputs, ObsFeatureConfig
@@ -204,23 +204,24 @@ def _finalize_macro_accumulators(macro_state, done_now, macro_tx_success_accum, 
     return macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
 
 
-def upgraded_tx_slot_reward(slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask):
+def upgraded_tx_slot_reward(slot_actions, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask, sub_collision_flag):
     tx_executing = slot_actions == Actions.TX.value
-    tx_success = jnp.logical_and(tx_executing, successful_packets > 0)
-    tx_collision = jnp.logical_and(tx_executing & tx_packet_mask, channel_state == -1)
+    tx_committed = tx_packet_mask
+    tx_success = jnp.logical_and(tx_committed, jnp.logical_and(~sub_collision_flag, successful_packets > 0))
+    tx_collision = jnp.logical_and(tx_committed, sub_collision_flag)
     tx_collision_max = jnp.logical_and(tx_collision, prev_ret_c >= MAX_RETRANSMISSION)
     tx_collision_normal = jnp.logical_and(tx_collision, prev_ret_c < MAX_RETRANSMISSION)
     tx_collision_coex = jnp.logical_and(tx_collision_normal, tx_collision_other_now > 0.5)
     tx_collision_ltc = jnp.logical_and(tx_collision_normal, tx_collision_other_now <= 0.5)
     tx_empty = jnp.logical_and(
-        tx_executing & tx_packet_mask,
-        jnp.logical_and(channel_state == 1, successful_packets == 0),
+        jnp.logical_and(tx_committed, ~sub_collision_flag),
+        successful_packets == 0,
     )
 
     k_tx_slot = successful_packets.astype(jnp.float32)
     k_coll_slot = tx_collision.astype(jnp.float32)
 
-    tx_success_reward = TX_REWARD * (k_tx_slot * TX_REWARD_LENGTH - 2.0) / TX_REWARD_LENGTH
+    tx_success_reward = TX_REWARD * k_tx_slot
     tx_collision_reward = (
         tx_collision_ltc.astype(jnp.float32) * (TX_LTC_COLLISION_PENALTY * k_coll_slot)
         + tx_collision_coex.astype(jnp.float32) * (TX_COEX_COLLISION_PENALTY * k_coll_slot)
@@ -291,8 +292,18 @@ def rl_step(
         slot_executing = macro_remaining > 0
         slot_actions = jnp.where(slot_executing, macro_action_types, Actions.IDLE.value)
 
-        # TX transmits a packet only at the first mini-slot of each TX unit
-        tx_packet_mask = (macro_remaining % TX_SLOTS == 0) & (slot_actions == Actions.TX.value)
+        # Sub-window collision tracking: one packet = TX_SLOTS mini-slots
+        tx_executing_pre = slot_actions == Actions.TX.value
+        channel_state_prelim = channel_state_selector(slot_actions)
+        sub_window_start = (macro_remaining % TX_SLOTS == 0) & slot_executing & tx_executing_pre
+        sub_collision_flag = jnp.where(sub_window_start, False, c.macro.sub_collision_flag)
+        sub_collision_flag = jnp.where(
+            tx_executing_pre & (channel_state_prelim == -1),
+            True,
+            sub_collision_flag,
+        )
+        tx_packet_mask = (macro_remaining % TX_SLOTS == 1) & slot_executing & tx_executing_pre
+        tx_success_mask = tx_packet_mask & ~sub_collision_flag
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         (
@@ -302,7 +313,8 @@ def rl_step(
             packet_seqs,
             planned_packets,
             successful_packets,
-        ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step, tx_packet_mask)
+        ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step,
+                     tx_packet_mask=tx_packet_mask, tx_success_mask=tx_success_mask)
 
         is_ltc = jnp.arange(n) < n_drl
         tx_mask = slot_actions == Actions.TX.value
@@ -376,7 +388,7 @@ def rl_step(
         )
 
         tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing = upgraded_tx_slot_reward(
-            slot_actions, channel_state, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask
+            slot_actions, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask, sub_collision_flag
         )
 
         slot_reward_upgraded = jnp.where(tx_executing, tx_slot_reward, slot_rewards)
@@ -385,11 +397,14 @@ def rl_step(
         macro_tx_collision_accum = c.macro.tx_collision_accum + jnp.where(slot_executing, k_coll_slot, 0.0)
         macro_reward_accum = c.macro.reward_accum + jnp.where(slot_executing, slot_reward_upgraded, 0.0)
 
+        k_total = macro_tx_success_accum
+        length_scale = (k_total * TX_REWARD_LENGTH - 2.0) / TX_REWARD_LENGTH
+        length_bonus = jnp.where(k_total > 0, TX_REWARD * length_scale, 0.0)
         size_penalty = TX_SIZE_PENALTY * jnp.minimum(
             1.0, (macro_tx_success_accum - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW
         )
         size_penalty = jnp.where(macro_tx_success_accum >= TX_SIZE_THRESHOLD, size_penalty, 0.0)
-        rewards = jnp.where(done_now, macro_reward_accum + size_penalty, c.rewards)
+        rewards = jnp.where(done_now, macro_reward_accum + length_bonus + size_penalty, c.rewards)
 
         macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum = _finalize_macro_accumulators(
             c.macro, done_now, macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
@@ -412,6 +427,7 @@ def rl_step(
             reward_accum=macro_reward_accum,
             tx_success_accum=macro_tx_success_accum,
             tx_collision_accum=macro_tx_collision_accum,
+            sub_collision_flag=sub_collision_flag,
         )
         obs_tracker_state = ObsTrackerState(
             buffer_birth_steps=buffer_birth_steps,
@@ -560,6 +576,7 @@ if __name__ == '__main__':
     macro_reward_accum = jnp.zeros(n, dtype=jnp.float32)
     macro_tx_success_accum = jnp.zeros(n, dtype=jnp.float32)
     macro_tx_collision_accum = jnp.zeros(n, dtype=jnp.float32)
+    macro_sub_collision_flag = jnp.zeros(n, dtype=bool)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
     obs = jnp.zeros((n, window_size, OBS_SIZE), dtype=jnp.float32)
@@ -636,6 +653,7 @@ if __name__ == '__main__':
         reward_accum=macro_reward_accum,
         tx_success_accum=macro_tx_success_accum,
         tx_collision_accum=macro_tx_collision_accum,
+        sub_collision_flag=macro_sub_collision_flag,
     )
     obs_tracker_state = ObsTrackerState(
         buffer_birth_steps=buffer_birth_steps,

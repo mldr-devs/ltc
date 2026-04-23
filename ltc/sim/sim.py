@@ -76,14 +76,13 @@ def add_new_frames(buffer_states, buffer_birth_steps, new_frames, packet_seqs, c
     )
 
 
-def simulate(buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step, tx_packet_mask):
+def simulate(buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step,
+             tx_packet_mask, tx_success_mask):
     channel_state = channel_state_selector(actions)
     pre_nonempty = jnp.any(buffer_states != EMPTY_PACKET_ID, axis=1)
-    success_tx = (actions == Actions.TX.value) & (channel_state == 1)
-    # tx_packet_mask: True only in the first mini-slot of each TX unit (actual packet send)
-    packet_tx = success_tx & tx_packet_mask
-    planned_packets = ((actions == Actions.TX.value) & tx_packet_mask).astype(jnp.int32)
-    successful_packets = (packet_tx & pre_nonempty).astype(jnp.int32)
+    packet_tx = tx_success_mask & pre_nonempty
+    planned_packets = tx_packet_mask.astype(jnp.int32)
+    successful_packets = packet_tx.astype(jnp.int32)
     queue_size = buffer_states.shape[1]
     head_mask = jnp.arange(queue_size) == 0
     tx_masks = packet_tx[:, None] & head_mask[None, :]
