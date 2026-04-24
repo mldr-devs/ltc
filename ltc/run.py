@@ -273,7 +273,7 @@ if __name__ == '__main__':
         tau=0.05
     )
     key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n)
+    drl_states, drl_step = init_agents(drl, init_key, n_drl)
     drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
 
     dcf = DCF()
