@@ -191,6 +191,7 @@ def setup_args():
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
+    parser.add_argument('--legacy_value', type=float, default=0.1, help='loc traffic generator parameter.')
     args = parser.parse_args()
     return args
 
@@ -211,6 +212,7 @@ if __name__ == '__main__':
     window_size = args.window_size
     seed = args.seed
     legacy_type = args.legacy_type
+    legacy_value = args.legacy_value
     traffic_type = args.traffic_type
 
     loc = args.loc
@@ -278,7 +280,7 @@ if __name__ == '__main__':
     key, init_key = jax.random.split(key)
 
     if legacy_type == 'q-aloha':
-        legacy = QALOHA(q=0.5)
+        legacy = QALOHA(q=legacy_value)
     elif legacy_type == 'eb-aloha':
         legacy = EBALOHA(window_size=4, max_backoff=2)
     elif legacy_type == 'fw-aloha':
