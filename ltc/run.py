@@ -12,7 +12,7 @@ import lz4.frame
 import optax
 from tqdm import trange
 
-from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
+from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork, QALOHA, EBALOHA, FWALOHA, TDMA
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
@@ -175,6 +175,7 @@ def rl_step(
 def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
+    parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents in the simulation.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
     parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
@@ -199,6 +200,7 @@ if __name__ == '__main__':
     ensure_clean_git_worktree()
     commit_hash = get_short_commit_hash()
 
+    n_drl = args.n_drl
     n_init = args.n
     has_n_final = args.n_final is not None
     n_final = args.n_final if has_n_final else n_init
@@ -208,6 +210,7 @@ if __name__ == '__main__':
     total_steps = n_epochs * n_steps
     window_size = args.window_size
     seed = args.seed
+    legacy_type = args.legacy_type
     traffic_type = args.traffic_type
 
     loc = args.loc
@@ -273,7 +276,19 @@ if __name__ == '__main__':
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
-    legacy_states, legacy_step = init_agents(dcf, init_key, 0)
+
+    if legacy_type == 'q-aloha':
+        legacy = QALOHA(q=0.5)
+    elif legacy_type == 'eb-aloha':
+        legacy = EBALOHA(window_size=4, max_backoff=2)
+    elif legacy_type == 'fw-aloha':
+        legacy = FWALOHA(window_size=4)
+    elif legacy_type == 'tdma':
+        legacy = TDMA(state_size=10, assigned_slots=5)
+    else:
+        raise ValueError(f'Unknown legacy type: {legacy_type}')
+
+    legacy_states, legacy_step = init_agents(legacy, init_key, n - n_drl)
 
     key, init_key = jax.random.split(key)
 
@@ -295,7 +310,7 @@ if __name__ == '__main__':
         legacy_step,
         traffic_step,
         n,
-        n,
+        n_drl,
         one_shot_step=one_shot_step,
         one_shot_target=one_shot_target,
         station_change_interval=station_change_interval,
