@@ -53,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seed", type=int, default=42, help="Seed used for filename matching"
     )
+    parser.add_argument("--output", type=str, default=None, help="Output .csv path")
 
     args = parser.parse_args()
 
@@ -87,6 +88,6 @@ if __name__ == "__main__":
     df["agent"] = agent_ids
     df["action"] = actions
 
-    out_path = str(history_file).replace(".pkl.lz4", ".csv")
+    out_path = args.output if args.output else str(history_file).replace(".pkl.lz4", ".csv")
     df.to_csv(out_path, index=False)
     print(f"Saved: {out_path} ({len(df)} rows)")

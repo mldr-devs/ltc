@@ -19,6 +19,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_estimators", type=int, default=1500, help="Number of trees"
     )
+    parser.add_argument("--output", type=str, default=None, help="Output .forest.pkl path")
     args = parser.parse_args()
 
     df = pd.read_csv(args.file)
@@ -26,6 +27,6 @@ if __name__ == "__main__":
 
     print(f"OOB score: {forest.oob_score_:.4f}")
 
-    out_path = args.file.replace(".csv", ".forest.pkl")
+    out_path = args.output if args.output else args.file.replace(".csv", ".forest.pkl")
     joblib.dump(forest, out_path)
     print(f"Saved: {out_path}")
