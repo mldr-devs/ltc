@@ -4,13 +4,15 @@ CSV_FILES    := $(addprefix out/, $(addsuffix .csv, $(BASENAMES)))
 FOREST_FILES := $(addprefix out/, $(addsuffix .forest.pkl, $(BASENAMES)))
 SR_STAMPS    := $(addprefix out/, $(addsuffix .sr.done, $(BASENAMES)))
 
-.PHONY: all distill sr clean
+.PHONY: all distill sr report clean
 
-all: distill sr
+all: distill sr report
 
 distill: $(FOREST_FILES)
 
 sr: $(SR_STAMPS)
+
+report: out/report.html
 
 .PRECIOUS: $(CSV_FILES)
 
@@ -26,6 +28,9 @@ out/%.forest.pkl: out/%.csv
 out/%.sr.done: out/%.csv
 	python -m ltc.symbolic.sr --file "$<" --output "out/$*" --pysr_output_dir out/output
 	touch "$@"
+
+out/report.html: $(SR_STAMPS) $(FOREST_FILES)
+	marimo export html ltc/symbolic/report.py -o "$@" -f
 
 clean:
 	rm -rf out
