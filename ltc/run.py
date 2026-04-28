@@ -15,7 +15,7 @@ from tqdm import trange
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork, QALOHA, EBALOHA, FWALOHA, TDMA
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
-from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
+from ltc.utils.history import agents_slug, build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
 
@@ -413,7 +413,7 @@ if __name__ == '__main__':
     metadata['n_drl'] = n_drl
     metadata['n_final'] = n_final
 
-    filename = build_history_filename(n, n_drl, seed, commit_hash)
+    filename = build_history_filename(n, n_drl, seed, commit_hash, slug=agents_slug(agent_groups))
 
     with lz4.frame.open(filename, 'wb') as f:
         cloudpickle.dump((carry.drl_states, all_outputs, metadata), f)

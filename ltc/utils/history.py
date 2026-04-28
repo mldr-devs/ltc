@@ -27,11 +27,24 @@ def get_short_commit_hash() -> str:
     return _run_git_command("rev-parse", "--short", "HEAD")
 
 
-def build_history_filename(n: int, n_drl: int, seed: int, commit_hash: str | None = None) -> str:
-    parts = [f"history_{n}_{n_drl}_{seed}"]
+def agents_slug(agent_groups: list[tuple[str, int, float | None]]) -> str:
+    """Build a compact filename-safe string from agent groups, e.g. 'drl9_q-aloha1p0.05'."""
+    parts = []
+    for atype, count, param in agent_groups:
+        if param is not None:
+            parts.append(f"{atype}{count}p{param:g}")
+        else:
+            parts.append(f"{atype}{count}")
+    return "_".join(parts)
+
+
+def build_history_filename(n: int, n_drl: int, seed: int, commit_hash: str | None = None, slug: str | None = None) -> str:
+    base = f"history_{n}_{n_drl}_{seed}"
+    if slug:
+        base = f"{base}_{slug}"
     if commit_hash is not None:
-        parts.append(commit_hash)
-    return f"{'_'.join(parts)}{HISTORY_SUFFIX}"
+        base = f"{base}_{commit_hash}"
+    return f"{base}{HISTORY_SUFFIX}"
 
 
 def parse_history_filename(path: str) -> tuple[int, int, int, str | None]:
@@ -41,11 +54,11 @@ def parse_history_filename(path: str) -> tuple[int, int, int, str | None]:
 
     stem = filename[: -len(HISTORY_SUFFIX)]
     parts = stem.split("_")
-    if parts[0] != "history" or len(parts) not in (4, 5):
+    if parts[0] != "history" or len(parts) < 4:
         raise ValueError(f"Unsupported history filename format: {filename}")
 
-    _, n, n_drl, seed, *hash_part = parts
-    commit_hash = hash_part[0] if hash_part else None
+    _, n, n_drl, seed = parts[:4]
+    commit_hash = parts[-1] if len(parts) > 4 else None
     return int(n), int(n_drl), int(seed), commit_hash
 
 
