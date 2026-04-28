@@ -10,7 +10,7 @@ from ltc.sim import ModelState
 @dataclass
 class Carry:
     drl_states: AgentState
-    legacy_states: AgentState
+    legacy_states: tuple  # tuple[AgentState, ...], one per legacy group
     traffic_states: ModelState
     buffer_states: jax.Array
     power_states: jax.Array
@@ -26,7 +26,7 @@ class Carry:
 @jax.tree_util.register_dataclass
 @dataclass
 class Output:
-    legacy_states: AgentState
+    legacy_states: tuple  # tuple[AgentState, ...], one per legacy group
     observations: jax.Array
     actions: jax.Array
     rewards: jax.Array

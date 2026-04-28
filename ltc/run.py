@@ -20,6 +20,42 @@ from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
 
 
+def parse_agent_groups(specs: list[str]) -> list[tuple[str, int, float | None]]:
+    """
+    Parse agent specs of the form 'type:count' or 'type:count:param'.
+    DRL must be first if present. Returns list of (type, count, param) tuples.
+    """
+    groups = []
+    for spec in specs:
+        parts = spec.split(':')
+        if len(parts) < 2:
+            raise ValueError(f'Invalid agent spec: {spec!r}. Expected type:count or type:count:param')
+        atype = parts[0]
+        count = int(parts[1])
+        param = float(parts[2]) if len(parts) > 2 else None
+        groups.append((atype, count, param))
+
+    drl_indices = [i for i, (t, _, _) in enumerate(groups) if t == 'drl']
+    if len(drl_indices) > 1:
+        raise ValueError('At most one DRL group is allowed in --agents')
+    if drl_indices and drl_indices[0] != 0:
+        raise ValueError('The DRL group must be first in --agents')
+
+    return groups
+
+
+def make_legacy_agent(atype: str, param: float | None):
+    if atype == 'q-aloha':
+        return QALOHA(q=param if param is not None else 0.1)
+    elif atype == 'eb-aloha':
+        return EBALOHA(window_size=4, max_backoff=2)
+    elif atype == 'fw-aloha':
+        return FWALOHA(window_size=4)
+    elif atype == 'tdma':
+        return TDMA(state_size=10, assigned_slots=5)
+    else:
+        raise ValueError(f'Unknown legacy agent type: {atype!r}')
+
 
 def init_agents(agent, key, n):
     keys = jax.random.split(key, n)
@@ -97,10 +133,13 @@ def schedule_active_stations(
 
 
 def rl_step(
-    drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
-    one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
+    drl_step, legacy_steps, traffic_step, n, n_drl, n_bins=50,
+    one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0,
     station_change_start_step=0, station_change_stop_step=None, station_change_target=None,
 ):
+    """
+    legacy_steps: list of (step_fn, count) pairs, one per legacy agent group.
+    """
     def rl_step_coroutine(c, step):
         active = schedule_active_stations(
             c.active,
@@ -114,18 +153,44 @@ def rl_step(
             station_change_target=station_change_target,
         )
 
-        key, drl_keys, legacy_keys, traffic_key, reward_key = jax.random.split(c.key, 5)
-        drl_keys = jax.random.split(drl_keys, n_drl)
-        legacy_keys = jax.random.split(legacy_keys, n - n_drl)
+        key, drl_key_raw, legacy_key_raw, traffic_key, reward_key = jax.random.split(c.key, 5)
+        n_legacy = n - n_drl
         traffic_keys = jax.random.split(traffic_key, n)
 
-        drl_states, drl_actions = yield drl_step(
-            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
-        )
-        legacy_states, legacy_actions = legacy_step(
-            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
-        )
-        actions = jnp.concatenate([drl_actions, legacy_actions])
+        # DRL step (skipped if n_drl == 0)
+        if n_drl > 0:
+            drl_keys = jax.random.split(drl_key_raw, n_drl)
+            drl_intermediate = drl_step(
+                c.drl_states, drl_keys,
+                c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
+            )
+        else:
+            drl_intermediate = (c.drl_states, jnp.zeros(0, dtype=int))
+        drl_states, drl_actions = yield drl_intermediate
+
+        # Legacy steps — one call per group
+        all_legacy_keys = jax.random.split(legacy_key_raw, n_legacy) if n_legacy > 0 else jnp.zeros((0, 2), dtype=jnp.uint32)
+        new_legacy_states = []
+        all_legacy_actions = []
+        lkey_offset = 0
+        sta_offset = n_drl
+        for i, (lstep, lcount) in enumerate(legacy_steps):
+            lkeys = all_legacy_keys[lkey_offset:lkey_offset + lcount]
+            lst, lact = lstep(
+                c.legacy_states[i], lkeys,
+                c.obs[sta_offset:sta_offset + lcount],
+                c.actions[sta_offset:sta_offset + lcount],
+                c.rewards[sta_offset:sta_offset + lcount],
+                c.terminals[sta_offset:sta_offset + lcount],
+                active[sta_offset:sta_offset + lcount],
+            )
+            new_legacy_states.append(lst)
+            all_legacy_actions.append(lact)
+            lkey_offset += lcount
+            sta_offset += lcount
+
+        legacy_states = tuple(new_legacy_states)
+        actions = jnp.concatenate([drl_actions] + all_legacy_actions)
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
@@ -165,7 +230,6 @@ def rl_step(
 
     def post_rl_fn(intermediate, *args, **kwargs):
         gen = rl_step_coroutine(*args, **kwargs)
-        # Unused computations will be DCE-ed
         _ = next(gen)
         return gen.send(intermediate)
 
@@ -174,9 +238,17 @@ def rl_step(
 
 def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
-    parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
-    parser.add_argument('--n_drl', type=int, default=5, help='Number of DRL agents in the simulation.')
-    parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
+    parser.add_argument(
+        '--agents', type=str, nargs='+', required=True,
+        metavar='TYPE:COUNT[:PARAM]',
+        help=(
+            'Agent groups in order. DRL must be first if present. '
+            'Format: type:count or type:count:param. '
+            'Types: drl, q-aloha (param=q), eb-aloha, fw-aloha, tdma. '
+            'Examples: --agents drl:5 q-aloha:1:0.333 | --agents eb-aloha:5 q-aloha:1:0.5'
+        ),
+    )
+    parser.add_argument('--n_final', type=int, help='Final number of active stations (one-shot reduction at mid-run).')
     parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
@@ -189,9 +261,7 @@ def setup_args():
     parser.add_argument('--station_change_delta', type=int, default=0, help='Stations to add/remove per interval tick. Negative values remove stations.')
     parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
-    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
-    parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
-    parser.add_argument('--legacy_value', type=float, default=0.1, help='loc traffic generator parameter.')
+    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'], help="Traffic model to use.")
     args = parser.parse_args()
     return args
 
@@ -201,18 +271,21 @@ if __name__ == '__main__':
     ensure_clean_git_worktree()
     commit_hash = get_short_commit_hash()
 
-    n_drl = args.n_drl
-    n_init = args.n
+    agent_groups = parse_agent_groups(args.agents)
+    n_drl = next((count for atype, count, _ in agent_groups if atype == 'drl'), 0)
+    n = sum(count for _, count, _ in agent_groups)
+    legacy_group_specs = [(atype, count, param) for atype, count, param in agent_groups if atype != 'drl']
+
     has_n_final = args.n_final is not None
-    n_final = args.n_final if has_n_final else n_init
-    n = max(n_init, n_final)
+    n_final = args.n_final if has_n_final else n
+    if n_final > n:
+        raise ValueError(f'--n_final ({n_final}) cannot exceed total agent count ({n})')
+
     n_epochs = args.n_epochs
     n_steps = args.n_steps
     total_steps = n_epochs * n_steps
     window_size = args.window_size
     seed = args.seed
-    legacy_type = args.legacy_type
-    legacy_value = args.legacy_value
     traffic_type = args.traffic_type
 
     loc = args.loc
@@ -237,7 +310,7 @@ if __name__ == '__main__':
     one_shot_step = None
     one_shot_target = None
     station_change_target = n_final if has_n_final else None
-    if station_change_interval is None and n_final != n_init:
+    if station_change_interval is None and n_final != n:
         one_shot_step = total_steps // 2
         one_shot_target = n_final
 
@@ -250,7 +323,7 @@ if __name__ == '__main__':
     obs = jnp.zeros((n, window_size, 5), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
-    active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
+    active = jnp.ones(n, dtype=bool)
 
     lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=60000, alpha=0.01)
     optimizer = optax.chain(
@@ -273,24 +346,24 @@ if __name__ == '__main__':
         tau=0.05
     )
     key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n_drl)
-    drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
-
-    dcf = DCF()
-    key, init_key = jax.random.split(key)
-
-    if legacy_type == 'q-aloha':
-        legacy = QALOHA(q=legacy_value)
-    elif legacy_type == 'eb-aloha':
-        legacy = EBALOHA(window_size=4, max_backoff=2)
-    elif legacy_type == 'fw-aloha':
-        legacy = FWALOHA(window_size=4)
-    elif legacy_type == 'tdma':
-        legacy = TDMA(state_size=10, assigned_slots=5)
+    if n_drl > 0:
+        drl_states, drl_step_fn = init_agents(drl, init_key, n_drl)
+        drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
     else:
-        raise ValueError(f'Unknown legacy type: {legacy_type}')
+        # Dummy DRL state (never used in step, just keeps Carry structure consistent)
+        drl_states, drl_step_fn = init_agents(drl, init_key, 1)
+        drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
 
-    legacy_states, legacy_step = init_agents(legacy, init_key, n - n_drl)
+    # Initialize each legacy group independently
+    all_legacy_states = []
+    legacy_agent_steps = []
+    for atype, lcount, param in legacy_group_specs:
+        legacy_agent = make_legacy_agent(atype, param)
+        key, init_key = jax.random.split(key)
+        lstates, lstep = init_agents(legacy_agent, init_key, lcount)
+        all_legacy_states.append(lstates)
+        legacy_agent_steps.append((lstep, lcount))
+    legacy_states = tuple(all_legacy_states)
 
     key, init_key = jax.random.split(key)
 
@@ -308,8 +381,8 @@ if __name__ == '__main__':
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn, _, _ = rl_step(
-        drl_step,
-        legacy_step,
+        drl_step_fn,
+        legacy_agent_steps,
         traffic_step,
         n,
         n_drl,
@@ -334,10 +407,16 @@ if __name__ == '__main__':
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    filename = build_history_filename(n_init, n_final, seed, commit_hash)
+
+    metadata = vars(args)
+    metadata['n'] = n
+    metadata['n_drl'] = n_drl
+    metadata['n_final'] = n_final
+
+    filename = build_history_filename(n, n_drl, seed, commit_hash)
 
     with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)
+        cloudpickle.dump((carry.drl_states, all_outputs, metadata), f)
 
     if args.save_plots:
         plot_all(filename)
