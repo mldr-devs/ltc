@@ -1,4 +1,4 @@
-PKL_FILES    := $(wildcard explain/nosvi/*.pkl.lz4)
+PKL_FILES    := $(wildcard data/nosvi/*.pkl.lz4)
 BASENAMES    := $(notdir $(PKL_FILES:.pkl.lz4=))
 CSV_FILES    := $(addprefix out/, $(addsuffix .csv, $(BASENAMES)))
 FOREST_FILES := $(addprefix out/, $(addsuffix .forest.pkl, $(BASENAMES)))

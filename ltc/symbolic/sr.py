@@ -27,7 +27,7 @@ def fit_sr(
         unary_operators=["exp"],
         constraints={"^": (-1, 1), "exp": 3},
         elementwise_loss="LogitMarginLoss()",
-        temp_equation_file=True,
+        temp_equation_file=output_directory is None,
         turbo=True,
         output_directory=output_directory,
     )
@@ -47,14 +47,16 @@ if __name__ == "__main__":
         help="Output path prefix; per-agent files are saved as <prefix>_agent_<n>.sr.pkl",
     )
     parser.add_argument(
-        "--agent", type=int, default=0, help="Single agent to fit (default: 0)"
+        "--agent", type=int, default=None, help="Single agent to fit (default: all)"
     )
     parser.add_argument("--n_iterations", type=int, default=100, help="PySR iterations")
     parser.add_argument(
         "--n_populations", type=int, default=10, help="PySR populations"
     )
     parser.add_argument(
-        "--pysr_output_dir", type=str, default=None,
+        "--pysr_output_dir",
+        type=str,
+        default=None,
         help="Directory for PySR equation files (default: system temp)",
     )
     args = parser.parse_args()
