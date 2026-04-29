@@ -25,7 +25,7 @@ def _():
     import sympy
 
     os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
-    return glob, joblib, np, os, pd, pickle, plt, sns, sympy
+    return glob, joblib, np, os, pd, pickle, plt, sns
 
 
 @app.cell
@@ -102,12 +102,14 @@ def _(agents, mo):
 def _(agent_sel, mo, sr_models):
     _ag = agent_sel.value
     _model = sr_models[_ag]
-    _eqs = _model.equations_[["equation", "loss", "complexity",]].copy()
+    _eqs = _model.equations_[["equation", "loss", "complexity","score"]].copy()
 
     # from PySR
-    threshold = 1.5 * _model.equations_["loss"].min()
-    filtered_equations = _model.equations_.query(f"loss <= {threshold}")
-    _best_idx = filtered_equations["score"].idxmax()
+    # threshold = 1.5 * _model.equations_["loss"].min()
+    # filtered_equations = _model.equations_.query(f"loss <= {threshold}")
+    # _best_idx = filtered_equations["score"].idxmax()
+
+    _best_idx = _model.equations_["score"].idxmax()
 
 
 
@@ -132,16 +134,12 @@ def _(mo):
 
 
 @app.cell
-def _(agents, base, df, np, plt, sns, sr_models, sympy):
+def _(agents, base, df, np, plt, sns, sr_models):
     _feat_cols = [c for c in df.columns if c not in {"agent", "action"}]
 
     def _predict(model, X):
-        expr = model.sympy()
-        free_syms = sorted(expr.free_symbols, key=lambda s: s.name)
-        if not free_syms:
-            return np.full(len(X), float(expr))
-        f = sympy.lambdify(free_syms, expr, "numpy")
-        return f(*[X[s.name].values for s in free_syms])
+        best_idx = model.equations_["score"].idxmax()
+        return model.predict(X.values, best_idx)
 
     n = len(agents)
     _acc = np.zeros((n, n))
