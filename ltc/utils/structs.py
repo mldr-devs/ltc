@@ -9,10 +9,15 @@ from reinforced_lib.agents import AgentState
 class MacroActionState:
     remaining: jax.Array
     action_types: jax.Array
-    reward_accum: jax.Array
-    tx_success_accum: jax.Array
-    tx_collision_accum: jax.Array
-    sub_collision_flag: jax.Array  # True if any collision in current TX_SLOTS sub-window
+    tx_success_accum: jax.Array          # k_tx: successful subframes
+    k_coll_ltc: jax.Array                # collided subframes vs LTC
+    k_coll_coex: jax.Array               # collided subframes vs coex
+    sub_collision_flag: jax.Array        # True if any collision in current TX_SLOTS sub-window
+    sub_collision_other_flag: jax.Array  # True if any coex collision in current TX_SLOTS sub-window
+    header_collision: jax.Array          # True if first mini-slot of macro TX collided
+    header_collision_other: jax.Array    # True if the header collision was with a non-LTC station
+    initial_ret_c: jax.Array             # ret_c captured at macro TX start
+    tx_started_empty: jax.Array          # True if buffer was empty when macro TX began
 
 
 @jax.tree_util.register_dataclass

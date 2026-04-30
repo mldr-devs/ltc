@@ -5,7 +5,7 @@ import subprocess
 HISTORY_SUFFIX = ".pkl.lz4"
 
 
-def _run_git_command(*args: str) -> str:
+def run_git_command(*args: str) -> str:
     result = subprocess.run(
         ["git", *args],
         check=True,
@@ -16,7 +16,7 @@ def _run_git_command(*args: str) -> str:
 
 
 def ensure_clean_git_worktree() -> None:
-    status = _run_git_command("status", "--porcelain", "--untracked-files=no")
+    status = run_git_command("status", "--porcelain", "--untracked-files=no")
     if status:
         raise RuntimeError(
             "Refusing to run with tracked uncommitted changes. Commit or stash changes first."
@@ -24,7 +24,7 @@ def ensure_clean_git_worktree() -> None:
 
 
 def get_short_commit_hash() -> str:
-    return _run_git_command("rev-parse", "--short", "HEAD")
+    return run_git_command("rev-parse", "--short", "HEAD")
 
 
 def build_history_filename(n: int, n_drl: int, seed: int, commit_hash: str | None = None) -> str:

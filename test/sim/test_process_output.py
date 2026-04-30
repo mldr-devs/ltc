@@ -18,46 +18,34 @@ class ProcessOutputTestCase(unittest.TestCase):
         self.assertEqual(reward, 0.0)
         self.assertEqual(r, 5)
 
-    def test_transmission_without_collision_empty_buffer(self):
-        args = (Actions.TX.value, jnp.array([EMPTY, EMPTY, EMPTY]), 3, 1, 1, KEY)
-        reward, r, no_tx = transmission_without_collision(args)
-        self.assertEqual(reward, EMPTY_TX_PENALTY)
-        self.assertEqual(r, 0)
-
-    def test_transmission_without_collision_successful(self):
-        args = (Actions.TX.value, jnp.array([5, EMPTY, EMPTY]), 2, 1, 1, KEY)
-        reward, r, no_tx = transmission_without_collision(args)
-        self.assertAlmostEqual(reward, TX_REWARD)
-        self.assertEqual(r, 0)
-
     def test_transmission_with_collision_retransmission(self):
         args = (Actions.TX.value, jnp.array([5, EMPTY, EMPTY]), 2, -1, 1, KEY)
         reward, r, no_tx = transmission_with_collision(args)
-        self.assertEqual(reward, COLLISION_PENALTY)
+        self.assertEqual(reward, 0.0)
         self.assertEqual(r, 3)
 
     def test_transmission_with_collision_max_retransmission(self):
         args = (Actions.TX.value, jnp.array([5, EMPTY, EMPTY]), MAX_RETRANSMISSION, -1, 1, KEY)
         reward, r, no_tx = transmission_with_collision(args)
-        self.assertEqual(reward, MAX_RETRANSMISSION_PENALTY)
+        self.assertEqual(reward, 0.0)
         self.assertEqual(r, 0)
 
     def test_transmission_collision_path(self):
         args = (Actions.TX.value, jnp.array([5, EMPTY, EMPTY]), 7, -1, 1, KEY)
         reward, r, no_tx = transmission(args)
-        self.assertEqual(reward, COLLISION_PENALTY)
+        self.assertEqual(reward, 0.0)
         self.assertEqual(r, 8)
 
     def test_transmission_successful_path(self):
         args = (Actions.TX.value, jnp.array([5, EMPTY, EMPTY]), 1, 1, 1, KEY)
         reward, r, no_tx = transmission(args)
-        self.assertAlmostEqual(reward, TX_REWARD)
+        self.assertEqual(reward, 0.0)
         self.assertEqual(r, 0)
 
     def test_transmission_empty_buffer(self):
         args = (Actions.TX.value, jnp.array([EMPTY, EMPTY, EMPTY]), 1, 1, 1, KEY)
         reward, r, no_tx = transmission(args)
-        self.assertEqual(reward, EMPTY_TX_PENALTY)
+        self.assertEqual(reward, 0.0)
         self.assertEqual(r, 0)
 
     def test_process_rl_output(self):
@@ -102,6 +90,18 @@ class ProcessOutputTestCase(unittest.TestCase):
             enable_tx_collision_other=True,
         )
 
+        # Agent 0: TX, collision, ret_c=8 >= MAX_RETRANSMISSION, coex collision → TX_MAX_RETRANSMISSION_PENALTY
+        done_now = jnp.array([True, True, True, True])
+        k_tx = jnp.zeros(4, dtype=jnp.float32)
+        k_coll_ltc = jnp.zeros(4, dtype=jnp.float32)
+        k_coll_coex = jnp.array([1.0, 0.0, 1.0, 1.0], dtype=jnp.float32)  # coex collision for TX agents
+        header_collision = jnp.zeros(4, dtype=bool)
+        header_collision_other = jnp.zeros(4, dtype=bool)
+        ack_collision = jnp.zeros(4, dtype=bool)
+        ack_collision_other = jnp.zeros(4, dtype=bool)
+        initial_ret_c = jnp.array([8, 0, 8, 8], dtype=jnp.int32)
+        tx_started_empty = jnp.array([True, False, False, True], dtype=bool)
+
         result_obs, result_R, power = process_output(
             buffer_states=buffer_states,
             new_buffer_states=new_buffer_states,
@@ -115,6 +115,16 @@ class ProcessOutputTestCase(unittest.TestCase):
             current_step=10,
             obs_features=obs_features,
             obs_config=obs_config,
+            done_now=done_now,
+            k_tx=k_tx,
+            k_coll_ltc=k_coll_ltc,
+            k_coll_coex=k_coll_coex,
+            header_collision=header_collision,
+            header_collision_other=header_collision_other,
+            ack_collision=ack_collision,
+            ack_collision_other=ack_collision_other,
+            initial_ret_c=initial_ret_c,
+            tx_started_empty=tx_started_empty,
         )
 
         self.assertEqual(result_obs.shape[-1], OBS_SIZE)

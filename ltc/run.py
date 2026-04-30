@@ -16,7 +16,7 @@ from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
 from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate, channel_state_selector
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
-from ltc.utils.structs import MacroActionState, ObsTrackerState, ActionDecodingResults, Carry, Output, ObsFeatureInputs, ObsFeatureConfig
+from ltc.utils.structs import *
 from ltc.utils.plots import plot_all, plot_first
 
 
@@ -96,38 +96,21 @@ def schedule_active_stations(
 
 
 def action_space_size(action_space_variant, max_duration):
-    if action_space_variant in {
-        'txcs_duration_set',
-        'txcs_to_discrete_duration',
-        'txcs_to_continuous_duration',
-        'txcs_to_geometric_duration',
-    }:
+    if action_space_variant == 'txcs_duration_set':
         return 2 * max_duration
     if action_space_variant == 'tx_stage_commit':
         return 3
     raise ValueError(f'Unknown action-space variant: {action_space_variant}')
 
 
-def decode_drl_actions(raw_actions, staged_tx, keys, action_space_variant, max_duration):
+def decode_drl_actions(raw_actions, staged_tx, action_space_variant, max_duration):
     raw_actions = raw_actions.astype(jnp.int32)
 
-    if action_space_variant in {
-        'txcs_duration_set',
-        'txcs_to_discrete_duration',
-        'txcs_to_continuous_duration',
-        'txcs_to_geometric_duration',
-    }:
+    if action_space_variant == 'txcs_duration_set':
         is_tx = raw_actions < max_duration
         duration_idx = jnp.where(is_tx, raw_actions, raw_actions - max_duration)
         action_type = jnp.where(is_tx, Actions.TX.value, Actions.CS.value)
-
-        if action_space_variant == 'txcs_to_geometric_duration':
-            p = (duration_idx.astype(jnp.float32) + 1.0) / (max_duration + 1.0)
-            duration = jax.vmap(lambda k, pp: jax.random.geometric(k, pp))(keys, p).astype(jnp.int32)
-            duration = jnp.clip(duration, 1, max_duration)
-        else:
-            duration = duration_idx + 1
-
+        duration = duration_idx + 1
         return action_type.astype(jnp.int32), duration.astype(jnp.int32), staged_tx
 
     if action_space_variant == 'tx_stage_commit':
@@ -159,7 +142,100 @@ def decode_legacy_actions(raw_actions, legacy_tx_duration):
     return action_type, duration
 
 
-def _update_macro_state_from_ready_agents(
+def window_mean(hist, axis=None):
+    valid = hist >= 0.0
+    count = jnp.sum(valid, axis=axis)
+    return jnp.where(count > 0, jnp.sum(jnp.where(valid, hist, 0.0), axis=axis) / count, -1.0)
+
+
+def roll_append(arr, val):
+    return jnp.roll(arr, -1, axis=-1).at[..., -1].set(val)
+
+
+def update_packet_tracking(
+    macro, slot_executing, slot_actions, macro_remaining,
+    tx_collision_other_now, agent_ready_now, ret_c, buffer_states,
+):
+    tx_executing_pre = slot_actions == Actions.TX.value
+    channel_state_prelim = channel_state_selector(slot_actions)
+
+    sub_window_start = (macro_remaining % TX_SLOTS == 0) & slot_executing & tx_executing_pre
+    sub_collision_flag = jnp.where(sub_window_start, False, macro.sub_collision_flag)
+    sub_collision_flag = jnp.where(
+        tx_executing_pre & (channel_state_prelim == -1), True, sub_collision_flag,
+    )
+    sub_collision_other_flag = jnp.where(sub_window_start, False, macro.sub_collision_other_flag)
+    sub_collision_other_flag = jnp.where(
+        tx_executing_pre & (channel_state_prelim == -1) & (tx_collision_other_now > 0.5),
+        True, sub_collision_other_flag,
+    )
+    tx_packet_mask = (macro_remaining % TX_SLOTS == 1) & slot_executing & tx_executing_pre
+    tx_success_mask = tx_packet_mask & ~sub_collision_flag
+
+    collision_with_other = tx_collision_other_now > 0.5
+    is_first_tx_slot = agent_ready_now & tx_executing_pre
+    header_collision = jnp.where(is_first_tx_slot, channel_state_prelim == -1, macro.header_collision)
+    header_collision_other = jnp.where(
+        is_first_tx_slot, (channel_state_prelim == -1) & collision_with_other, macro.header_collision_other,
+    )
+    done_now = jnp.logical_and(slot_executing, macro_remaining == 1)
+    ack_collision_now = done_now & tx_executing_pre & (channel_state_prelim == -1)
+    ack_collision_other_now = ack_collision_now & collision_with_other
+
+    initial_ret_c = jnp.where(is_first_tx_slot, ret_c, macro.initial_ret_c)
+    tx_started_empty = jnp.where(
+        is_first_tx_slot, jnp.all(buffer_states == EMPTY_PACKET_ID, axis=1), macro.tx_started_empty,
+    )
+
+    return (
+        sub_collision_flag, sub_collision_other_flag,
+        tx_packet_mask, tx_success_mask,
+        header_collision, header_collision_other,
+        done_now, ack_collision_now, ack_collision_other_now,
+        initial_ret_c, tx_started_empty,
+    )
+
+
+def compute_obs_features(
+    obs_tracker, tx_hist, n_drl,
+    new_frames, planned_packets, successful_packets, channel_state, tx_mask,
+    cs_tx_same_type_now, tx_collision_other_now,
+):
+    n = obs_tracker.arrival_hist.shape[0]
+
+    arrival_hist = roll_append(obs_tracker.arrival_hist, new_frames.astype(jnp.float32))
+    planned_tx_hist = roll_append(obs_tracker.planned_tx_hist, planned_packets.astype(jnp.float32))
+    success_tx_hist = roll_append(obs_tracker.success_tx_hist, successful_packets.astype(jnp.float32))
+    channel_busy_hist = roll_append(obs_tracker.channel_busy_hist, (channel_state != 0).astype(jnp.float32))
+    collision_hist = roll_append(obs_tracker.collision_hist, (channel_state == -1).astype(jnp.float32))
+    tx_hist = jnp.roll(tx_hist, -1, axis=0).at[-1].set(tx_mask.astype(jnp.int32))
+
+    planned_valid = planned_tx_hist >= 0.0
+    planned_sum = jnp.sum(jnp.where(planned_valid, planned_tx_hist, 0.0), axis=1)
+    success_sum = jnp.sum(jnp.where(planned_valid, success_tx_hist, 0.0), axis=1)
+    back_pct = jnp.where(planned_sum > 0, success_sum / planned_sum, -1.0)
+
+    tx_valid_rows = tx_hist[:, 0] >= 0
+    unique_ltc_tx_window = jnp.where(
+        jnp.any(tx_valid_rows),
+        jnp.sum(jnp.any(jnp.where(tx_valid_rows[:, None], tx_hist[:, :n_drl], 0) > 0, axis=0).astype(jnp.float32)),
+        -1.0,
+    )
+
+    features = ObsFeatureInputs(
+        traffic_mean_arrival_rate=window_mean(arrival_hist, axis=1),
+        channel_occupancy_pct_window=jnp.broadcast_to(window_mean(channel_busy_hist), (n,)),
+        channel_collisions_pct_window=jnp.broadcast_to(window_mean(collision_hist), (n,)),
+        back_pct=back_pct,
+        unique_ltc_tx_window=jnp.broadcast_to(unique_ltc_tx_window, (n,)),
+        cs_tx_same_type_now=cs_tx_same_type_now,
+        tx_collision_other_now=tx_collision_other_now,
+    )
+
+    return (arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist), features
+
+
+def update_macro_state_from_ready_agents(
     macro_state, obs_tracker, ready_drl, ready_legacy,
     decoded_actions, n_drl
 ):
@@ -197,40 +273,6 @@ def _update_macro_state_from_ready_agents(
     return macro_action_types, macro_remaining, staged_tx
 
 
-def _finalize_macro_accumulators(macro_state, done_now, macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum):
-    macro_tx_success_accum = jnp.where(done_now, 0.0, macro_tx_success_accum)
-    macro_tx_collision_accum = jnp.where(done_now, 0.0, macro_tx_collision_accum)
-    macro_reward_accum = jnp.where(done_now, 0.0, macro_reward_accum)
-    return macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
-
-
-def upgraded_tx_slot_reward(slot_actions, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask, sub_collision_flag):
-    tx_executing = slot_actions == Actions.TX.value
-    tx_committed = tx_packet_mask
-    tx_success = jnp.logical_and(tx_committed, jnp.logical_and(~sub_collision_flag, successful_packets > 0))
-    tx_collision = jnp.logical_and(tx_committed, sub_collision_flag)
-    tx_collision_max = jnp.logical_and(tx_collision, prev_ret_c >= MAX_RETRANSMISSION)
-    tx_collision_normal = jnp.logical_and(tx_collision, prev_ret_c < MAX_RETRANSMISSION)
-    tx_collision_coex = jnp.logical_and(tx_collision_normal, tx_collision_other_now > 0.5)
-    tx_collision_ltc = jnp.logical_and(tx_collision_normal, tx_collision_other_now <= 0.5)
-    tx_empty = jnp.logical_and(
-        jnp.logical_and(tx_committed, ~sub_collision_flag),
-        successful_packets == 0,
-    )
-
-    k_tx_slot = successful_packets.astype(jnp.float32)
-    k_coll_slot = tx_collision.astype(jnp.float32)
-
-    tx_success_reward = TX_REWARD * k_tx_slot
-    tx_collision_reward = (
-        tx_collision_ltc.astype(jnp.float32) * (TX_LTC_COLLISION_PENALTY * k_coll_slot)
-        + tx_collision_coex.astype(jnp.float32) * (TX_COEX_COLLISION_PENALTY * k_coll_slot)
-        + tx_collision_max.astype(jnp.float32) * TX_MAX_RETRANSMISSION_PENALTY
-    )
-    tx_slot_reward = jnp.where(tx_success, tx_success_reward, 0.0) + tx_collision_reward + jnp.where(tx_empty, TX_EMPTY_BUFFER_PENALTY, 0.0)
-    return tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing
-
-
 def rl_step(
     drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
@@ -238,7 +280,7 @@ def rl_step(
     obs_enable_cs_tx_same_type=False, obs_enable_tx_collision_other=False,
     action_space_variant='txcs_duration_set', max_duration=5, legacy_tx_duration=5,
 ):
-    def rl_step_coroutine(c, step):
+    def rl_step_fn(c, step):
         active = schedule_active_stations(
             c.active,
             step,
@@ -260,7 +302,7 @@ def rl_step(
         drl_ready = jnp.logical_and(active[:n_drl], ready[:n_drl])
         legacy_ready = jnp.logical_and(active[n_drl:], ready[n_drl:])
 
-        drl_states, drl_actions_raw = yield drl_step(
+        drl_states, drl_actions_raw = drl_step(
             c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], drl_ready
         )
         legacy_states, legacy_actions_raw = legacy_step(
@@ -272,7 +314,7 @@ def rl_step(
         raw_actions = raw_actions.at[n_drl:].set(jnp.where(legacy_ready, legacy_actions_raw, c.actions[n_drl:]))
 
         drl_action_types, drl_durations, drl_staged_next = decode_drl_actions(
-            raw_actions[:n_drl], c.obs_tracker.staged_tx[:n_drl], drl_keys, action_space_variant, max_duration
+            raw_actions[:n_drl], c.obs_tracker.staged_tx[:n_drl], action_space_variant, max_duration
         )
         legacy_action_types, legacy_durations = decode_legacy_actions(raw_actions[n_drl:], legacy_tx_duration)
 
@@ -284,26 +326,33 @@ def rl_step(
             legacy_durations=legacy_durations,
         )
 
-        macro_action_types, macro_remaining, staged_tx = _update_macro_state_from_ready_agents(
+        macro_action_types, macro_remaining, staged_tx = update_macro_state_from_ready_agents(
             c.macro, c.obs_tracker, drl_ready, legacy_ready,
             decoded_actions, n_drl
         )
 
         slot_executing = macro_remaining > 0
         slot_actions = jnp.where(slot_executing, macro_action_types, Actions.IDLE.value)
+        tx_mask = slot_actions == Actions.TX.value
 
-        # Sub-window collision tracking: one packet = TX_SLOTS mini-slots
-        tx_executing_pre = slot_actions == Actions.TX.value
-        channel_state_prelim = channel_state_selector(slot_actions)
-        sub_window_start = (macro_remaining % TX_SLOTS == 0) & slot_executing & tx_executing_pre
-        sub_collision_flag = jnp.where(sub_window_start, False, c.macro.sub_collision_flag)
-        sub_collision_flag = jnp.where(
-            tx_executing_pre & (channel_state_prelim == -1),
-            True,
-            sub_collision_flag,
+        is_ltc = jnp.arange(n) < n_drl
+        tx_idx = jnp.argmax(tx_mask.astype(jnp.int32))
+        cs_tx_same_type_now = (is_ltc[tx_idx] == is_ltc).astype(jnp.float32)
+        diff_type = is_ltc[:, None] != is_ltc[None, :]
+        tx_collision_other_now = jnp.any(diff_type & tx_mask[None, :], axis=1).astype(jnp.float32)
+
+        agent_ready_now = jnp.concatenate([drl_ready, legacy_ready])
+        ret_c = c.obs[:, -1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
+        (
+            sub_collision_flag, sub_collision_other_flag,
+            tx_packet_mask, tx_success_mask,
+            header_collision, header_collision_other,
+            done_now, ack_collision_now, ack_collision_other_now,
+            initial_ret_c, tx_started_empty,
+        ) = update_packet_tracking(
+            c.macro, slot_executing, slot_actions, macro_remaining,
+            tx_collision_other_now, agent_ready_now, ret_c, c.buffer_states,
         )
-        tx_packet_mask = (macro_remaining % TX_SLOTS == 1) & slot_executing & tx_executing_pre
-        tx_success_mask = tx_packet_mask & ~sub_collision_flag
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         (
@@ -316,99 +365,44 @@ def rl_step(
         ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step,
                      tx_packet_mask=tx_packet_mask, tx_success_mask=tx_success_mask)
 
-        is_ltc = jnp.arange(n) < n_drl
-        tx_mask = slot_actions == Actions.TX.value
-        tx_idx = jnp.argmax(tx_mask.astype(jnp.int32))
-        tx_is_ltc = is_ltc[tx_idx]
-        cs_tx_same_type_now = (tx_is_ltc == is_ltc).astype(jnp.float32)
-        diff_type = is_ltc[:, None] != is_ltc[None, :]
-        tx_collision_other_now = jnp.any(diff_type & tx_mask[None, :], axis=1).astype(jnp.float32)
+        (arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist), obs_features = \
+            compute_obs_features(
+                c.obs_tracker, c.tx_hist, n_drl,
+                new_frames, planned_packets, successful_packets, channel_state, tx_mask,
+                cs_tx_same_type_now, tx_collision_other_now,
+            )
 
-        arrival_hist = jnp.roll(c.obs_tracker.arrival_hist, -1, axis=1).at[:, -1].set(new_frames.astype(jnp.float32))
-        planned_tx_hist = jnp.roll(c.obs_tracker.planned_tx_hist, -1, axis=1).at[:, -1].set(planned_packets.astype(jnp.float32))
-        success_tx_hist = jnp.roll(c.obs_tracker.success_tx_hist, -1, axis=1).at[:, -1].set(successful_packets.astype(jnp.float32))
-        channel_busy_hist = jnp.roll(c.obs_tracker.channel_busy_hist, -1).at[-1].set((channel_state != 0).astype(jnp.float32))
-        collision_hist = jnp.roll(c.obs_tracker.collision_hist, -1).at[-1].set((channel_state == -1).astype(jnp.float32))
-        tx_hist = jnp.roll(c.tx_hist, -1, axis=0).at[-1].set(tx_mask.astype(jnp.int32))
+        packet_collided = tx_packet_mask & sub_collision_flag
+        k_tx_accum = c.macro.tx_success_accum + successful_packets.astype(jnp.float32)
+        k_coll_ltc = c.macro.k_coll_ltc + jnp.where(packet_collided & ~sub_collision_other_flag, 1.0, 0.0)
+        k_coll_coex = c.macro.k_coll_coex + jnp.where(packet_collided & sub_collision_other_flag, 1.0, 0.0)
 
-        arrival_valid = arrival_hist >= 0.0
-        arrival_count = jnp.sum(arrival_valid, axis=1)
-        traffic_mean_arrival_rate = jnp.where(
-            arrival_count > 0,
-            jnp.sum(jnp.where(arrival_valid, arrival_hist, 0.0), axis=1) / arrival_count,
-            -1.0,
-        )
-
-        busy_valid = channel_busy_hist >= 0.0
-        busy_count = jnp.sum(busy_valid)
-        channel_occupancy_pct_window = jnp.where(
-            busy_count > 0,
-            jnp.sum(jnp.where(busy_valid, channel_busy_hist, 0.0)) / busy_count,
-            -1.0,
-        )
-
-        coll_valid = collision_hist >= 0.0
-        coll_count = jnp.sum(coll_valid)
-        channel_collisions_pct_window = jnp.where(
-            coll_count > 0,
-            jnp.sum(jnp.where(coll_valid, collision_hist, 0.0)) / coll_count,
-            -1.0,
-        )
-
-        planned_valid = planned_tx_hist >= 0.0
-        planned_sum = jnp.sum(jnp.where(planned_valid, planned_tx_hist, 0.0), axis=1)
-        success_sum = jnp.sum(jnp.where(planned_valid, success_tx_hist, 0.0), axis=1)
-        back_pct = jnp.where(planned_sum > 0, success_sum / planned_sum, -1.0)
-
-        tx_valid_rows = tx_hist[:, 0] >= 0
-        unique_ltc_tx_window = jnp.where(
-            jnp.any(tx_valid_rows),
-            jnp.sum(jnp.any(jnp.where(tx_valid_rows[:, None], tx_hist[:, :n_drl], 0) > 0, axis=0).astype(jnp.float32)),
-            -1.0,
-        )
-
-        done_now = jnp.logical_and(slot_executing, macro_remaining == 1)
-        prev_ret_c = c.obs[:, -1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
-        obs_features = ObsFeatureInputs(
-            traffic_mean_arrival_rate=traffic_mean_arrival_rate,
-            channel_occupancy_pct_window=jnp.broadcast_to(channel_occupancy_pct_window, (n,)),
-            channel_collisions_pct_window=jnp.broadcast_to(channel_collisions_pct_window, (n,)),
-            back_pct=back_pct,
-            unique_ltc_tx_window=jnp.broadcast_to(unique_ltc_tx_window, (n,)),
-            cs_tx_same_type_now=cs_tx_same_type_now,
-            tx_collision_other_now=tx_collision_other_now,
-        )
         obs_config = ObsFeatureConfig(
             enable_cs_tx_same_type=obs_enable_cs_tx_same_type,
             enable_tx_collision_other=obs_enable_tx_collision_other,
         )
-        obs, slot_rewards, powers = process_output(
+        obs, rewards_new, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
-            c.terminals, reward_key, step, obs_features, obs_config, roll_obs=done_now
+            c.terminals, reward_key, step, obs_features, obs_config,
+            roll_obs=done_now,
+            done_now=done_now,
+            k_tx=k_tx_accum,
+            k_coll_ltc=k_coll_ltc,
+            k_coll_coex=k_coll_coex,
+            header_collision=header_collision,
+            header_collision_other=header_collision_other,
+            ack_collision=ack_collision_now,
+            ack_collision_other=ack_collision_other_now,
+            initial_ret_c=initial_ret_c,
+            tx_started_empty=tx_started_empty,
         )
 
-        tx_slot_reward, k_tx_slot, k_coll_slot, tx_executing = upgraded_tx_slot_reward(
-            slot_actions, successful_packets, prev_ret_c, tx_collision_other_now, tx_packet_mask, sub_collision_flag
-        )
+        rewards = jnp.where(done_now, rewards_new, c.rewards)
 
-        slot_reward_upgraded = jnp.where(tx_executing, tx_slot_reward, slot_rewards)
-
-        macro_tx_success_accum = c.macro.tx_success_accum + jnp.where(slot_executing, k_tx_slot, 0.0)
-        macro_tx_collision_accum = c.macro.tx_collision_accum + jnp.where(slot_executing, k_coll_slot, 0.0)
-        macro_reward_accum = c.macro.reward_accum + jnp.where(slot_executing, slot_reward_upgraded, 0.0)
-
-        k_total = macro_tx_success_accum
-        length_scale = (k_total * TX_REWARD_LENGTH - 2.0) / TX_REWARD_LENGTH
-        length_bonus = jnp.where(k_total > 0, TX_REWARD * length_scale, 0.0)
-        size_penalty = TX_SIZE_PENALTY * jnp.minimum(
-            1.0, (macro_tx_success_accum - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW
-        )
-        size_penalty = jnp.where(macro_tx_success_accum >= TX_SIZE_THRESHOLD, size_penalty, 0.0)
-        rewards = jnp.where(done_now, macro_reward_accum + length_bonus + size_penalty, c.rewards)
-
-        macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum = _finalize_macro_accumulators(
-            c.macro, done_now, macro_tx_success_accum, macro_tx_collision_accum, macro_reward_accum
-        )
+        # Reset per-macro accumulators when action completes
+        k_tx_accum = jnp.where(done_now, 0.0, k_tx_accum)
+        k_coll_ltc = jnp.where(done_now, 0.0, k_coll_ltc)
+        k_coll_coex = jnp.where(done_now, 0.0, k_coll_coex)
         macro_remaining = jnp.where(slot_executing, macro_remaining - 1, macro_remaining)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
@@ -424,10 +418,15 @@ def rl_step(
         macro_state = MacroActionState(
             remaining=macro_remaining,
             action_types=macro_action_types,
-            reward_accum=macro_reward_accum,
-            tx_success_accum=macro_tx_success_accum,
-            tx_collision_accum=macro_tx_collision_accum,
+            tx_success_accum=k_tx_accum,
+            k_coll_ltc=k_coll_ltc,
+            k_coll_coex=k_coll_coex,
             sub_collision_flag=sub_collision_flag,
+            sub_collision_other_flag=sub_collision_other_flag,
+            header_collision=header_collision,
+            header_collision_other=header_collision_other,
+            initial_ret_c=initial_ret_c,
+            tx_started_empty=tx_started_empty,
         )
         obs_tracker_state = ObsTrackerState(
             buffer_birth_steps=buffer_birth_steps,
@@ -447,27 +446,12 @@ def rl_step(
             legacy_states, obs, raw_actions, rewards, terminals, buffer_states, powers,
             new_frames, channel_state, active, hist, bin_edges, successful_packets
         )
-        yield c, o
+        return c, o
 
-    def rl_step_fn(*args, **kwargs):
-        gen = rl_step_coroutine(*args, **kwargs)
-        intercepted = next(gen)
-        return gen.send(intercepted)
-
-    def pre_rl_fn(*args, **kwargs):
-        gen = rl_step_coroutine(*args, **kwargs)
-        intercepted = next(gen)
-        return intercepted
-
-    def post_rl_fn(intermediate, *args, **kwargs):
-        gen = rl_step_coroutine(*args, **kwargs)
-        _ = next(gen)
-        return gen.send(intermediate)
-
-    return rl_step_fn, pre_rl_fn, post_rl_fn
+    return rl_step_fn
 
 
-def setup_args():
+if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
@@ -478,19 +462,7 @@ def setup_args():
     parser.add_argument('--obs_stats_window', type=int, default=1000, help='Window length for rolling observation statistics.')
     parser.add_argument('--obs_enable_cs_tx_same_type', action='store_true', default=False, help='Enable CS me-vs-other transmitter feature.')
     parser.add_argument('--obs_enable_tx_collision_other', action='store_true', default=False, help='Enable TX collision-involves-other feature.')
-    parser.add_argument(
-        '--action_space_variant',
-        type=str,
-        default='txcs_duration_set',
-        choices=[
-            'txcs_duration_set',
-            'txcs_to_discrete_duration',
-            'txcs_to_continuous_duration',
-            'txcs_to_geometric_duration',
-            'tx_stage_commit',
-        ],
-        help='Macro action-space variant.',
-    )
+    parser.add_argument('--action_space_variant', type=str, default='txcs_duration_set', choices=['txcs_duration_set', 'tx_stage_commit'], help='Macro action-space variant.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
@@ -502,89 +474,46 @@ def setup_args():
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
+    parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
-    return args
 
-
-if __name__ == '__main__':
-    args = setup_args()
-    ensure_clean_git_worktree()
+    if not args.skip_git_check:
+        ensure_clean_git_worktree()
     commit_hash = get_short_commit_hash()
 
     n_init = args.n
-    has_n_final = args.n_final is not None
-    n_final = args.n_final if has_n_final else n_init
+    n_final = args.n_final if args.n_final is not None else n_init
     n = max(n_init, n_final)
-    n_epochs = args.n_epochs
-    n_steps = args.n_steps
-    total_steps = n_epochs * n_steps
-    window_size = args.window_size
-    queue_size = args.queue_size
-    obs_stats_window = args.obs_stats_window
-    seed = args.seed
-    traffic_type = args.traffic_type
+    total_steps = args.n_epochs * args.n_steps
 
-    loc = args.loc
-    scale = args.scale
-    f3dB = args.f3dB
-    station_change_interval = args.station_change_interval
-    station_change_delta = args.station_change_delta
-    station_change_start_step = args.station_change_start_step
-    station_change_stop_step = args.station_change_stop_step
-    obs_enable_cs_tx_same_type = args.obs_enable_cs_tx_same_type
-    obs_enable_tx_collision_other = args.obs_enable_tx_collision_other
-    action_space_variant = args.action_space_variant
-
-    if queue_size <= 0:
+    if args.queue_size <= 0:
         raise ValueError('--queue_size must be positive.')
-    if obs_stats_window <= 0:
+    if args.obs_stats_window <= 0:
         raise ValueError('--obs_stats_window must be positive.')
 
-    if station_change_interval is not None and station_change_interval <= 0:
+    station_change_start_step = args.station_change_start_step
+    if args.station_change_interval is not None and args.station_change_interval <= 0:
         raise ValueError('--station_change_interval must be positive.')
-    if station_change_interval is None:
-        if station_change_start_step is not None or station_change_stop_step is not None:
+    if args.station_change_interval is None:
+        if args.station_change_start_step is not None or args.station_change_stop_step is not None:
             raise ValueError('--station_change_start_step/--station_change_stop_step require --station_change_interval.')
     else:
-        if station_change_delta == 0:
+        if args.station_change_delta == 0:
             raise ValueError('--station_change_delta must be non-zero when --station_change_interval is used.')
         if station_change_start_step is None:
-            station_change_start_step = station_change_interval
+            station_change_start_step = args.station_change_interval
 
     one_shot_step = None
     one_shot_target = None
-    station_change_target = n_final if has_n_final else None
-    if station_change_interval is None and n_final != n_init:
+    station_change_target = n_final if args.n_final is not None else None
+    if args.station_change_interval is None and n_final != n_init:
         one_shot_step = total_steps // 2
         one_shot_target = n_final
 
-    key = jax.random.key(seed)
-    num_actions = action_space_size(action_space_variant, MAX_MACRO_DURATION)
-    actions = jnp.zeros(n, dtype=int)
-    packet_seqs = jnp.zeros(n, dtype=jnp.int32)
-    buffer_states = jnp.full((n, queue_size), EMPTY_PACKET_ID, dtype=jnp.int32)
-    buffer_birth_steps = jnp.full((n, queue_size), -1, dtype=jnp.int32)
-    arrival_hist = jnp.full((n, obs_stats_window), -1.0, dtype=jnp.float32)
-    planned_tx_hist = jnp.full((n, obs_stats_window), -1.0, dtype=jnp.float32)
-    success_tx_hist = jnp.full((n, obs_stats_window), -1.0, dtype=jnp.float32)
-    channel_busy_hist = jnp.full(obs_stats_window, -1.0, dtype=jnp.float32)
-    collision_hist = jnp.full(obs_stats_window, -1.0, dtype=jnp.float32)
-    tx_hist = jnp.full((obs_stats_window, n), -1, dtype=jnp.int32)
-    staged_tx = jnp.zeros(n, dtype=jnp.int32)
-    macro_remaining = jnp.zeros(n, dtype=jnp.int32)
-    macro_action_types = jnp.full(n, Actions.IDLE.value, dtype=jnp.int32)
-    macro_reward_accum = jnp.zeros(n, dtype=jnp.float32)
-    macro_tx_success_accum = jnp.zeros(n, dtype=jnp.float32)
-    macro_tx_collision_accum = jnp.zeros(n, dtype=jnp.float32)
-    macro_sub_collision_flag = jnp.zeros(n, dtype=bool)
-    power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
-    channel_state = 0
-    obs = jnp.zeros((n, window_size, OBS_SIZE), dtype=jnp.float32)
-    rewards = jnp.zeros(n)
-    terminals = jnp.full(n, False, dtype=bool)
-    active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
+    key = jax.random.key(args.seed)
+    num_actions = action_space_size(args.action_space_variant, MAX_MACRO_DURATION)
 
-    lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=60000, alpha=0.01)
+    lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=total_steps, alpha=0.01)
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),
         optax.adam(lr_schedule, b1=0.95, b2=0.95)
@@ -592,7 +521,7 @@ if __name__ == '__main__':
 
     drl = BayesianDDQN(
         q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
-        obs_space_shape=obs.shape[1:],
+        obs_space_shape=(args.window_size, OBS_SIZE),
         act_space_size=num_actions,
         optimizer=optimizer,
         experience_replay_buffer_size=30000,
@@ -614,70 +543,82 @@ if __name__ == '__main__':
 
     key, init_key = jax.random.split(key)
 
-    if traffic_type == 'constant':
+    if args.traffic_type == 'constant':
         traffic = cox_traffic(f3dB=1.0, loc=-1.0, scale=0.0, initial_state=InitialStateConf.ZERO)
-    elif traffic_type == 'saturated':
+    elif args.traffic_type == 'saturated':
         traffic = cox_traffic(f3dB=1.0, loc=5.0, scale=0.0, initial_state=InitialStateConf.ZERO)
-    elif traffic_type == 'bursty':
+    elif args.traffic_type == 'bursty':
         traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
-    elif traffic_type == 'custom':
-        traffic = cox_traffic(f3dB=f3dB, loc=loc, scale=scale, initial_state=InitialStateConf.ZERO)
+    elif args.traffic_type == 'custom':
+        traffic = cox_traffic(f3dB=args.f3dB, loc=args.loc, scale=args.scale, initial_state=InitialStateConf.ZERO)
     else:
-        raise ValueError(f'Unknown traffic type: {traffic_type}')
-
+        raise ValueError(f'Unknown traffic type: {args.traffic_type}')
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn, _, _ = rl_step(
-        drl_step,
-        legacy_step,
-        traffic_step,
-        n,
-        n,
+    rl_step_fn = jax.jit(rl_step(
+        drl_step, legacy_step, traffic_step, n, n,
         one_shot_step=one_shot_step,
         one_shot_target=one_shot_target,
-        station_change_interval=station_change_interval,
-        station_change_delta=station_change_delta,
+        station_change_interval=args.station_change_interval,
+        station_change_delta=args.station_change_delta,
         station_change_start_step=station_change_start_step,
-        station_change_stop_step=station_change_stop_step,
+        station_change_stop_step=args.station_change_stop_step,
         station_change_target=station_change_target,
-        obs_enable_cs_tx_same_type=obs_enable_cs_tx_same_type,
-        obs_enable_tx_collision_other=obs_enable_tx_collision_other,
-        action_space_variant=action_space_variant,
+        obs_enable_cs_tx_same_type=args.obs_enable_cs_tx_same_type,
+        obs_enable_tx_collision_other=args.obs_enable_tx_collision_other,
+        action_space_variant=args.action_space_variant,
         max_duration=MAX_MACRO_DURATION,
         legacy_tx_duration=LEGACY_TX_DURATION,
-    )
-    rl_step_fn = jax.jit(rl_step_fn)
-    macro_state = MacroActionState(
-        remaining=macro_remaining,
-        action_types=macro_action_types,
-        reward_accum=macro_reward_accum,
-        tx_success_accum=macro_tx_success_accum,
-        tx_collision_accum=macro_tx_collision_accum,
-        sub_collision_flag=macro_sub_collision_flag,
-    )
-    obs_tracker_state = ObsTrackerState(
-        buffer_birth_steps=buffer_birth_steps,
-        arrival_hist=arrival_hist,
-        planned_tx_hist=planned_tx_hist,
-        success_tx_hist=success_tx_hist,
-        channel_busy_hist=channel_busy_hist,
-        collision_hist=collision_hist,
-        staged_tx=staged_tx,
-    )
+    ))
+
     carry = Carry(
-        drl_states, legacy_states, traffic_states, packet_seqs, buffer_states,
-        tx_hist, power_states, channel_state, key, obs, actions, rewards, terminals, active,
-        macro_state, obs_tracker_state
+        drl_states=drl_states,
+        legacy_states=legacy_states,
+        traffic_states=traffic_states,
+        packet_seqs=jnp.zeros(n, dtype=jnp.int32),
+        buffer_states=jnp.full((n, args.queue_size), EMPTY_PACKET_ID, dtype=jnp.int32),
+        tx_hist=jnp.full((args.obs_stats_window, n), -1, dtype=jnp.int32),
+        power_states=jnp.full(n, INITIAL_CAPACITY, dtype=int),
+        channel_state=0,
+        key=key,
+        obs=jnp.zeros((n, args.window_size, OBS_SIZE), dtype=jnp.float32),
+        actions=jnp.zeros(n, dtype=int),
+        rewards=jnp.zeros(n),
+        terminals=jnp.full(n, False, dtype=bool),
+        active=jnp.ones(n, dtype=bool).at[n_init:].set(False),
+        macro=MacroActionState(
+            remaining=jnp.zeros(n, dtype=jnp.int32),
+            action_types=jnp.full(n, Actions.IDLE.value, dtype=jnp.int32),
+            tx_success_accum=jnp.zeros(n, dtype=jnp.float32),
+            k_coll_ltc=jnp.zeros(n, dtype=jnp.float32),
+            k_coll_coex=jnp.zeros(n, dtype=jnp.float32),
+            sub_collision_flag=jnp.zeros(n, dtype=bool),
+            sub_collision_other_flag=jnp.zeros(n, dtype=bool),
+            header_collision=jnp.zeros(n, dtype=bool),
+            header_collision_other=jnp.zeros(n, dtype=bool),
+            initial_ret_c=jnp.zeros(n, dtype=jnp.int32),
+            tx_started_empty=jnp.zeros(n, dtype=bool),
+        ),
+        obs_tracker=ObsTrackerState(
+            buffer_birth_steps=jnp.full((n, args.queue_size), -1, dtype=jnp.int32),
+            arrival_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+            planned_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+            success_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+            channel_busy_hist=jnp.full(args.obs_stats_window, -1.0, dtype=jnp.float32),
+            collision_hist=jnp.full(args.obs_stats_window, -1.0, dtype=jnp.float32),
+            staged_tx=jnp.zeros(n, dtype=jnp.int32),
+        ),
     )
+
     all_outputs = []
 
-    for epoch in trange(n_epochs):
-        global_steps = jnp.arange(epoch * n_steps, (epoch + 1) * n_steps, dtype=jnp.int32)
+    for epoch in trange(args.n_epochs):
+        global_steps = jnp.arange(epoch * args.n_steps, (epoch + 1) * args.n_steps, dtype=jnp.int32)
         carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    filename = build_history_filename(n_init, n_final, seed, commit_hash)
+    filename = build_history_filename(n_init, n_final, args.seed, commit_hash)
 
     with lz4.frame.open(filename, 'wb') as f:
         cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)

@@ -12,7 +12,7 @@ def channel_state_selector(actions):
     )
 
 
-def _cantor_pairing(a, b):
+def cantor_pairing(a, b):
     s = a + b
     return (s * (s + 1)) // 2 + b
 
@@ -60,7 +60,7 @@ def enqueue_generated_packets(buffer_state, buffer_birth_state, new_frames, stat
     new_rel = idx - kept_old
     take_new = jnp.logical_and(idx >= kept_old, new_rel < kept_new)
     new_local_ids = new_start + jnp.maximum(new_rel, 0)
-    new_packets = _cantor_pairing(station_id.astype(jnp.int32), new_local_ids)
+    new_packets = cantor_pairing(station_id.astype(jnp.int32), new_local_ids)
     new_births = jnp.full((q,), current_step, dtype=jnp.int32)
 
     next_state = jnp.where(take_old, old_packets, jnp.where(take_new, new_packets, EMPTY_PACKET_ID))
