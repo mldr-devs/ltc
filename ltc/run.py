@@ -248,7 +248,8 @@ def setup_args():
             'Examples: --agents drl:5 q-aloha:1:0.333 | --agents eb-aloha:5 q-aloha:1:0.5'
         ),
     )
-    parser.add_argument('--n_final', type=int, help='Final number of active stations (one-shot reduction at mid-run).')
+    parser.add_argument('--n_init', type=int, help='Number of active stations at the start (default: all). Use with --n_final to turn stations on/off at mid-run.')
+    parser.add_argument('--n_final', type=int, help='Number of active stations at the end (one-shot change at mid-run).')
     parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
@@ -276,10 +277,12 @@ if __name__ == '__main__':
     n = sum(count for _, count, _ in agent_groups)
     legacy_group_specs = [(atype, count, param) for atype, count, param in agent_groups if atype != 'drl']
 
-    has_n_final = args.n_final is not None
-    n_final = args.n_final if has_n_final else n
-    if n_final > n:
-        raise ValueError(f'--n_final ({n_final}) cannot exceed total agent count ({n})')
+    n_init = args.n_init if args.n_init is not None else n
+    n_final = args.n_final if args.n_final is not None else n_init
+    if not (0 < n_init <= n):
+        raise ValueError(f'--n_init ({n_init}) must be between 1 and total agent count ({n})')
+    if not (0 < n_final <= n):
+        raise ValueError(f'--n_final ({n_final}) must be between 1 and total agent count ({n})')
 
     n_epochs = args.n_epochs
     n_steps = args.n_steps
@@ -309,8 +312,8 @@ if __name__ == '__main__':
 
     one_shot_step = None
     one_shot_target = None
-    station_change_target = n_final if has_n_final else None
-    if station_change_interval is None and n_final != n:
+    station_change_target = n_final if args.n_final is not None else None
+    if station_change_interval is None and n_final != n_init:
         one_shot_step = total_steps // 2
         one_shot_target = n_final
 
@@ -323,7 +326,7 @@ if __name__ == '__main__':
     obs = jnp.zeros((n, window_size, 5), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
-    active = jnp.ones(n, dtype=bool)
+    active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
     lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=60000, alpha=0.01)
     optimizer = optax.chain(
@@ -411,6 +414,7 @@ if __name__ == '__main__':
     metadata = vars(args)
     metadata['n'] = n
     metadata['n_drl'] = n_drl
+    metadata['n_init'] = n_init
     metadata['n_final'] = n_final
 
     filename = build_history_filename(n, n_drl, seed, commit_hash, slug=agents_slug(agent_groups))
