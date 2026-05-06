@@ -20,7 +20,7 @@ def idle_empty_buffer(_):
 def idle_full_buffer(args):
     _, _, _, _, no_tx, key = args
     rnd_factor = jax.random.normal(key) * SAFE_IDLE_PERIOD_STD
-    rnd_factor = jnp.round(rnd_factor).astype(int)
+    rnd_factor = jnp.round(rnd_factor).astype(jnp.int32)
     safe_period = SAFE_IDLE_PERIOD + rnd_factor
     args += (safe_period,)
     return jax.lax.cond(no_tx < safe_period, no_transmission_short, no_transmission_long, args)
@@ -167,8 +167,8 @@ def process_output_i(
     tx_packet_mask,
     tx_success_mask,
 ):
-    old_ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int32)
-    no_tx     = obs[-1, ObsIdx.STATUS_NO_TX_COUNTER].astype(jnp.int32)
+    old_ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int64)
+    no_tx     = obs[-1, ObsIdx.STATUS_NO_TX_COUNTER].astype(jnp.int64)
 
     is_tx = action == Actions.TX.value
 
@@ -263,6 +263,7 @@ def process_output(
     tx_success_mask=None,
 ):
     n = actions.shape[0]
+    keys = jax.random.split(key, n)
     roll_obs = jnp.broadcast_to(jnp.asarray(roll_obs), actions.shape)
     done_now = jnp.broadcast_to(jnp.asarray(done_now), actions.shape)
     k_tx = jnp.broadcast_to(jnp.asarray(k_tx if k_tx is not None else 0.0, dtype=jnp.float32), (n,))
@@ -278,7 +279,7 @@ def process_output(
     tx_packet_mask = jnp.broadcast_to(jnp.asarray(tx_packet_mask if tx_packet_mask is not None else False), (n,))
     tx_success_mask = jnp.broadcast_to(jnp.asarray(tx_success_mask if tx_success_mask is not None else False), (n,))
 
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, None, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))(
+    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))(
         buffer_states,
         new_buffer_states,
         new_buffer_birth_states,
@@ -287,7 +288,7 @@ def process_output(
         obs,
         actions,
         terminals,
-        key,
+        keys,
         current_step,
         obs_features,
         obs_config,

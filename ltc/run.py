@@ -1,6 +1,7 @@
 import os
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+os.environ['JAX_ENABLE_X64'] = 'true'
 
 import argparse
 from functools import partial
@@ -331,7 +332,7 @@ def rl_step(
             decoded_actions, n_drl
         )
 
-        slot_executing = macro_remaining > 0
+        slot_executing = jnp.logical_and(active, macro_remaining > 0)
         slot_actions = jnp.where(slot_executing, macro_action_types, Actions.IDLE.value)
         tx_mask = slot_actions == Actions.TX.value
 
@@ -363,7 +364,7 @@ def rl_step(
             planned_packets,
             successful_packets,
         ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step,
-                     tx_packet_mask=tx_packet_mask, tx_success_mask=tx_success_mask)
+                     tx_packet_mask=tx_packet_mask, tx_success_mask=tx_success_mask, active=active)
 
         (arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist), obs_features = \
             compute_obs_features(
@@ -579,14 +580,14 @@ if __name__ == '__main__':
         drl_states=drl_states,
         legacy_states=legacy_states,
         traffic_states=traffic_states,
-        packet_seqs=jnp.zeros(n, dtype=jnp.int32),
-        buffer_states=jnp.full((n, args.queue_size), EMPTY_PACKET_ID, dtype=jnp.int32),
+        packet_seqs=jnp.zeros(n, dtype=jnp.int64),
+        buffer_states=jnp.full((n, args.queue_size), EMPTY_PACKET_ID, dtype=jnp.int64),
         tx_hist=jnp.full((args.obs_stats_window, n), -1, dtype=jnp.int32),
-        power_states=jnp.full(n, INITIAL_CAPACITY, dtype=int),
+        power_states=jnp.full(n, INITIAL_CAPACITY, dtype=jnp.int32),
         channel_state=0,
         key=key,
         obs=jnp.zeros((n, args.window_size, OBS_SIZE), dtype=jnp.float32),
-        actions=jnp.zeros(n, dtype=int),
+        actions=jnp.zeros(n, dtype=jnp.int32),
         rewards=jnp.zeros(n),
         terminals=jnp.full(n, False, dtype=bool),
         active=jnp.ones(n, dtype=bool).at[n_init:].set(False),

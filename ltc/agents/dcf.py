@@ -48,6 +48,10 @@ class DCF(BaseAgent):
         channel_busy = env_state[-1][ObsIdx.CHANNEL_LAST_CS_BUSY]
         ret_c = env_state[-1][ObsIdx.STATUS_RETRY_COUNTER]
 
+        is_tx = action == Actions.TX.value
+        is_success = jax.lax.bitwise_and(is_tx, jax.lax.bitwise_or(reward > 0, ret_c == 0))
+        is_failure = jax.lax.bitwise_and(is_tx, reward < 0)
+
         return jax.lax.cond(
             buffer_count == 0,
             reset,
@@ -58,10 +62,10 @@ class DCF(BaseAgent):
                     jax.lax.bitwise_and(state.backoff > 0, channel_busy != 0),
                     freeze,
                     lambda: jax.lax.cond(
-                        jax.lax.bitwise_or(reward > 0, ret_c == 0),
+                        is_success,
                         reset,
                         lambda: jax.lax.cond(
-                            reward < 0,
+                            is_failure,
                             double_cw,
                             freeze
                         )

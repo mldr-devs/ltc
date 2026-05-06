@@ -59,8 +59,8 @@ def enqueue_generated_packets(buffer_state, buffer_birth_state, new_frames, stat
 
     new_rel = idx - kept_old
     take_new = jnp.logical_and(idx >= kept_old, new_rel < kept_new)
-    new_local_ids = new_start + jnp.maximum(new_rel, 0)
-    new_packets = cantor_pairing(station_id.astype(jnp.int32), new_local_ids)
+    new_local_ids = new_start + jnp.maximum(new_rel, 0).astype(jnp.int64)
+    new_packets = cantor_pairing(station_id.astype(jnp.int64), new_local_ids)
     new_births = jnp.full((q,), current_step, dtype=jnp.int32)
 
     next_state = jnp.where(take_old, old_packets, jnp.where(take_new, new_packets, EMPTY_PACKET_ID))
@@ -70,18 +70,25 @@ def enqueue_generated_packets(buffer_state, buffer_birth_state, new_frames, stat
 
 
 def add_new_frames(buffer_states, buffer_birth_steps, new_frames, packet_seqs, current_step):
-    station_ids = jnp.arange(buffer_states.shape[0], dtype=jnp.int32)
+    station_ids = jnp.arange(buffer_states.shape[0], dtype=jnp.int64)
     return jax.vmap(enqueue_generated_packets, in_axes=(0, 0, 0, 0, 0, None))(
         buffer_states, buffer_birth_steps, new_frames, station_ids, packet_seqs, current_step
     )
 
 
 def simulate(buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step,
-             tx_packet_mask, tx_success_mask):
+             tx_packet_mask, tx_success_mask, active=None):
+    if active is None:
+        active = jnp.ones_like(actions, dtype=bool)
+
+    active = jnp.asarray(active, dtype=bool)
+    actions = jnp.where(active, actions, Actions.IDLE.value)
+    new_frames = jnp.where(active, new_frames, 0)
+
     channel_state = channel_state_selector(actions)
     pre_nonempty = jnp.any(buffer_states != EMPTY_PACKET_ID, axis=1)
-    packet_tx = tx_success_mask & pre_nonempty
-    planned_packets = tx_packet_mask.astype(jnp.int32)
+    packet_tx = tx_success_mask & pre_nonempty & active
+    planned_packets = (tx_packet_mask & active).astype(jnp.int32)
     successful_packets = packet_tx.astype(jnp.int32)
     queue_size = buffer_states.shape[1]
     head_mask = jnp.arange(queue_size) == 0
