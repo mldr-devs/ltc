@@ -35,7 +35,8 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
 
     def _macro_reward(self, **kwargs):
         defaults = dict(
-            k_tx=jnp.array(0.0), k_coll_ltc=jnp.array(0.0), k_coll_coex=jnp.array(0.0),
+            k_tx=jnp.array(0.0), k_tx_planned=jnp.array(0.0),
+            k_coll_ltc=jnp.array(0.0), k_coll_coex=jnp.array(0.0),
             tx_started_empty=jnp.array(False), initial_ret_c=jnp.array(0),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
@@ -44,40 +45,46 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
         return tx_macro_reward(**defaults)
 
     def test_tx_macro_reward_branches(self):
-        # success: k_tx=1, no collision
-        r = self._macro_reward(k_tx=jnp.array(1.0))
+        # success: 1 sub-window, no collision
+        r = self._macro_reward(k_tx=jnp.array(1.0), k_tx_planned=jnp.array(1.0))
         expected = TX_REWARD * (1.0 * TX_SLOTS - 2.0) / TX_SLOTS
         self.assertAlmostEqual(float(r), expected, places=6)
 
-        # coex collision, ret_c < MAX
-        r = self._macro_reward(k_coll_coex=jnp.array(1.0))
+        # coex collision, ret_c < MAX: 1 collided sub-window → full coex penalty
+        r = self._macro_reward(k_coll_coex=jnp.array(1.0), k_tx_planned=jnp.array(1.0))
         self.assertAlmostEqual(float(r), TX_COEX_COLLISION_PENALTY * 1.0, places=6)
 
-        # LTC collision, max retransmission
-        r = self._macro_reward(k_coll_ltc=jnp.array(1.0), initial_ret_c=jnp.array(MAX_RETRANSMISSION))
-        self.assertAlmostEqual(float(r), TX_MAX_RETRANSMISSION_PENALTY, places=6)
-
-        # empty buffer, no collision
-        r = self._macro_reward(tx_started_empty=jnp.array(True))
-        self.assertAlmostEqual(float(r), TX_EMPTY_BUFFER_PENALTY, places=6)
-
-        # header collision (LTC): k_tx=3 successful frames all become LTC collisions
+        # LTC collision + max retransmission: collision penalty + max-retry penalty (additive)
         r = self._macro_reward(
-            k_tx=jnp.array(3.0),
+            k_coll_ltc=jnp.array(1.0), k_tx_planned=jnp.array(1.0),
+            initial_ret_c=jnp.array(MAX_RETRANSMISSION),
+        )
+        expected = TX_LTC_COLLISION_PENALTY * 1.0 + TX_MAX_RETRANSMISSION_PENALTY
+        self.assertAlmostEqual(float(r), expected, places=6)
+
+        # empty buffer, no collision: penalty scales with planned duration
+        r = self._macro_reward(tx_started_empty=jnp.array(True), k_tx_planned=jnp.array(2.0))
+        self.assertAlmostEqual(float(r), TX_EMPTY_BUFFER_PENALTY * 2.0, places=6)
+
+        # header collision (LTC): all 3 planned sub-windows → 3 LTC collisions
+        # size penalty applies: k_tx_planned=3, ramp=(3-2)/2=0.5
+        r = self._macro_reward(
+            k_tx=jnp.array(3.0), k_tx_planned=jnp.array(3.0),
             header_collision=jnp.array(True), header_collision_other=jnp.array(False),
         )
-        self.assertAlmostEqual(float(r), TX_LTC_COLLISION_PENALTY * 3.0, places=6)
+        expected = TX_LTC_COLLISION_PENALTY * 3.0 + TX_SIZE_PENALTY * 0.5
+        self.assertAlmostEqual(float(r), expected, places=6)
 
-        # header collision (coex): k_tx=2 successful frames become coex collisions
+        # header collision (coex): all 2 planned sub-windows → 2 coex collisions
         r = self._macro_reward(
-            k_tx=jnp.array(2.0),
+            k_tx=jnp.array(2.0), k_tx_planned=jnp.array(2.0),
             header_collision=jnp.array(True), header_collision_other=jnp.array(True),
         )
         self.assertAlmostEqual(float(r), TX_COEX_COLLISION_PENALTY * 2.0, places=6)
 
-        # ACK collision (LTC) with mixed mid-frame: k_tx=1 successful also becomes LTC collision
+        # ACK collision (LTC), 2 planned sub-windows: all flagged → 2 LTC collisions
         r = self._macro_reward(
-            k_tx=jnp.array(1.0), k_coll_ltc=jnp.array(1.0),
+            k_tx=jnp.array(1.0), k_coll_ltc=jnp.array(1.0), k_tx_planned=jnp.array(2.0),
             ack_collision=jnp.array(True), ack_collision_other=jnp.array(False),
         )
         self.assertAlmostEqual(float(r), TX_LTC_COLLISION_PENALTY * 2.0, places=6)

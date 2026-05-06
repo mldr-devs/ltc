@@ -374,6 +374,7 @@ def rl_step(
 
         packet_collided = tx_packet_mask & sub_collision_flag
         k_tx_accum = c.macro.tx_success_accum + successful_packets.astype(jnp.float32)
+        k_tx_planned = c.macro.tx_planned_accum + tx_packet_mask.astype(jnp.float32)
         k_coll_ltc = c.macro.k_coll_ltc + jnp.where(packet_collided & ~sub_collision_other_flag, 1.0, 0.0)
         k_coll_coex = c.macro.k_coll_coex + jnp.where(packet_collided & sub_collision_other_flag, 1.0, 0.0)
 
@@ -381,12 +382,13 @@ def rl_step(
             enable_cs_tx_same_type=obs_enable_cs_tx_same_type,
             enable_tx_collision_other=obs_enable_tx_collision_other,
         )
-        obs, rewards_new, powers = process_output(
+        obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
             c.terminals, reward_key, step, obs_features, obs_config,
             roll_obs=done_now,
             done_now=done_now,
             k_tx=k_tx_accum,
+            k_tx_planned=k_tx_planned,
             k_coll_ltc=k_coll_ltc,
             k_coll_coex=k_coll_coex,
             header_collision=header_collision,
@@ -395,12 +397,13 @@ def rl_step(
             ack_collision_other=ack_collision_other_now,
             initial_ret_c=initial_ret_c,
             tx_started_empty=tx_started_empty,
+            tx_packet_mask=tx_packet_mask,
+            tx_success_mask=tx_success_mask,
         )
-
-        rewards = jnp.where(done_now, rewards_new, c.rewards)
 
         # Reset per-macro accumulators when action completes
         k_tx_accum = jnp.where(done_now, 0.0, k_tx_accum)
+        k_tx_planned = jnp.where(done_now, 0.0, k_tx_planned)
         k_coll_ltc = jnp.where(done_now, 0.0, k_coll_ltc)
         k_coll_coex = jnp.where(done_now, 0.0, k_coll_coex)
         macro_remaining = jnp.where(slot_executing, macro_remaining - 1, macro_remaining)
@@ -419,6 +422,7 @@ def rl_step(
             remaining=macro_remaining,
             action_types=macro_action_types,
             tx_success_accum=k_tx_accum,
+            tx_planned_accum=k_tx_planned,
             k_coll_ltc=k_coll_ltc,
             k_coll_coex=k_coll_coex,
             sub_collision_flag=sub_collision_flag,
@@ -455,8 +459,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
-    parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
+    parser.add_argument('--n_epochs', type=int, default=100, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=3000, help='Number of steps per epoch.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--queue_size', type=int, default=16, help='Fixed packet-queue length for each station.')
     parser.add_argument('--obs_stats_window', type=int, default=1000, help='Window length for rolling observation statistics.')
@@ -590,6 +594,7 @@ if __name__ == '__main__':
             remaining=jnp.zeros(n, dtype=jnp.int32),
             action_types=jnp.full(n, Actions.IDLE.value, dtype=jnp.int32),
             tx_success_accum=jnp.zeros(n, dtype=jnp.float32),
+            tx_planned_accum=jnp.zeros(n, dtype=jnp.float32),
             k_coll_ltc=jnp.zeros(n, dtype=jnp.float32),
             k_coll_coex=jnp.zeros(n, dtype=jnp.float32),
             sub_collision_flag=jnp.zeros(n, dtype=bool),

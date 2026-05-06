@@ -10,6 +10,7 @@ class MacroActionState:
     remaining: jax.Array
     action_types: jax.Array
     tx_success_accum: jax.Array          # k_tx: successful subframes
+    tx_planned_accum: jax.Array          # k_tx_planned: planned subframes (= TX macro duration)
     k_coll_ltc: jax.Array                # collided subframes vs LTC
     k_coll_coex: jax.Array               # collided subframes vs coex
     sub_collision_flag: jax.Array        # True if any collision in current TX_SLOTS sub-window
