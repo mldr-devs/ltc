@@ -41,13 +41,36 @@ def decode_action_type(raw_action, action_space_variant, max_duration):
     return raw_action
 
 
+def resolve_max_duration(metadata, raw_actions):
+    """
+    Resolve max_duration for plotting.
+
+    Older history files may not store max_duration in metadata. In that case,
+    infer it from observed raw actions (best-effort) instead of falling back to
+    current code constant, which can misdecode old runs.
+    """
+    md = metadata or {}
+    md_val = md.get('max_duration')
+    if md_val is not None:
+        try:
+            md_int = int(md_val)
+            if md_int > 0:
+                return md_int
+        except (TypeError, ValueError):
+            pass
+
+    # txcs_duration_set has action range [0, 2*max_duration-1].
+    # Infer max_duration from observed maximum action index.
+    raw_max = int(np.max(raw_actions))
+    return max(1, (raw_max + 2) // 2)
+
+
 # ── 1. Actions ────────────────────────────────────────────────────────────────
 
 def plot_action_slots(history, metadata, n, n_drl, seed, epoch=0, max_steps=300):
     action_space_variant = (metadata or {}).get('action_space_variant', 'txcs_duration_set')
-    max_duration = (metadata or {}).get('max_duration', MAX_MACRO_DURATION)
-
     raw = np.array(history.actions[epoch, :max_steps])   # (steps, n_agents)
+    max_duration = resolve_max_duration(metadata, raw)
     n_steps, n_agents = raw.shape
     has_slot = hasattr(history, 'slot_actions') and history.slot_actions is not None
     if has_slot:
@@ -159,9 +182,8 @@ def plot_reward_slots(history, n, n_drl, seed, epoch=0, max_steps=300):
 
 def plot_combined(history, metadata, n, n_drl, seed, epoch=0, max_steps=300, grid_every=10):
     action_space_variant = (metadata or {}).get('action_space_variant', 'txcs_duration_set')
-    max_duration = (metadata or {}).get('max_duration', MAX_MACRO_DURATION)
-
     raw     = np.array(history.actions[epoch, :max_steps])        # (steps, n_agents)
+    max_duration = resolve_max_duration(metadata, raw)
     has_slot = hasattr(history, 'slot_actions') and history.slot_actions is not None
     slot_act = np.array(history.slot_actions[epoch, :max_steps]) if has_slot else None
     ch      = np.array(history.channel_state[epoch, :max_steps])  # (steps,)
@@ -306,7 +328,7 @@ def inspect(history, metadata, n, n_drl, seed, epoch=0, max_steps=20):
     slot_raw = np.array(history.slot_actions[epoch, :max_steps]) if has_slot else None
 
     action_space_variant = (metadata or {}).get('action_space_variant', 'txcs_duration_set')
-    max_duration = (metadata or {}).get('max_duration', MAX_MACRO_DURATION)
+    max_duration = resolve_max_duration(metadata, raw)
     macro_types = decode_action_type(raw.T, action_space_variant, max_duration).T  # (steps, agents)
 
     action_names = {Actions.TX.value: 'TX', Actions.CS.value: 'CS', Actions.IDLE.value: 'IDLE'}
