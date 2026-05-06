@@ -139,6 +139,15 @@ def build_observation_entry(
     ], dtype=jnp.float32)
 
 
+def normalize_obs(obs, queue_size):
+    obs = obs.at[..., ObsIdx.BUFFER_PACKET_COUNT].divide(queue_size)
+    obs = obs.at[..., ObsIdx.TRAFFIC_MEAN_ARRIVAL_RATE].divide(OBS_TRAFFIC_ARRIVAL_NORM)
+    obs = obs.at[..., ObsIdx.STATUS_RETRY_COUNTER].divide(MAX_RETRANSMISSION)
+    obs = obs.at[..., ObsIdx.STATUS_NO_TX_COUNTER].divide(SAFE_IDLE_PERIOD + PENALIZED_IDLE_PERIOD)
+    obs = obs.at[..., ObsIdx.STATUS_UNIQUE_LTC_TX_WINDOW].divide(OBS_UNIQUE_LTC_TX_NORM)
+    return obs
+
+
 def process_output_i(
     buffer_state,
     new_buffer_state,

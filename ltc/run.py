@@ -4,6 +4,7 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 os.environ['JAX_ENABLE_X64'] = 'true'
 
 import argparse
+from dataclasses import dataclass
 from functools import partial
 
 import cloudpickle
@@ -14,11 +15,33 @@ import optax
 from tqdm import trange
 
 from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
-from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate, channel_state_selector
+from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.structs import *
 from ltc.utils.plots import plot_all, plot_first
+
+
+@dataclass(frozen=True)
+class StationScheduleConfig:
+    one_shot_step: int | None = None
+    one_shot_target: int | None = None
+    station_change_interval: int | None = None
+    station_change_delta: int = 0
+    station_change_start_step: int = 0
+    station_change_stop_step: int | None = None
+    station_change_target: int | None = None
+
+
+@dataclass(frozen=True)
+class RLStepConfig:
+    n_bins: int = 50
+    schedule: StationScheduleConfig = StationScheduleConfig()
+    obs_enable_cs_tx_same_type: bool = False
+    obs_enable_tx_collision_other: bool = False
+    action_space_variant: str = 'txcs_duration_set'
+    max_duration: int = 5
+    legacy_tx_duration: int = 5
 
 
 def init_agents(agent, key, n):
@@ -52,40 +75,30 @@ def init_traffic(traffic, key, n):
     return states, step_fn
 
 
-def schedule_active_stations(
-    active,
-    step,
-    *,
-    one_shot_step=None,
-    one_shot_target=None,
-    station_change_interval=None,
-    station_change_delta=0,
-    station_change_start_step=0,
-    station_change_stop_step=None,
-    station_change_target=None,
-):
+def schedule_active_stations(active, step, schedule):
     n = active.shape[0]
     next_active = active
 
-    if one_shot_step is not None and one_shot_target is not None:
-        target = jnp.asarray(one_shot_target, dtype=jnp.int32)
+    if schedule.one_shot_step is not None and schedule.one_shot_target is not None:
+        target = jnp.asarray(schedule.one_shot_target, dtype=jnp.int32)
         one_shot_active = jnp.arange(n) < target
-        next_active = jnp.where(step == one_shot_step, one_shot_active, next_active)
+        next_active = jnp.where(step == schedule.one_shot_step, one_shot_active, next_active)
 
-    if station_change_interval is not None and station_change_delta != 0:
-        should_change = step >= station_change_start_step
-        if station_change_stop_step is not None:
-            should_change = jnp.logical_and(should_change, step <= station_change_stop_step)
+    if schedule.station_change_interval is not None and schedule.station_change_delta != 0:
+        should_change = step >= schedule.station_change_start_step
+        if schedule.station_change_stop_step is not None:
+            should_change = jnp.logical_and(should_change, step <= schedule.station_change_stop_step)
         should_change = jnp.logical_and(
-            should_change, (step - station_change_start_step) % station_change_interval == 0
+            should_change,
+            (step - schedule.station_change_start_step) % schedule.station_change_interval == 0,
         )
 
         current_count = jnp.sum(next_active.astype(jnp.int32))
-        updated_count = jnp.clip(current_count + station_change_delta, 0, n)
-        if station_change_target is not None:
-            target = jnp.asarray(station_change_target, dtype=jnp.int32)
+        updated_count = jnp.clip(current_count + schedule.station_change_delta, 0, n)
+        if schedule.station_change_target is not None:
+            target = jnp.asarray(schedule.station_change_target, dtype=jnp.int32)
             updated_count = jnp.where(
-                station_change_delta > 0,
+                schedule.station_change_delta > 0,
                 jnp.minimum(updated_count, target),
                 jnp.maximum(updated_count, target),
             )
@@ -197,6 +210,14 @@ def update_packet_tracking(
     )
 
 
+def scale_tx_durations(action_types, durations):
+    return jnp.where(
+        action_types == Actions.TX.value,
+        durations * TX_SLOTS,
+        durations,
+    )
+
+
 def compute_obs_features(
     obs_tracker, tx_hist, n_drl,
     new_frames, planned_packets, successful_packets, channel_state, tx_mask,
@@ -247,11 +268,7 @@ def update_macro_state_from_ready_agents(
     macro_action_types = macro_action_types.at[:n_drl].set(
         jnp.where(ready_drl, decoded_actions.drl_action_types, macro_state.action_types[:n_drl])
     )
-    drl_scaled_durations = jnp.where(
-        decoded_actions.drl_action_types == Actions.TX.value,
-        decoded_actions.drl_durations * TX_SLOTS,
-        decoded_actions.drl_durations,
-    )
+    drl_scaled_durations = scale_tx_durations(decoded_actions.drl_action_types, decoded_actions.drl_durations)
     macro_remaining = macro_remaining.at[:n_drl].set(
         jnp.where(ready_drl, drl_scaled_durations, macro_state.remaining[:n_drl])
     )
@@ -262,10 +279,8 @@ def update_macro_state_from_ready_agents(
     macro_action_types = macro_action_types.at[n_drl:].set(
         jnp.where(ready_legacy, decoded_actions.legacy_action_types, macro_state.action_types[n_drl:])
     )
-    legacy_scaled_durations = jnp.where(
-        decoded_actions.legacy_action_types == Actions.TX.value,
-        decoded_actions.legacy_durations * TX_SLOTS,
-        decoded_actions.legacy_durations,
+    legacy_scaled_durations = scale_tx_durations(
+        decoded_actions.legacy_action_types, decoded_actions.legacy_durations
     )
     macro_remaining = macro_remaining.at[n_drl:].set(
         jnp.where(ready_legacy, legacy_scaled_durations, macro_state.remaining[n_drl:])
@@ -274,25 +289,25 @@ def update_macro_state_from_ready_agents(
     return macro_action_types, macro_remaining, staged_tx
 
 
-def rl_step(
-    drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
-    one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
-    station_change_start_step=0, station_change_stop_step=None, station_change_target=None,
-    obs_enable_cs_tx_same_type=False, obs_enable_tx_collision_other=False,
-    action_space_variant='txcs_duration_set', max_duration=5, legacy_tx_duration=5,
-):
+def build_traffic(traffic_type, f3dB, loc, scale):
+    if traffic_type == 'custom':
+        params = {'f3dB': f3dB, 'loc': loc, 'scale': scale}
+    else:
+        presets = {
+            'constant': {'f3dB': 1.0, 'loc': -1.0, 'scale': 0.0},
+            'saturated': {'f3dB': 1.0, 'loc': 5.0, 'scale': 0.0},
+            'bursty': {'f3dB': 0.1, 'loc': -5.0, 'scale': 5.0},
+        }
+        params = presets.get(traffic_type)
+        if params is None:
+            raise ValueError(f'Unknown traffic type: {traffic_type}')
+
+    return cox_traffic(initial_state=InitialStateConf.ZERO, **params)
+
+
+def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()):
     def rl_step_fn(c, step):
-        active = schedule_active_stations(
-            c.active,
-            step,
-            one_shot_step=one_shot_step,
-            one_shot_target=one_shot_target,
-            station_change_interval=station_change_interval,
-            station_change_delta=station_change_delta,
-            station_change_start_step=station_change_start_step,
-            station_change_stop_step=station_change_stop_step,
-            station_change_target=station_change_target,
-        )
+        active = schedule_active_stations(c.active, step, config.schedule)
 
         key, drl_keys, legacy_keys, traffic_key, reward_key = jax.random.split(c.key, 5)
         drl_keys = jax.random.split(drl_keys, n_drl)
@@ -303,11 +318,12 @@ def rl_step(
         drl_ready = jnp.logical_and(active[:n_drl], ready[:n_drl])
         legacy_ready = jnp.logical_and(active[n_drl:], ready[n_drl:])
 
+        obs_norm = normalize_obs(c.obs, queue_size=c.buffer_states.shape[1])
         drl_states, drl_actions_raw = drl_step(
-            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], drl_ready
+            c.drl_states, drl_keys, obs_norm[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], drl_ready
         )
         legacy_states, legacy_actions_raw = legacy_step(
-            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], legacy_ready
+            c.legacy_states, legacy_keys, obs_norm[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], legacy_ready
         )
 
         raw_actions = c.actions
@@ -315,9 +331,11 @@ def rl_step(
         raw_actions = raw_actions.at[n_drl:].set(jnp.where(legacy_ready, legacy_actions_raw, c.actions[n_drl:]))
 
         drl_action_types, drl_durations, drl_staged_next = decode_drl_actions(
-            raw_actions[:n_drl], c.obs_tracker.staged_tx[:n_drl], action_space_variant, max_duration
+            raw_actions[:n_drl], c.obs_tracker.staged_tx[:n_drl], config.action_space_variant, config.max_duration
         )
-        legacy_action_types, legacy_durations = decode_legacy_actions(raw_actions[n_drl:], legacy_tx_duration)
+        legacy_action_types, legacy_durations = decode_legacy_actions(
+            raw_actions[n_drl:], config.legacy_tx_duration
+        )
 
         decoded_actions = ActionDecodingResults(
             drl_action_types=drl_action_types,
@@ -380,8 +398,8 @@ def rl_step(
         k_coll_coex = c.macro.k_coll_coex + jnp.where(packet_collided & sub_collision_other_flag, 1.0, 0.0)
 
         obs_config = ObsFeatureConfig(
-            enable_cs_tx_same_type=obs_enable_cs_tx_same_type,
-            enable_tx_collision_other=obs_enable_tx_collision_other,
+            enable_cs_tx_same_type=config.obs_enable_cs_tx_same_type,
+            enable_tx_collision_other=config.obs_enable_tx_collision_other,
         )
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
@@ -415,7 +433,7 @@ def rl_step(
             flat_params, _ = jax.tree.flatten(params)
             flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
             flat_params = jnp.hstack(flat_params)
-            hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
+            hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, config.n_bins)
         else:
             hist, bin_edges = None, None
 
@@ -548,33 +566,26 @@ if __name__ == '__main__':
 
     key, init_key = jax.random.split(key)
 
-    if args.traffic_type == 'constant':
-        traffic = cox_traffic(f3dB=1.0, loc=-1.0, scale=0.0, initial_state=InitialStateConf.ZERO)
-    elif args.traffic_type == 'saturated':
-        traffic = cox_traffic(f3dB=1.0, loc=5.0, scale=0.0, initial_state=InitialStateConf.ZERO)
-    elif args.traffic_type == 'bursty':
-        traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
-    elif args.traffic_type == 'custom':
-        traffic = cox_traffic(f3dB=args.f3dB, loc=args.loc, scale=args.scale, initial_state=InitialStateConf.ZERO)
-    else:
-        raise ValueError(f'Unknown traffic type: {args.traffic_type}')
+    traffic = build_traffic(args.traffic_type, args.f3dB, args.loc, args.scale)
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
-    rl_step_fn = jax.jit(rl_step(
-        drl_step, legacy_step, traffic_step, n, n,
-        one_shot_step=one_shot_step,
-        one_shot_target=one_shot_target,
-        station_change_interval=args.station_change_interval,
-        station_change_delta=args.station_change_delta,
-        station_change_start_step=station_change_start_step,
-        station_change_stop_step=args.station_change_stop_step,
-        station_change_target=station_change_target,
+    step_config = RLStepConfig(
+        schedule=StationScheduleConfig(
+            one_shot_step=one_shot_step,
+            one_shot_target=one_shot_target,
+            station_change_interval=args.station_change_interval,
+            station_change_delta=args.station_change_delta,
+            station_change_start_step=station_change_start_step,
+            station_change_stop_step=args.station_change_stop_step,
+            station_change_target=station_change_target,
+        ),
         obs_enable_cs_tx_same_type=args.obs_enable_cs_tx_same_type,
         obs_enable_tx_collision_other=args.obs_enable_tx_collision_other,
         action_space_variant=args.action_space_variant,
         max_duration=MAX_MACRO_DURATION,
         legacy_tx_duration=LEGACY_TX_DURATION,
-    ))
+    )
+    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n, config=step_config))
 
     carry = Carry(
         drl_states=drl_states,

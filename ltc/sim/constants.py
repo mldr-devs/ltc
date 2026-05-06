@@ -55,7 +55,9 @@ https://ieeexplore.ieee.org/document/8930559
 """
 TAU = 5.484 * 1e-3
 
-# Queue representation
+"""
+Queue representation
+"""
 EMPTY_PACKET_ID = -1
 
 """
@@ -63,6 +65,12 @@ Macro-action defaults
 """
 MAX_MACRO_DURATION = 5
 LEGACY_TX_DURATION = 5
+
+"""
+Observation normalization constants
+"""
+OBS_UNIQUE_LTC_TX_NORM = 10
+OBS_TRAFFIC_ARRIVAL_NORM = 10
 
 
 class ObsIdx:
