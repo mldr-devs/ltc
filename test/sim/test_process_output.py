@@ -13,7 +13,7 @@ EMPTY = EMPTY_PACKET_ID
 
 class ProcessOutputTestCase(unittest.TestCase):
     def test_no_transmission(self):
-        args = (Actions.IDLE.value, jnp.array([1, EMPTY, EMPTY]), 5, 0, 1, KEY)
+        args = (Actions.IDLE.value, jnp.array([1, EMPTY, EMPTY]), jnp.array(5, dtype=jnp.int64), 0, jnp.array(1, dtype=jnp.int64), KEY)
         reward, r, no_tx = no_transmission(args)
         self.assertEqual(reward, 0.0)
         self.assertEqual(r, 5)
