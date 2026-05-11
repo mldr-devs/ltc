@@ -48,7 +48,7 @@ class EBALOHA(BaseAgent):
 
     @staticmethod
     def sample(state, key, env_state):
-        *_, buffer = env_state[-1]
+        buffer, *_ = env_state[-1]
 
         return jnp.where(
             (buffer > 0) & (state.backoff == 0),

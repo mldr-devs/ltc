@@ -29,7 +29,7 @@ class QALOHA(BaseAgent):
 
     @staticmethod
     def sample(state, key, env_state, q):
-        *_, buffer = env_state[-1]
+        buffer, *_ = env_state[-1]
 
         return jnp.where(
             buffer == 0,
