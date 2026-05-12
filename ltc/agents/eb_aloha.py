@@ -30,7 +30,7 @@ class EBALOHA(BaseAgent):
 
     @staticmethod
     def update(state, key, env_state, action, reward, terminal, window_size: int, max_backoff: int):
-        collision = (action == Actions.TX.value) & (reward == 0)
+        collision = (action == Actions.TX.value) & (reward < 0)
         success = (action == Actions.TX.value) & (reward > 0)
 
         new_ret_c = jnp.where(
