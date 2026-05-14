@@ -1,7 +1,11 @@
+from dataclasses import dataclass, field
+
 import jax
 import jax.numpy as jnp
 
-# @jax.jit
+from ltc.sim.constants import Actions
+
+
 def simplex_code(T: int) -> jax.Array:
     """
     Simplex code matrix for T classes, shape (T-1, T).
@@ -19,7 +23,7 @@ def simplex_code(T: int) -> jax.Array:
     C = jnp.array([[1.0, -1.0]])  # C[2], shape (1, 2)
 
     for i in range(2, T):
-        scale = jnp.sqrt(1.0 - 1.0 / i ** 2)
+        scale = jnp.sqrt(1.0 - 1.0 / i**2)
         u = jnp.full((1, i), -1.0 / i)
         v = jnp.zeros((i - 1, 1))
         top = jnp.concatenate([jnp.ones((1, 1)), u], axis=1)
@@ -28,10 +32,48 @@ def simplex_code(T: int) -> jax.Array:
 
     return C
 
-if __name__ == "__main__":
-    T=5
-    sc = simplex_code(T=T)
-    for i in range(T):
-        print(jnp.take(sc,i,axis=1))
 
-    ...
+@jax.tree_util.register_dataclass
+@dataclass
+class SimplexCode:
+    T: int = field(metadata=dict(static=True), default=len(Actions))
+    codes: jax.Array | None = None
+
+    def __post_init__(self):
+        if self.codes is None:
+            self.codes = simplex_code(self.T)
+        else:
+            assert self.codes.shape == (self.T - 1, self.T), (
+                "Codes must have shape (T-1, T)"
+            )
+            self.codes = self.codes
+
+    @jax.jit
+    def encode(self, labels: jax.Array) -> jax.Array:
+        """
+        Encode integer labels (shape (N,)) to simplex codes (shape (N, T-1)).
+        """
+        return jnp.take(self.codes, labels, axis=1).T
+
+    @jax.jit
+    def decode(self, codes: jax.Array) -> jax.Array:
+        """
+        Decode simplex codes (shape (N, T-1)) to integer labels (shape (N,)).
+        """
+        # Compute inner products with codewords, shape (N, T)
+        inner_products = codes @ self.codes
+        return jnp.argmax(inner_products, axis=1)
+
+
+if __name__ == "__main__":
+    T = 5
+    sc = SimplexCode(T=T)
+    for i in range(T):
+        print(jnp.take(sc.codes, i, axis=1))
+
+    labels = jnp.array([0, 1, 2, 3, 4])
+    codes = sc.encode(labels)
+    print("Codes:\n", codes)
+    decoded_labels = sc.decode(codes)
+    print("Decoded labels:\n", decoded_labels)
+    assert jnp.array_equal(labels, decoded_labels), "Decoded labels do not match original"
