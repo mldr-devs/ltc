@@ -25,7 +25,10 @@ def _():
     import sympy
 
     os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
-    return glob, joblib, np, os, pd, pickle, plt, sns
+
+    from ltc.symbolic.util import SimplexCode
+
+    return SimplexCode, glob, joblib, np, os, pd, pickle, plt, sns
 
 
 @app.cell
@@ -42,7 +45,7 @@ def _(glob, mo, os):
 
 
 @app.cell
-def _(experiment, joblib, os, pd, pickle):
+def _(SimplexCode, experiment, joblib, os, pd, pickle):
     base = experiment.value
     df = pd.read_csv(f"out/{base}.csv")
     forest = joblib.load(f"out/{base}.forest.pkl")
@@ -53,7 +56,24 @@ def _(experiment, joblib, os, pd, pickle):
         if os.path.exists(_path):
             with open(_path, "rb") as _fh:
                 sr_models[_ag] = pickle.load(_fh)
-    return agents, base, df, forest, sr_models
+    simplex_code = SimplexCode(T=df["action"].nunique())
+    return agents, base, df, forest, simplex_code, sr_models
+
+
+@app.cell
+def _(np, simplex_code):
+    def predict_labels(model, X):
+        """Predict integer action labels by decoding the SR simplex-code output."""
+        _eqs = model.equations_
+        if isinstance(_eqs, list):
+            _idx = [_e["score"].idxmax() for _e in _eqs]
+        else:
+            _idx = _eqs["score"].idxmax()
+        _codes = np.asarray(model.predict(X.values, _idx))
+        _codes = _codes.reshape(len(X), simplex_code.T - 1)
+        return np.asarray(simplex_code.decode(_codes))
+
+    return (predict_labels,)
 
 
 @app.cell
@@ -134,12 +154,8 @@ def _(mo):
 
 
 @app.cell
-def _(agents, base, df, np, plt, sns, sr_models):
+def _(agents, base, df, np, plt, predict_labels, sns, sr_models):
     _feat_cols = [c for c in df.columns if c not in {"agent", "action"}]
-
-    def _predict(model, X):
-        best_idx = model.equations_["score"].idxmax()
-        return model.predict(X.values, best_idx)
 
     n = len(agents)
     _acc = np.zeros((n, n))
@@ -148,7 +164,7 @@ def _(agents, base, df, np, plt, sns, sr_models):
             _df_j = df[df["agent"] == _ag_j]
             _X_j = _df_j[_feat_cols].astype(np.float32)
             _y_j = _df_j["action"].values
-            _y_pred = (_predict(sr_models[_ag_i], _X_j) > 0).astype(int)
+            _y_pred = predict_labels(sr_models[_ag_i], _X_j)
             _acc[_i, _j] = (_y_pred == _y_j).mean()
 
     fig_cp, ax_cp = plt.subplots(figsize=(9, 7))
@@ -180,14 +196,10 @@ def _(mo):
 
 
 @app.cell
-def _(agents, df, np, sr_models):
+def _(agents, df, np, predict_labels, sr_models):
     from sklearn.metrics import balanced_accuracy_score, f1_score
 
     _feat_cols = [c for c in df.columns if c not in {"agent", "action"}]
-
-    def _predict_best(model, X):
-        best_idx = model.equations_["score"].idxmax()
-        return model.predict(X.values, best_idx)
 
     _n = len(agents)
     _acc2 = np.zeros((_n, _n))
@@ -204,7 +216,7 @@ def _(agents, df, np, sr_models):
         baseline_acc[_j] = _counts.max() / len(_y_j)
 
         for _i, _ag_i in enumerate(agents):
-            _y_pred = (_predict_best(sr_models[_ag_i], _X_j) > 0).astype(int)
+            _y_pred = predict_labels(sr_models[_ag_i], _X_j)
             _acc2[_i, _j] = (_y_pred == _y_j).mean()
             lift[_i, _j] = _acc2[_i, _j] - baseline_acc[_j]
             bal_acc[_i, _j] = balanced_accuracy_score(_y_j, _y_pred)
@@ -344,14 +356,10 @@ def _(mo):
 
 
 @app.cell
-def _(agents, base, df, np, plt, sns, sr_models):
+def _(agents, base, df, np, plt, predict_labels, sns, sr_models):
     from sklearn.metrics import confusion_matrix as _confusion_matrix
 
     _feat_cols = [c for c in df.columns if c not in {"agent", "action"}]
-
-    def _predict_best(model, X):
-        best_idx = model.equations_["score"].idxmax()
-        return model.predict(X.values, best_idx)
 
     _n = len(agents)
     _cell = 2.6
@@ -365,7 +373,7 @@ def _(agents, base, df, np, plt, sns, sr_models):
             _df_j = df[df["agent"] == _ag_j]
             _X_j = _df_j[_feat_cols].astype(np.float32)
             _y_j = _df_j["action"].values
-            _y_pred = (_predict_best(sr_models[_ag_i], _X_j) > 0).astype(int)
+            _y_pred = predict_labels(sr_models[_ag_i], _X_j)
             _cm = _confusion_matrix(_y_j, _y_pred, normalize="true")
             sns.heatmap(
                 _cm,
