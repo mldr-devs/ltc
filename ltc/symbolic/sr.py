@@ -2,6 +2,8 @@ import argparse
 import os
 import pickle
 
+from ltc.symbolic.util import SimplexCode
+
 os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
 
 import numpy as np
@@ -11,6 +13,7 @@ from pysr import PySRRegressor
 
 def fit_sr(
     df_ag: pd.DataFrame,
+    label_codes: SimplexCode | None = None,
     n_iterations: int = 100,
     n_populations: int = 10,
     output_directory: str | None = None,
@@ -18,7 +21,16 @@ def fit_sr(
     exclude_cols = {"agent", "action"}
     feat_cols = [c for c in df_ag.columns if c not in exclude_cols]
     X = df_ag[feat_cols].astype(np.float32)
-    y = (2.0 * df_ag["action"].astype(np.float32) - 1.0).to_numpy()
+    # y = (2.0 * df_ag["action"].astype(np.float32) - 1.0).to_numpy()
+    yi = df_ag["action"].astype(int).to_numpy()
+    simplex_code = label_codes or SimplexCode(T=2) # Assuming binary actions; adjust T if more actions
+    y = simplex_code.encode(yi)
+
+    # Balanced sample weights so the model can't win by predicting the
+    # most frequent class.
+    classes, counts = np.unique(yi, return_counts=True)
+    class_weight = {c: len(yi) / (len(classes) * n) for c, n in zip(classes, counts)}
+    weights = np.array([class_weight[c] for c in yi], dtype=np.float32)
 
     model = PySRRegressor(
         niterations=n_iterations,
@@ -26,12 +38,12 @@ def fit_sr(
         binary_operators=["+", "*", "/", "-", "^"],
         unary_operators=["exp"],
         constraints={"^": (-1, 1), "exp": 3},
-        elementwise_loss="LogitMarginLoss()",
+        # elementwise_loss="LogitMarginLoss()",
         temp_equation_file=output_directory is None,
         turbo=True,
         output_directory=output_directory,
     )
-    model.fit(X, y)
+    model.fit(X, y, weights=weights)
     return model
 
 
@@ -65,10 +77,12 @@ if __name__ == "__main__":
     out_prefix = args.output if args.output else args.file.replace(".csv", "")
 
     agents = [args.agent] if args.agent is not None else sorted(df["agent"].unique())
+    label_codes = SimplexCode(T=df["action"].nunique())
     for ag in agents:
         print(f"Fitting agent {ag}...")
         model = fit_sr(
             df[df["agent"] == ag],
+            label_codes=label_codes,
             n_iterations=args.n_iterations,
             n_populations=args.n_populations,
             output_directory=args.pysr_output_dir,

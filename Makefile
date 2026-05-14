@@ -25,7 +25,7 @@ out/%.csv: explain/nosvi/%.pkl.lz4 | out
 out/%.forest.pkl: out/%.csv
 	python -m ltc.symbolic.tree --file "$<" --output "$@"
 
-out/%.sr.done: out/%.csv
+out/%.sr.done: out/%.csv ltc/symbolic/sr.py
 	python -m ltc.symbolic.sr --file "$<" --output "out/$*" --pysr_output_dir out/output
 	touch "$@"
 
