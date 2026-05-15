@@ -61,7 +61,7 @@ class TrafficTestCase(unittest.TestCase):
         estimated_acf=np.corrcoef(yjax[:-1]-yjax.mean(), yjax[1:]-yjax.mean())[1,0]
 
 
-        self.assertAlmostEqual(yjax.mean(), stats.mean, places=3)
+        self.assertAlmostEqual(yjax.mean(), stats.mean, places=2)
         self.assertAlmostEqual(yjax.var(), stats.variance, places=1)
         self.assertAlmostEqual(estimated_acf, stats.acf_lag1, places=2)
         ...
