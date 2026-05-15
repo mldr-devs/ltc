@@ -62,9 +62,10 @@ def tx_macro_reward(
     k_coll = k_coll_ltc_eff + k_coll_coex_eff
     any_collision = k_coll > 0
 
+    net_data_slots = jnp.maximum(k_tx_eff * TX_SLOTS - 2.0, k_tx_eff)
     success_reward = jnp.where(
         k_tx_eff > 0,
-        TX_REWARD * (k_tx_eff * TX_SLOTS - 2.0) / TX_SLOTS,
+        TX_REWARD * net_data_slots / TX_SLOTS,
         0.0,
     )
 
@@ -97,8 +98,7 @@ def oldest_packet_age_norm(buffer_state, buffer_birth_state, current_step):
     valid = buffer_state != EMPTY_PACKET_ID
     oldest_birth = jnp.min(jnp.where(valid, buffer_birth_state, current_step))
     age = jnp.where(jnp.any(valid), current_step - oldest_birth, -1)
-    queue_size = jnp.maximum(buffer_state.shape[0], 1)
-    return jnp.where(age >= 0, age.astype(jnp.float32) / queue_size, -1.0)
+    return jnp.where(age >= 0, age.astype(jnp.float32), -1.0)
 
 
 def build_observation_entry(
@@ -121,6 +121,10 @@ def build_observation_entry(
         -1.0,
     )
 
+    action_tx   = jnp.where(action == Actions.TX.value,   1.0, 0.0)
+    action_cs   = jnp.where(action == Actions.CS.value,   1.0, 0.0)
+    action_idle = jnp.where(action == Actions.IDLE.value, 1.0, 0.0)
+
     return jnp.array([
         buffer_occupancy_pct,
         buffer_count.astype(jnp.float32),
@@ -131,7 +135,9 @@ def build_observation_entry(
         tx_collision_other.astype(jnp.float32),
         obs_features.channel_occupancy_pct_window,
         obs_features.channel_collisions_pct_window,
-        action.astype(jnp.float32),
+        action_tx,
+        action_cs,
+        action_idle,
         obs_features.back_pct,
         ret_c.astype(jnp.float32),
         no_tx.astype(jnp.float32),
@@ -141,6 +147,10 @@ def build_observation_entry(
 
 def normalize_obs(obs, queue_size):
     obs = obs.at[..., ObsIdx.BUFFER_PACKET_COUNT].divide(queue_size)
+    raw_age = obs[..., ObsIdx.BUFFER_OLDEST_AGE_NORM]
+    obs = obs.at[..., ObsIdx.BUFFER_OLDEST_AGE_NORM].set(
+        jnp.where(raw_age >= 0, jnp.minimum(raw_age / SAFE_IDLE_PERIOD, 1.0), raw_age)
+    )
     obs = obs.at[..., ObsIdx.TRAFFIC_MEAN_ARRIVAL_RATE].divide(OBS_TRAFFIC_ARRIVAL_NORM)
     obs = obs.at[..., ObsIdx.STATUS_RETRY_COUNTER].divide(MAX_RETRANSMISSION)
     obs = obs.at[..., ObsIdx.STATUS_NO_TX_COUNTER].divide(SAFE_IDLE_PERIOD + PENALIZED_IDLE_PERIOD)

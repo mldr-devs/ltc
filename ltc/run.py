@@ -183,7 +183,7 @@ def update_packet_tracking(
         tx_executing_pre & (channel_state_prelim == -1) & (tx_collision_other_now > 0.5),
         True, sub_collision_other_flag,
     )
-    tx_packet_mask = (macro_remaining % TX_SLOTS == 1) & slot_executing & tx_executing_pre
+    tx_packet_mask = ((macro_remaining - 1) % TX_SLOTS == 0) & slot_executing & tx_executing_pre
     tx_success_mask = tx_packet_mask & ~sub_collision_flag
 
     collision_with_other = tx_collision_other_now > 0.5
