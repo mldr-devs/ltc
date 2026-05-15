@@ -553,7 +553,7 @@ if __name__ == '__main__':
         discount=0.95,
         epsilon=1.0,
         epsilon_decay=0.999,
-        epsilon_min=0.0,
+        epsilon_min=0.05,
         tau=0.05
     )
     key, init_key = jax.random.split(key)
