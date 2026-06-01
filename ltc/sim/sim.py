@@ -1,18 +1,19 @@
 import jax.numpy as jnp
+import jax.random as jr
 
 from ltc.sim.constants import Actions
 
 
-def channel_state_selector(actions):
+def channel_state_selector(actions, ):
     """
     Returns a state of the channel due to how many STA transmit in the same time.
     :param actions: vector of stations that transmit at a given time
     :return:
     int: -1 if more than one STA transmit, 1 if exactly one STA transmit, 0 if noone transmit at the moment.
     """
-
     ones_count = jnp.sum(actions == Actions.TX.value)
     return jnp.where(
+
         ones_count > 1, -1,
         jnp.where(ones_count == 1, 1, 0)
     )
@@ -45,9 +46,15 @@ def add_new_frames(buffer_states, new_frames):
     new_frames = (new_frames > 0).astype(int)
     return jnp.bitwise_or(buffer_states, new_frames)
 
+def phy_interference(error_probability, sim_key):
+    return jr.bernoulli(sim_key, error_probability).astype(int)
 
-def simulate(buffer_states, new_frames, actions):
+
+
+def simulate(buffer_states, new_frames, actions, sim_key, error_probability=0.05):
     channel_state = channel_state_selector(actions)
+    phy_error = phy_interference(error_probability, sim_key)
+    channel_state = jnp.where(phy_error == 1, -1, channel_state)
     buffer_states = jnp.where(channel_state == 1, buffer_clearing(buffer_states, actions), buffer_states)
     buffer_states = add_new_frames(buffer_states, new_frames)
     return buffer_states, channel_state
