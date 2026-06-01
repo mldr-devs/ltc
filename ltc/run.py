@@ -11,9 +11,10 @@ import jax.numpy as jnp
 import lz4.frame
 import optax
 from tqdm import trange
+from reinforced_lib.agents.deep.ddqn import DDQN
 
-from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
-from ltc.sim import InitialStateConf, cox_traffic, process_output, simulate
+from ltc.agents import DCF, QNetwork
+from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
@@ -119,11 +120,12 @@ def rl_step(
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
+        obs_norm = normalize_obs(c.obs)
         drl_states, drl_actions = yield drl_step(
-            c.drl_states, drl_keys, c.obs[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
+            c.drl_states, drl_keys, obs_norm[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
         )
         legacy_states, legacy_actions = legacy_step(
-            c.legacy_states, legacy_keys, c.obs[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
+            c.legacy_states, legacy_keys, obs_norm[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
         )
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
@@ -174,11 +176,11 @@ def rl_step(
 
 def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
-    parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
+    parser.add_argument('--n', type=int, default=10, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
     parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
-    parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
+    parser.add_argument('--window_size', type=int, default=5, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
@@ -190,13 +192,15 @@ def setup_args():
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
+    parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
     return args
 
 
 if __name__ == '__main__':
     args = setup_args()
-    ensure_clean_git_worktree()
+    if not args.skip_git_check:
+        ensure_clean_git_worktree()
     commit_hash = get_short_commit_hash()
 
     n_init = args.n
@@ -242,19 +246,26 @@ if __name__ == '__main__':
     buffer_states = jnp.zeros(n, dtype=int)
     power_states = jnp.full(n, INITIAL_CAPACITY, dtype=int)
     channel_state = 0
-    obs = jnp.zeros((n, window_size, 5), dtype=int)
+    obs = jnp.zeros((n, window_size, 6), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
-    lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=60000, alpha=0.01)
+    warmup_steps = int(0.02 * total_steps)
+    decay_end_steps = int(0.75 * total_steps)
+    peak_lr = 5e-5
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(0.0, peak_lr, warmup_steps),
+        optax.cosine_decay_schedule(peak_lr, decay_steps=decay_end_steps - warmup_steps, alpha=0.01),
+        optax.constant_schedule(peak_lr * 0.01),
+    ], boundaries=[warmup_steps, decay_end_steps])
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),
-        optax.adam(lr_schedule, b1=0.95, b2=0.95)
+        optax.adam(lr_schedule),
     )
 
-    drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
+    drl = DDQN(
+        q_network=QNetwork(num_actions, dim=64, num_layers=2),
         obs_space_shape=obs.shape[1:],
         act_space_size=num_actions,
         optimizer=optimizer,
@@ -263,13 +274,12 @@ if __name__ == '__main__':
         experience_replay_steps=5,
         discount=0.95,
         epsilon=1.0,
-        epsilon_decay=0.999,
+        epsilon_decay=0.9997,
         epsilon_min=0.0,
-        tau=0.05
+        tau=0.01
     )
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(drl, init_key, n)
-    drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(int))
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
