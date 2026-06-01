@@ -4,6 +4,13 @@ import jax.numpy as jnp
 from ltc.sim.constants import *
 
 
+def normalize_obs(obs):
+    obs = obs.astype(jnp.float32)
+    obs = obs.at[..., 2].divide(MAX_RETRANSMISSION)
+    obs = obs.at[..., 3].divide(SAFE_IDLE_PERIOD + PENALIZED_IDLE_PERIOD)
+    return obs
+
+
 def no_transmission(args):
     _, buffer_state, _, _, _, _ = args
     return jax.lax.cond(buffer_state == 0, idle_empty_buffer, idle_full_buffer, args)
@@ -86,7 +93,7 @@ def successful_transmission(args):
 
 
 def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal, key):
-    _, _, ret_c, no_tx, _ = obs[-1]
+    _, _, ret_c, no_tx, _, _ = obs[-1]
     args = (action, buffer_state, ret_c, channel_state, no_tx, key)
 
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
@@ -104,7 +111,9 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
         )
     )
 
-    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, action])
+    action_tx = (action == Actions.TX.value).astype(int)
+    action_cs = (action == Actions.CS.value).astype(int)
+    obs_t = jnp.array([new_buffer_state, channel_state, ret_c, no_tx, action_tx, action_cs])
     obs = jnp.roll(obs, -1, axis=0)
     obs = obs.at[-1].set(obs_t)
 

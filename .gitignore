@@ -170,6 +170,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+scripts/
+plots/
+
 # Project outputs
 out/
 **/outputs/
