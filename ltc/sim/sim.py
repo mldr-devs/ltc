@@ -57,4 +57,4 @@ def simulate(buffer_states, new_frames, actions, sim_key, error_probability=0.05
     channel_state = jnp.where(phy_error == 1, -1, channel_state)
     buffer_states = jnp.where(channel_state == 1, buffer_clearing(buffer_states, actions), buffer_states)
     buffer_states = add_new_frames(buffer_states, new_frames)
-    return buffer_states, channel_state
+    return buffer_states, channel_state, phy_error

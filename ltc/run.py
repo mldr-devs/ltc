@@ -130,7 +130,7 @@ def rl_step(
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions, sim_key)
+        buffer_states, channel_state, phy_error = simulate(c.buffer_states, new_frames, actions, sim_key)
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals, reward_key
         )
@@ -151,7 +151,7 @@ def rl_step(
         )
         o = Output(
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges
+            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges, phy_error
         )
         yield c, o
 
