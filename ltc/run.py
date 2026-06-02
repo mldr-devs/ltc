@@ -98,9 +98,9 @@ def schedule_active_stations(
 
 
 def rl_step(
-    drl_step, legacy_step, traffic_step, n, n_drl, n_bins=50,
+    drl_step, legacy_step, traffic_step, n, n_drl, phy_error_prob, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
-    station_change_start_step=0, station_change_stop_step=None, station_change_target=None,
+    station_change_start_step=0, station_change_stop_step=None, station_change_target=None
 ):
     def rl_step_coroutine(c, step):
         active = schedule_active_stations(
@@ -130,7 +130,7 @@ def rl_step(
         actions = jnp.concatenate([drl_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state, phy_error = simulate(c.buffer_states, new_frames, actions, sim_key)
+        buffer_states, channel_state, phy_error = simulate(c.buffer_states, new_frames, actions, sim_key, error_probability=phy_error_prob)
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals, reward_key
         )
@@ -193,6 +193,7 @@ def setup_args():
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
+    parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
     args = parser.parse_args()
     return args
 
@@ -213,6 +214,7 @@ if __name__ == '__main__':
     window_size = args.window_size
     seed = args.seed
     traffic_type = args.traffic_type
+    phy_error_prob = args.phy_error_prob
 
     loc = args.loc
     scale = args.scale
@@ -306,6 +308,7 @@ if __name__ == '__main__':
         traffic_step,
         n,
         n,
+        phy_error_prob,
         one_shot_step=one_shot_step,
         one_shot_target=one_shot_target,
         station_change_interval=station_change_interval,
