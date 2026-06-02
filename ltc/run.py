@@ -99,8 +99,8 @@ def schedule_active_stations(
 
 def rl_step(
     drl_step, legacy_step, traffic_step, n, n_drl, phy_error_prob, n_bins=50,
-    one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0, 
-    station_change_start_step=0, station_change_stop_step=None, station_change_target=None
+    one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0,
+    station_change_start_step=0, station_change_stop_step=None, station_change_target=None, noise_dims=0, zero_obs=False,
 ):
     def rl_step_coroutine(c, step):
         active = schedule_active_stations(
@@ -115,14 +115,19 @@ def rl_step(
             station_change_target=station_change_target,
         )
 
-        key, drl_keys, legacy_keys, traffic_key, reward_key, sim_key = jax.random.split(c.key, 6)
+        key, drl_keys, legacy_keys, traffic_key, reward_key, sim_key, noise_key = jax.random.split(c.key, 7)
         drl_keys = jax.random.split(drl_keys, n_drl)
         legacy_keys = jax.random.split(legacy_keys, n - n_drl)
         traffic_keys = jax.random.split(traffic_key, n)
 
         obs_norm = normalize_obs(c.obs)
+        if noise_dims > 0:
+            noise = jax.random.normal(noise_key, (n_drl, obs_norm.shape[1], noise_dims))
+            obs_drl = noise if zero_obs else jnp.concatenate([obs_norm[:n_drl], noise], axis=-1)
+        else:
+            obs_drl = obs_norm[:n_drl]
         drl_states, drl_actions = yield drl_step(
-            c.drl_states, drl_keys, obs_norm[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
+            c.drl_states, drl_keys, obs_drl, c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
         )
         legacy_states, legacy_actions = legacy_step(
             c.legacy_states, legacy_keys, obs_norm[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
@@ -194,6 +199,8 @@ def setup_args():
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
+    parser.add_argument('--noise_dims', type=int, default=0, help='Gaussian noise dimensions appended to the observation.')
+    parser.add_argument('--zero_obs', action='store_true', default=False, help='Replace real observations with pure noise (discard real obs).')
     args = parser.parse_args()
     return args
 
@@ -212,6 +219,8 @@ if __name__ == '__main__':
     n_steps = args.n_steps
     total_steps = n_epochs * n_steps
     window_size = args.window_size
+    noise_dims = args.noise_dims
+    zero_obs = args.zero_obs
     seed = args.seed
     traffic_type = args.traffic_type
     phy_error_prob = args.phy_error_prob
@@ -266,9 +275,15 @@ if __name__ == '__main__':
         optax.adam(lr_schedule),
     )
 
+    if zero_obs and noise_dims > 0:
+        obs_space_shape = (window_size, noise_dims)
+    elif noise_dims > 0:
+        obs_space_shape = (window_size, 6 + noise_dims)
+    else:
+        obs_space_shape = (window_size, 6)
     drl = DDQN(
         q_network=QNetwork(num_actions, dim=64, num_layers=2),
-        obs_space_shape=obs.shape[1:],
+        obs_space_shape=obs_space_shape,
         act_space_size=num_actions,
         optimizer=optimizer,
         experience_replay_buffer_size=30000,
@@ -316,6 +331,8 @@ if __name__ == '__main__':
         station_change_start_step=station_change_start_step,
         station_change_stop_step=station_change_stop_step,
         station_change_target=station_change_target,
+        noise_dims=noise_dims,
+        zero_obs=zero_obs,
     )
     rl_step_fn = jax.jit(rl_step_fn)
     carry = Carry(
