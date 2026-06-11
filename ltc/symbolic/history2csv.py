@@ -12,9 +12,9 @@ import pandas as pd
 from ltc.agents import QNetwork
 from ltc.utils.history import resolve_history_file, unpack_history
 
-FEATURE_NAMES = ["buffer", "channel", "ret_c", "no_tx", "action"]
+FEATURE_NAMES = ["buffer", "channel", "ret_c", "no_tx", "action_tx", "action_cs"]
 
-_model = QNetwork(num_actions=2, num_layers=1, dim=64, num_heads=4)
+_model = QNetwork(num_actions=2, num_layers=2, dim=64)
 
 
 def build_column_names(window_size: int) -> list[str]:
