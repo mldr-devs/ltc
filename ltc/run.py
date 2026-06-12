@@ -1,6 +1,5 @@
 import os
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
-os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+os.environ['JAX_PLATFORMS'] = 'cpu'
 
 import argparse
 from functools import partial
@@ -9,11 +8,10 @@ import cloudpickle
 import jax
 import jax.numpy as jnp
 import lz4.frame
-import optax
 from tqdm import trange
-from reinforced_lib.agents.deep.ddqn import DDQN
+from reinforced_lib.agents.mab import Exp3, Softmax
 
-from ltc.agents import DCF, QNetwork
+from ltc.agents import DCF, DiscountedThompsonSampling
 from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
@@ -22,19 +20,23 @@ from ltc.utils.plots import plot_all, plot_first
 
 
 
-def init_agents(agent, key, n):
+def init_agents(agent, key, n, has_obs):
     keys = jax.random.split(key, n)
     states = jax.vmap(agent.init)(keys)
-    step_fn = jax.vmap(partial(agent_step, agent))
+    step_fn = jax.vmap(partial(agent_step, agent, has_obs=has_obs))
     return states, step_fn
 
 
-def agent_step(agent, state, key, obs, action, reward, terminal, active):
+def agent_step(agent, state, key, obs, action, reward, terminal, active, has_obs):
     update_key, sample_key = jax.random.split(key)
 
     def power_on(state, update_key, sample_key, obs, action, reward, terminal):
-        state = agent.update(state, update_key, obs, action, reward, terminal)
-        action = agent.sample(state, sample_key, obs)
+        if has_obs:
+            state = agent.update(state, update_key, obs, action, reward, terminal)
+            action = agent.sample(state, sample_key, obs)
+        else:
+            state = agent.update(state, update_key, action, reward)
+            action = agent.sample(state, sample_key)
         return state, action
 
     def power_off(state, update_key, sample_key, obs, action, reward, terminal):
@@ -98,7 +100,7 @@ def schedule_active_stations(
 
 
 def rl_step(
-    drl_step, legacy_step, traffic_step, n, n_drl, phy_error_prob, n_bins=50,
+    mab_step, legacy_step, traffic_step, n, n_mab, phy_error_prob, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0,
     station_change_start_step=0, station_change_stop_step=None, station_change_target=None, noise_dims=0, zero_obs=False,
 ):
@@ -115,24 +117,24 @@ def rl_step(
             station_change_target=station_change_target,
         )
 
-        key, drl_keys, legacy_keys, traffic_key, reward_key, sim_key, noise_key = jax.random.split(c.key, 7)
-        drl_keys = jax.random.split(drl_keys, n_drl)
-        legacy_keys = jax.random.split(legacy_keys, n - n_drl)
+        key, mab_keys, legacy_keys, traffic_key, reward_key, sim_key, noise_key = jax.random.split(c.key, 7)
+        mab_keys = jax.random.split(mab_keys, n_mab)
+        legacy_keys = jax.random.split(legacy_keys, n - n_mab)
         traffic_keys = jax.random.split(traffic_key, n)
 
         obs_norm = normalize_obs(c.obs)
         if noise_dims > 0:
-            noise = jax.random.normal(noise_key, (n_drl, obs_norm.shape[1], noise_dims))
-            obs_drl = noise if zero_obs else jnp.concatenate([obs_norm[:n_drl], noise], axis=-1)
+            noise = jax.random.normal(noise_key, (n_mab, obs_norm.shape[1], noise_dims))
+            obs_mab = noise if zero_obs else jnp.concatenate([obs_norm[:n_mab], noise], axis=-1)
         else:
-            obs_drl = obs_norm[:n_drl]
-        drl_states, drl_actions = yield drl_step(
-            c.drl_states, drl_keys, obs_drl, c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], active[:n_drl]
+            obs_mab = obs_norm[:n_mab]
+        mab_states, mab_actions = yield mab_step(
+            c.drl_states, mab_keys, obs_mab, c.actions[:n_mab], c.rewards[:n_mab], c.terminals[:n_mab], active[:n_mab]
         )
         legacy_states, legacy_actions = legacy_step(
-            c.legacy_states, legacy_keys, obs_norm[n_drl:], c.actions[n_drl:], c.rewards[n_drl:], c.terminals[n_drl:], active[n_drl:]
+            c.legacy_states, legacy_keys, obs_norm[n_mab:], c.actions[n_mab:], c.rewards[n_mab:], c.terminals[n_mab:], active[n_mab:]
         )
-        actions = jnp.concatenate([drl_actions, legacy_actions])
+        actions = jnp.concatenate([mab_actions, legacy_actions])
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         buffer_states, channel_state, phy_error = simulate(c.buffer_states, new_frames, actions, sim_key, error_probability=phy_error_prob)
@@ -141,22 +143,13 @@ def rl_step(
         )
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
-        if n_drl > 0:
-            params = c.drl_states.params['model'] if 'model' in c.drl_states.params else c.drl_states.params
-            flat_params, _ = jax.tree.flatten(params)
-            flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
-            flat_params = jnp.hstack(flat_params)
-            hist, bin_edges = jax.vmap(jnp.histogram, in_axes=(0, None))(flat_params, n_bins)
-        else:
-            hist, bin_edges = None, None
-
         c = Carry(
-            drl_states, legacy_states, traffic_states, buffer_states, powers,
+            mab_states, legacy_states, traffic_states, buffer_states, powers,
             channel_state, key, obs, actions, rewards, terminals, active
         )
         o = Output(
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges, phy_error
+            (new_frames > 0).astype(int), channel_state, active, None, None, phy_error
         )
         yield c, o
 
@@ -183,9 +176,10 @@ def setup_args():
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=10, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
-    parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
-    parser.add_argument('--window_size', type=int, default=5, help='Size of the observation window for each agent.')
+    parser.add_argument('--n_epochs', type=int, default=200, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=50, help='Number of steps per epoch.')
+    parser.add_argument('--mab_type', type=str, required=True, choices=['exp3', 'ts', 'softmax'], help='Type of MAB agent to use.')
+    parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
@@ -224,6 +218,7 @@ if __name__ == '__main__':
     seed = args.seed
     traffic_type = args.traffic_type
     phy_error_prob = args.phy_error_prob
+    mab_type = args.mab_type
 
     loc = args.loc
     scale = args.scale
@@ -262,45 +257,21 @@ if __name__ == '__main__':
     terminals = jnp.full(n, False, dtype=bool)
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
-    warmup_steps = int(0.02 * total_steps)
-    decay_end_steps = int(0.75 * total_steps)
-    peak_lr = 5e-5
-    lr_schedule = optax.join_schedules([
-        optax.linear_schedule(0.0, peak_lr, warmup_steps),
-        optax.cosine_decay_schedule(peak_lr, decay_steps=decay_end_steps - warmup_steps, alpha=0.01),
-        optax.constant_schedule(peak_lr * 0.01),
-    ], boundaries=[warmup_steps, decay_end_steps])
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0),
-        optax.adam(lr_schedule),
-    )
-
-    if zero_obs and noise_dims > 0:
-        obs_space_shape = (window_size, noise_dims)
-    elif noise_dims > 0:
-        obs_space_shape = (window_size, 6 + noise_dims)
+    if mab_type == 'exp3':
+        mab = Exp3(n_arms=num_actions, gamma=0.001, min_reward=-1., max_reward=1.)
+    elif mab_type == 'ts':
+        mab = DiscountedThompsonSampling(n_arms=num_actions, alpha=0.75, beta=0.06, lam=0.004, mu=-0.2, gamma=0.96)
+    elif mab_type == 'softmax':
+        mab = Softmax(n_arms=num_actions, lr=0.02, alpha=0.93, tau=9.9)
     else:
-        obs_space_shape = (window_size, 6)
-    drl = DDQN(
-        q_network=QNetwork(num_actions, dim=64, num_layers=2),
-        obs_space_shape=obs_space_shape,
-        act_space_size=num_actions,
-        optimizer=optimizer,
-        experience_replay_buffer_size=30000,
-        experience_replay_batch_size=128,
-        experience_replay_steps=5,
-        discount=0.95,
-        epsilon=1.0,
-        epsilon_decay=0.9997,
-        epsilon_min=0.0,
-        tau=0.01
-    )
+        raise ValueError(f'Unknown MAB type: {mab_type}')
+
     key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n)
+    mab_states, mab_step = init_agents(mab, init_key, n, has_obs=False)
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
-    legacy_states, legacy_step = init_agents(dcf, init_key, 0)
+    legacy_states, legacy_step = init_agents(dcf, init_key, 0, has_obs=True)
 
     key, init_key = jax.random.split(key)
 
@@ -318,7 +289,7 @@ if __name__ == '__main__':
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     rl_step_fn, _, _ = rl_step(
-        drl_step,
+        mab_step,
         legacy_step,
         traffic_step,
         n,
@@ -336,7 +307,7 @@ if __name__ == '__main__':
     )
     rl_step_fn = jax.jit(rl_step_fn)
     carry = Carry(
-        drl_states, legacy_states, traffic_states, buffer_states, power_states,
+        mab_states, legacy_states, traffic_states, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
     )
     all_outputs = []
