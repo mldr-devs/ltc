@@ -24,7 +24,7 @@ report-split: out/report_split.html
 out:
 	mkdir -p out
 
-out/%.csv: explain/nosvi/%.pkl.lz4 | out
+out/%.csv: data/nosvi/%.pkl.lz4 | out
 	python -m ltc.symbolic.history2csv --file "$<" --output "$@"
 
 out/%.forest.pkl: out/%.csv
