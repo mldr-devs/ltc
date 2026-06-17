@@ -3,6 +3,7 @@ os.environ['JAX_PLATFORMS'] = 'cpu'
 
 import argparse
 import json
+from types import SimpleNamespace
 
 import jax
 import jax.numpy as jnp
@@ -58,14 +59,20 @@ def run_sim(mab, n=10, n_epochs=200, n_steps=50, seed=42):
         mab_states, legacy_states, traffic_states, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
     )
-    all_outputs = []
+    # Only channel_state and actions are needed for the metrics. Pull them to host
+    # numpy each epoch so device buffers (and the large obs tensor) are released
+    # immediately instead of accumulating across the whole run.
+    ch_list, act_list = [], []
     for epoch in range(n_epochs):
         global_steps = jnp.arange(epoch * n_steps, (epoch + 1) * n_steps, dtype=jnp.int32)
         carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
-        all_outputs.append(output)
+        ch_list.append(np.asarray(output.channel_state))
+        act_list.append(np.asarray(output.actions))
 
-    all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    return all_outputs
+    return SimpleNamespace(
+        channel_state=np.stack(ch_list),
+        actions=np.stack(act_list),
+    )
 
 
 def compute_metrics(all_outputs, n_epochs, n_steps):
@@ -118,6 +125,9 @@ def evaluate(mab_type, params, n_values, seeds, n_epochs=200, n_steps=50, agg='m
         fair_per_n.append(f_n)
         thr_per_n.append(t_n)
 
+    # Each (n, seed) jit-compiles a fresh step function; without this the XLA
+    # executable cache grows unbounded across trials and eventually OOMs.
+    jax.clear_caches()
     return float(reducer(fair_per_n)), float(reducer(thr_per_n)), per_n
 
 
@@ -160,17 +170,16 @@ def make_objective(mab_type, n_values, seeds, n_epochs=200, n_steps=50, agg='mea
     return objective
 
 
-def pick_balanced(trials):
-    """Knee point of the Pareto front: max of min-max normalized (fairness + throughput)."""
+def pick_fairness_first(trials, tol=0.01):
+    """Lexicographic pick: fairness is primary (as close to 1 as possible), throughput secondary.
+
+    Take the highest fairness reached on the front, keep every solution within `tol` of it,
+    and among those return the one with the best throughput.
+    """
     fair = np.array([t.values[0] for t in trials])
-    thr = np.array([t.values[1] for t in trials])
-
-    def norm(x):
-        rng = x.max() - x.min()
-        return (x - x.min()) / rng if rng > 1e-12 else np.zeros_like(x)
-
-    score = norm(fair) + norm(thr)
-    return trials[int(np.argmax(score))]
+    best_fair = fair.max()
+    candidates = [t for t in trials if t.values[0] >= best_fair - tol]
+    return max(candidates, key=lambda t: t.values[1])
 
 
 if __name__ == '__main__':
@@ -188,7 +197,11 @@ if __name__ == '__main__':
                         help='Comma-separated seeds averaged per network size.')
     parser.add_argument('--agg', choices=['mean', 'min'], default='mean',
                         help="How to aggregate metrics across n: 'mean' (smooth) or 'min' (worst-case robust).")
-    parser.add_argument('--n_jobs', type=int, default=8)
+    parser.add_argument('--fairness_tol', type=float, default=0.01,
+                        help='Fairness band below the best fairness within which throughput is maximized.')
+    parser.add_argument('--n_jobs', type=int, default=1,
+                        help='Optuna parallel trials. Keep at 1: JAX/XLA compiles per trial and '
+                             'concurrent compilation across threads multiplies memory and can segfault.')
     parser.add_argument('--out', type=str, default=None, help='Path to write the Pareto front JSON.')
     args = parser.parse_args()
 
@@ -215,20 +228,22 @@ if __name__ == '__main__':
         n_trials=args.n_trials, n_jobs=args.n_jobs,
     )
 
-    front = sorted(study.best_trials, key=lambda tr: tr.values[1], reverse=True)
-    print(f'\nPareto front ({len(front)} solutions):')
+    # Sort the front by fairness (primary objective) descending, then throughput.
+    front = sorted(study.best_trials, key=lambda tr: (tr.values[0], tr.values[1]), reverse=True)
+    print(f'\nPareto front ({len(front)} solutions, sorted by fairness):')
     print(f"  {'fairness':>9} {'throughput':>11}   params")
     for tr in front:
         print(f'  {tr.values[0]:>9.4f} {tr.values[1]:>11.4f}   {tr.params}')
 
-    balanced = pick_balanced(front)
-    print(f'\nBalanced (knee) pick -> fairness={balanced.values[0]:.4f}, throughput={balanced.values[1]:.4f}')
-    print(f'Params: {balanced.params}')
+    recommended = pick_fairness_first(front, tol=args.fairness_tol)
+    print(f'\nRecommended (fairness-first, tol={args.fairness_tol}) -> '
+          f'fairness={recommended.values[0]:.4f}, throughput={recommended.values[1]:.4f}')
+    print(f'Params: {recommended.params}')
 
     # Held-out verification on an unseen seed, across all network sizes.
     holdout_seed = max(seeds) + 1000
     best_params = default_params[args.mab_type].copy()
-    best_params.update(balanced.params)
+    best_params.update(recommended.params)
     vf, vt, vper_n = evaluate(args.mab_type, best_params, n_values, [holdout_seed], **eval_kwargs)
     print(f'\nHeld-out (seed={holdout_seed}) -> fairness={vf:.4f}, throughput={vt:.4f}')
     print(f'  per_n={ {k: tuple(round(v, 3) for v in val) for k, val in vper_n.items()} }')
@@ -251,8 +266,11 @@ if __name__ == '__main__':
             }
             for tr in front
         ],
-        'balanced': {'fairness': balanced.values[0], 'throughput': balanced.values[1], 'params': balanced.params},
-        'holdout': {'seed': holdout_seed, 'fairness': vf, 'throughput': vt},
+        'recommended': {
+            'fairness': recommended.values[0], 'throughput': recommended.values[1],
+            'params': recommended.params, 'fairness_tol': args.fairness_tol,
+        },
+        'holdout': {'seed': holdout_seed, 'fairness': vf, 'throughput': vt, 'per_n': {n: vper_n[n] for n in n_values}},
     }
     with open(out_path, 'w') as fp:
         json.dump(payload, fp, indent=2)
