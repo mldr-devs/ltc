@@ -39,9 +39,7 @@ symbolic = [
 ]
 analysis = [
     "SALib~=1.5.2",
-]
-analysis = [
-    "SALib~=1.5.2",
+    "optuna>=3.6",
 ]
 
 [tool.setuptools]
