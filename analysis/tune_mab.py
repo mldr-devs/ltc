@@ -28,7 +28,26 @@ def build_mab(mab_type, params, num_actions=2):
     raise ValueError(f'Unknown MAB type: {mab_type}')
 
 
-def run_sim(mab, n=10, n_epochs=200, n_steps=50, seed=42):
+def run_sim(mab, n, n_init=None, n_final=None, n_epochs=200, n_steps=50, seed=42,
+            station_change_interval=None, station_change_delta=0):
+    """Run one simulation. `n` is the total station slots; `n_init` how many start
+    active (defaults to n = static). Dynamic scenarios mirror run.py exactly: with a
+    station_change_interval the count ramps by station_change_delta every interval
+    (clamped at n_final); without one, n_init->n_final is a one-shot change at mid-run."""
+    n_init = n if n_init is None else n_init
+    total_steps = n_epochs * n_steps
+
+    # Mirror run.py's scheduling branch (run.py:239-247).
+    one_shot_step = one_shot_target = None
+    station_change_start_step = 0
+    station_change_target = n_final
+    if station_change_interval is None:
+        if n_final is not None and n_final != n_init:
+            one_shot_step = total_steps // 2
+            one_shot_target = n_final
+    else:
+        station_change_start_step = station_change_interval
+
     key = jax.random.key(seed)
     actions = jnp.zeros(n, dtype=int)
     buffer_states = jnp.zeros(n, dtype=int)
@@ -37,7 +56,7 @@ def run_sim(mab, n=10, n_epochs=200, n_steps=50, seed=42):
     obs = jnp.zeros((n, 1, 6), dtype=int)
     rewards = jnp.zeros(n)
     terminals = jnp.full(n, False, dtype=bool)
-    active = jnp.ones(n, dtype=bool)
+    active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
     key, init_key = jax.random.split(key)
     mab_states, mab_step = init_agents(mab, init_key, n, has_obs=False)
@@ -52,6 +71,11 @@ def run_sim(mab, n=10, n_epochs=200, n_steps=50, seed=42):
 
     rl_step_fn, _, _ = rl_step(
         mab_step, legacy_step, traffic_step, n, n, 0.05,
+        one_shot_step=one_shot_step, one_shot_target=one_shot_target,
+        station_change_interval=station_change_interval,
+        station_change_delta=station_change_delta,
+        station_change_start_step=station_change_start_step,
+        station_change_target=station_change_target,
         noise_dims=0, zero_obs=False,
     )
     rl_step_fn = jax.jit(rl_step_fn)
@@ -59,76 +83,131 @@ def run_sim(mab, n=10, n_epochs=200, n_steps=50, seed=42):
         mab_states, legacy_states, traffic_states, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
     )
-    # Only channel_state and actions are needed for the metrics. Pull them to host
-    # numpy each epoch so device buffers (and the large obs tensor) are released
+    # Only channel_state, actions and active are needed for the metrics. Pull them to
+    # host numpy each epoch so device buffers (and the large obs tensor) are released
     # immediately instead of accumulating across the whole run.
-    ch_list, act_list = [], []
+    ch_list, act_list, active_list = [], [], []
     for epoch in range(n_epochs):
         global_steps = jnp.arange(epoch * n_steps, (epoch + 1) * n_steps, dtype=jnp.int32)
         carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
         ch_list.append(np.asarray(output.channel_state))
         act_list.append(np.asarray(output.actions))
+        active_list.append(np.asarray(output.active))
 
     return SimpleNamespace(
         channel_state=np.stack(ch_list),
         actions=np.stack(act_list),
+        active=np.stack(active_list),
     )
 
 
-def compute_metrics(all_outputs, n_epochs, n_steps):
-    """Returns (fairness, throughput) measured on the converged tail of the run."""
+def compute_metrics(all_outputs, n_epochs):
+    """Returns (fairness, throughput) measured on the converged tail of the run.
+
+    For dynamic scenarios the tail lies after the station-count change, and fairness
+    is computed only over the stations active in that window (a station that left, or
+    one that never joined, must not drag Jain's index down)."""
     cutoff = int(0.7 * n_epochs)
     ch = np.array(all_outputs.channel_state[cutoff:])
 
     # Throughput: fraction of slots with exactly one successful transmission.
     throughput = float(np.mean(ch == 1))
 
-    # Fairness: Jain's index over per-station successful transmissions.
+    # Per-station successful transmissions over the measurement window.
     actions = np.array(all_outputs.actions[cutoff:])
     tx_mask = (actions == Actions.TX.value)
     ch_broadcast = (ch == 1)[..., None]
     succ_tx = (tx_mask & ch_broadcast).sum(axis=(0, 1)).astype(float)
 
-    n = succ_tx.shape[0]
-    if succ_tx.sum() == 0:
+    # Stations in play in this window: those active at the final measured slot
+    # (the active set is stable post-change). Fairness is Jain's index over them.
+    final_active = np.array(all_outputs.active[cutoff:])[-1, -1].astype(bool)
+    succ_active = succ_tx[final_active]
+    k = succ_active.shape[0]
+    if k == 0 or succ_active.sum() == 0:
         fairness = 0.0
     else:
-        fairness = float((succ_tx.sum() ** 2) / (n * (succ_tx ** 2).sum()))
+        fairness = float((succ_active.sum() ** 2) / (k * (succ_active ** 2).sum()))
 
     return fairness, throughput
 
 
-def evaluate(mab_type, params, n_values, seeds, n_epochs=200, n_steps=50, agg='mean'):
-    """Evaluate one parameter set across several network sizes and seeds.
+def parse_dynamic(spec):
+    """Parse --dynamic 'n_init-n_final-interval,...' into scenario dicts.
 
-    Returns (fairness_agg, throughput_agg, per_n) where per_n maps each n to its
-    (fairness, throughput) averaged over seeds. Aggregation across n is the mean
-    (smooth) or the worst-case min (robust 'works for small and large network').
+    Each token 'n_init-n_final-interval' configures a run.py-style gradual scenario:
+    the station count ramps from n_init toward n_final by +-1 every `interval` steps
+    (station_change_*). A two-number token 'n_init-n_final' (no interval) is the
+    run.py one-shot change at mid-run. Returns [] for empty / 'none'."""
+    scenarios = []
+    for tok in spec.split(','):
+        tok = tok.strip()
+        if not tok or tok == 'none':
+            continue
+        parts = [int(x) for x in tok.split('-')]
+        if len(parts) == 2:
+            n_init, n_final = parts
+            sim = {'n': max(n_init, n_final), 'n_init': n_init, 'n_final': n_final}
+        elif len(parts) == 3:
+            n_init, n_final, interval = parts
+            sim = {'n': max(n_init, n_final), 'n_init': n_init, 'n_final': n_final,
+                   'station_change_interval': interval,
+                   'station_change_delta': 1 if n_final > n_init else -1}
+        else:
+            raise ValueError(f"Bad --dynamic token '{tok}'; expected n_init-n_final[-interval].")
+        scenarios.append({'label': tok, 'sim': sim})
+    return scenarios
+
+
+def build_scenarios(n_values, dynamic_spec, static_n_epochs, static_n_steps, dyn_n_epochs, dyn_n_steps):
+    """Static network sizes plus the dynamic scenarios parsed from --dynamic. Static and
+    dynamic scenarios carry their own n_epochs/n_steps (dynamics usually need longer runs
+    so the ramp completes and leaves a stable tail to measure)."""
+    scenarios = [
+        {'label': f'static_n{nv}', 'sim': {'n': nv, 'n_init': nv},
+         'n_epochs': static_n_epochs, 'n_steps': static_n_steps}
+        for nv in n_values
+    ]
+    for d in parse_dynamic(dynamic_spec):
+        d['n_epochs'] = dyn_n_epochs
+        d['n_steps'] = dyn_n_steps
+        scenarios.append(d)
+    return scenarios
+
+
+def evaluate(mab_type, params, scenarios, seeds, agg='mean'):
+    """Evaluate one parameter set across all scenarios (static + dynamic) and seeds.
+
+    Each scenario carries its own n_epochs/n_steps. Returns (fairness_agg,
+    throughput_agg, per_scenario) where per_scenario maps each scenario label to its
+    (fairness, throughput) averaged over seeds. Aggregation across scenarios is the
+    mean (smooth) or the worst-case min (robust: every scenario, ramps included, good).
     """
     reducer = np.mean if agg == 'mean' else np.min
-    per_n = {}
-    fair_per_n, thr_per_n = [], []
+    per_scenario = {}
+    fair_list, thr_list = [], []
 
-    for n in n_values:
+    for s in scenarios:
+        ne, ns = s['n_epochs'], s['n_steps']
         fair_seeds, thr_seeds = [], []
         for seed in seeds:
             try:
                 mab = build_mab(mab_type, params)
-                outputs = run_sim(mab, n=n, n_epochs=n_epochs, n_steps=n_steps, seed=seed)
-                f, t = compute_metrics(outputs, n_epochs, n_steps)
+                outputs = run_sim(mab, n_epochs=ne, n_steps=ns, seed=seed, **s['sim'])
+                f, t = compute_metrics(outputs, ne)
             except Exception:
                 f, t = 0.0, 0.0
             fair_seeds.append(f)
             thr_seeds.append(t)
-        f_n, t_n = float(np.mean(fair_seeds)), float(np.mean(thr_seeds))
-        per_n[n] = (f_n, t_n)
-        fair_per_n.append(f_n)
-        thr_per_n.append(t_n)
+        f_s, t_s = float(np.mean(fair_seeds)), float(np.mean(thr_seeds))
+        per_scenario[s['label']] = (f_s, t_s)
+        fair_list.append(f_s)
+        thr_list.append(t_s)
 
-    # Each (n, seed) jit-compiles a fresh step function; without this the XLA
+    # Each (scenario, seed) jit-compiles a fresh step function; without this the XLA
     # executable cache grows unbounded across trials and eventually OOMs.
     jax.clear_caches()
-    return float(reducer(fair_per_n)), float(reducer(thr_per_n)), per_n
+    return float(reducer(fair_list)), float(reducer(thr_list)), per_scenario
 
 
 def suggest_params(trial, mab_type):
@@ -155,19 +234,19 @@ def suggest_params(trial, mab_type):
     raise ValueError(f'Unknown MAB type: {mab_type}')
 
 
-def make_objective(mab_type, n_values, seeds, n_epochs=200, n_steps=50, agg='mean',
+def make_objective(mab_type, scenarios, seeds, agg='mean',
                    objective_mode='fairness', throughput_weight=0.01, throughput_floor=0.3):
     def objective(trial):
         params = suggest_params(trial, mab_type)
-        fairness, throughput, per_n = evaluate(
-            mab_type, params, n_values, seeds, n_epochs=n_epochs, n_steps=n_steps, agg=agg
+        fairness, throughput, per_scenario = evaluate(
+            mab_type, params, scenarios, seeds, agg=agg
         )
         # Record raw metrics so both modes can report fairness/throughput uniformly.
         trial.set_user_attr('fairness', fairness)
         trial.set_user_attr('throughput', throughput)
-        for n, (f_n, t_n) in per_n.items():
-            trial.set_user_attr(f'fairness_n{n}', f_n)
-            trial.set_user_attr(f'throughput_n{n}', t_n)
+        for label, (f_s, t_s) in per_scenario.items():
+            trial.set_user_attr(f'fairness_{label}', f_s)
+            trial.set_user_attr(f'throughput_{label}', t_s)
 
         if objective_mode == 'pareto':
             # Maximize fairness AND throughput -> Optuna returns a Pareto front.
@@ -211,14 +290,25 @@ if __name__ == '__main__':
     )
     parser.add_argument('--mab_type', required=True, choices=['exp3', 'ts', 'softmax'])
     parser.add_argument('--n_trials', type=int, default=100)
-    parser.add_argument('--n_epochs', type=int, default=500)
-    parser.add_argument('--n_steps', type=int, default=50)
+    parser.add_argument('--n_epochs', type=int, default=500, help='Epochs for static scenarios.')
+    parser.add_argument('--n_steps', type=int, default=50, help='Steps per epoch for static scenarios.')
+    parser.add_argument('--dyn_n_epochs', type=int, default=None,
+                        help='Epochs for dynamic scenarios (longer lets the ramp complete). '
+                             'Defaults to --n_epochs.')
+    parser.add_argument('--dyn_n_steps', type=int, default=None,
+                        help='Steps per epoch for dynamic scenarios. Defaults to --n_steps.')
     parser.add_argument('--n_values', type=str, default='5,10,20,30,40',
-                        help='Comma-separated network sizes to tune across.')
+                        help='Comma-separated static network sizes to tune across.')
+    parser.add_argument('--dynamic', type=str, default='10-20-5000,20-10-5000',
+                        help="Comma-separated dynamic scenarios (run.py-style) alongside the static "
+                             "sizes. Each token 'n_init-n_final-interval' ramps the station count "
+                             "by +-1 every interval steps (station_change_*); 'n_init-n_final' is a "
+                             "one-shot change at mid-run. 'none' disables dynamics.")
     parser.add_argument('--seeds', type=str, default='1,42,101',
-                        help='Comma-separated seeds averaged per network size.')
+                        help='Comma-separated seeds averaged per scenario.')
     parser.add_argument('--agg', choices=['mean', 'min'], default='mean',
-                        help="How to aggregate metrics across n: 'mean' (smooth) or 'min' (worst-case robust).")
+                        help="How to aggregate metrics across scenarios: 'mean' (smooth) or "
+                             "'min' (worst-case robust: every scenario, ramps included, must be good).")
     parser.add_argument('--objective', choices=['fairness', 'pareto'], default='fairness',
                         help="'fairness': single-objective fairness + w*throughput (fairness primary). "
                              "'pareto': multi-objective Pareto front + fairness-first pick.")
@@ -236,19 +326,27 @@ if __name__ == '__main__':
 
     n_values = [int(x) for x in args.n_values.split(',')]
     seeds = [int(x) for x in args.seeds.split(',')]
-    eval_kwargs = dict(n_epochs=args.n_epochs, n_steps=args.n_steps, agg=args.agg)
+    dyn_n_epochs = args.dyn_n_epochs if args.dyn_n_epochs is not None else args.n_epochs
+    dyn_n_steps = args.dyn_n_steps if args.dyn_n_steps is not None else args.n_steps
+    scenarios = build_scenarios(n_values, args.dynamic, args.n_epochs, args.n_steps, dyn_n_epochs, dyn_n_steps)
+    labels = [s['label'] for s in scenarios]
+    eval_kwargs = dict(agg=args.agg)
+
+    def fmt_per_scn(per_scn):
+        return {k: tuple(round(v, 3) for v in val) for k, val in per_scn.items()}
 
     default_params = {
         'exp3': {'gamma': 0.001, 'min_reward': -1.0, 'max_reward': 1.0},
         'ts': {'alpha': 0.75, 'beta': 0.06, 'lam': 0.004, 'mu': -0.2, 'gamma': 0.96},
         'softmax': {'lr': 0.02, 'alpha': 0.93, 'tau': 9.9},
     }
-    print(f'Tuning {args.mab_type} | n_values={n_values} | seeds={seeds} | agg={args.agg}')
-    f, t, per_n = evaluate(args.mab_type, default_params[args.mab_type], n_values, seeds, **eval_kwargs)
-    print(f'  Default -> fairness={f:.4f}, throughput={t:.4f}  per_n={ {k: tuple(round(v, 3) for v in val) for k, val in per_n.items()} }')
+    print(f'Tuning {args.mab_type} | scenarios={labels} | seeds={seeds} | agg={args.agg}')
+    print(f'  static: {args.n_epochs}x{args.n_steps} steps | dynamic: {dyn_n_epochs}x{dyn_n_steps} steps')
+    f, t, per_scn = evaluate(args.mab_type, default_params[args.mab_type], scenarios, seeds, **eval_kwargs)
+    print(f'  Default -> fairness={f:.4f}, throughput={t:.4f}  per_scenario={fmt_per_scn(per_scn)}')
 
     objective_fn = make_objective(
-        args.mab_type, n_values, seeds, objective_mode=args.objective,
+        args.mab_type, scenarios, seeds, objective_mode=args.objective,
         throughput_weight=args.throughput_weight, throughput_floor=args.throughput_floor, **eval_kwargs,
     )
 
@@ -296,13 +394,13 @@ if __name__ == '__main__':
     print(f'\nRecommended ({rec_note}) -> fairness={rec_fair:.4f}, throughput={rec_thr:.4f}')
     print(f'Params: {recommended.params}')
 
-    # Held-out verification on an unseen seed, across all network sizes.
+    # Held-out verification on an unseen seed, across all scenarios.
     holdout_seed = max(seeds) + 1000
     best_params = default_params[args.mab_type].copy()
     best_params.update(recommended.params)
-    vf, vt, vper_n = evaluate(args.mab_type, best_params, n_values, [holdout_seed], **eval_kwargs)
+    vf, vt, vper_scn = evaluate(args.mab_type, best_params, scenarios, [holdout_seed], **eval_kwargs)
     print(f'\nHeld-out (seed={holdout_seed}) -> fairness={vf:.4f}, throughput={vt:.4f}')
-    print(f'  per_n={ {k: tuple(round(v, 3) for v in val) for k, val in vper_n.items()} }')
+    print(f'  per_scenario={fmt_per_scn(vper_scn)}')
 
     out_path = args.out or f'tune_mab_{args.mab_type}_{args.objective}.json'
     payload = {
@@ -311,6 +409,12 @@ if __name__ == '__main__':
         'throughput_weight': args.throughput_weight,
         'throughput_floor': args.throughput_floor,
         'n_values': n_values,
+        'dynamic': args.dynamic,
+        'scenarios': labels,
+        'n_epochs': args.n_epochs,
+        'n_steps': args.n_steps,
+        'dyn_n_epochs': dyn_n_epochs,
+        'dyn_n_steps': dyn_n_steps,
         'seeds': seeds,
         'agg': args.agg,
         'candidates': [
@@ -318,9 +422,9 @@ if __name__ == '__main__':
                 'fairness': trial_metrics(tr)[0],
                 'throughput': trial_metrics(tr)[1],
                 'params': tr.params,
-                'per_n': {
-                    n: [tr.user_attrs.get(f'fairness_n{n}'), tr.user_attrs.get(f'throughput_n{n}')]
-                    for n in n_values
+                'per_scenario': {
+                    label: [tr.user_attrs.get(f'fairness_{label}'), tr.user_attrs.get(f'throughput_{label}')]
+                    for label in labels
                 },
             }
             for tr in shown
@@ -328,7 +432,7 @@ if __name__ == '__main__':
         'recommended': {
             'fairness': rec_fair, 'throughput': rec_thr, 'params': recommended.params,
         },
-        'holdout': {'seed': holdout_seed, 'fairness': vf, 'throughput': vt, 'per_n': {n: vper_n[n] for n in n_values}},
+        'holdout': {'seed': holdout_seed, 'fairness': vf, 'throughput': vt, 'per_scenario': vper_scn},
     }
     with open(out_path, 'w') as fp:
         json.dump(payload, fp, indent=2)
