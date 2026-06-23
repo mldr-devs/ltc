@@ -15,7 +15,7 @@ from ltc.agents import DCF, DiscountedThompsonSampling
 from ltc.sim import InitialStateConf, cox_traffic
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry
-from ltc.run import init_agents, init_traffic, rl_step
+from ltc.run import init_agents, init_traffic, rl_step, bias_initial_state_low_tx
 
 
 def build_mab(mab_type, params, num_actions=2):
@@ -29,7 +29,8 @@ def build_mab(mab_type, params, num_actions=2):
 
 
 def run_sim(mab, n, n_init=None, n_final=None, n_epochs=200, n_steps=50, seed=42,
-            station_change_interval=None, station_change_delta=0):
+            station_change_interval=None, station_change_delta=0,
+            mab_type=None, init_low_tx=False):
     """Run one simulation. `n` is the total station slots; `n_init` how many start
     active (defaults to n = static). Dynamic scenarios mirror run.py exactly: with a
     station_change_interval the count ramps by station_change_delta every interval
@@ -60,6 +61,8 @@ def run_sim(mab, n, n_init=None, n_final=None, n_epochs=200, n_steps=50, seed=42
 
     key, init_key = jax.random.split(key)
     mab_states, mab_step = init_agents(mab, init_key, n, has_obs=False)
+    if init_low_tx:
+        mab_states = bias_initial_state_low_tx(mab_states, mab_type)
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
@@ -175,7 +178,7 @@ def build_scenarios(n_values, dynamic_spec, static_n_epochs, static_n_steps, dyn
     return scenarios
 
 
-def evaluate(mab_type, params, scenarios, seeds, agg='mean'):
+def evaluate(mab_type, params, scenarios, seeds, agg='mean', init_low_tx=False):
     """Evaluate one parameter set across all scenarios (static + dynamic) and seeds.
 
     Each scenario carries its own n_epochs/n_steps. Returns (fairness_agg,
@@ -193,7 +196,8 @@ def evaluate(mab_type, params, scenarios, seeds, agg='mean'):
         for seed in seeds:
             try:
                 mab = build_mab(mab_type, params)
-                outputs = run_sim(mab, n_epochs=ne, n_steps=ns, seed=seed, **s['sim'])
+                outputs = run_sim(mab, n_epochs=ne, n_steps=ns, seed=seed,
+                                  mab_type=mab_type, init_low_tx=init_low_tx, **s['sim'])
                 f, t = compute_metrics(outputs, ne)
             except Exception:
                 f, t = 0.0, 0.0
@@ -234,12 +238,12 @@ def suggest_params(trial, mab_type):
     raise ValueError(f'Unknown MAB type: {mab_type}')
 
 
-def make_objective(mab_type, scenarios, seeds, agg='mean',
+def make_objective(mab_type, scenarios, seeds, agg='mean', init_low_tx=False,
                    objective_mode='fairness', throughput_weight=0.01, throughput_floor=0.3):
     def objective(trial):
         params = suggest_params(trial, mab_type)
         fairness, throughput, per_scenario = evaluate(
-            mab_type, params, scenarios, seeds, agg=agg
+            mab_type, params, scenarios, seeds, agg=agg, init_low_tx=init_low_tx
         )
         # Record raw metrics so both modes can report fairness/throughput uniformly.
         trial.set_user_attr('fairness', fairness)
@@ -322,6 +326,8 @@ if __name__ == '__main__':
                         help='Optuna parallel trials. Keep at 1: JAX/XLA compiles per trial and '
                              'concurrent compilation across threads multiplies memory and can segfault.')
     parser.add_argument('--out', type=str, default=None, help='Path to write the Pareto front JSON.')
+    parser.add_argument('--init_low_tx', action='store_true', default=False,
+                        help='Initialize MAB state so that initial P(TX) is close to 0 for every agent.')
     args = parser.parse_args()
 
     n_values = [int(x) for x in args.n_values.split(',')]
@@ -330,7 +336,7 @@ if __name__ == '__main__':
     dyn_n_steps = args.dyn_n_steps if args.dyn_n_steps is not None else args.n_steps
     scenarios = build_scenarios(n_values, args.dynamic, args.n_epochs, args.n_steps, dyn_n_epochs, dyn_n_steps)
     labels = [s['label'] for s in scenarios]
-    eval_kwargs = dict(agg=args.agg)
+    eval_kwargs = dict(agg=args.agg, init_low_tx=args.init_low_tx)
 
     def fmt_per_scn(per_scn):
         return {k: tuple(round(v, 3) for v in val) for k, val in per_scn.items()}
@@ -402,9 +408,11 @@ if __name__ == '__main__':
     print(f'\nHeld-out (seed={holdout_seed}) -> fairness={vf:.4f}, throughput={vt:.4f}')
     print(f'  per_scenario={fmt_per_scn(vper_scn)}')
 
-    out_path = args.out or f'tune_mab_{args.mab_type}_{args.objective}.json'
+    low_tx_tag = '_init_low_tx' if args.init_low_tx else ''
+    out_path = args.out or f'tune_mab_{args.mab_type}_{args.objective}{low_tx_tag}.json'
     payload = {
         'mab_type': args.mab_type,
+        'init_low_tx': args.init_low_tx,
         'objective': args.objective,
         'throughput_weight': args.throughput_weight,
         'throughput_floor': args.throughput_floor,
