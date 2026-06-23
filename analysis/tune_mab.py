@@ -10,9 +10,10 @@ import jax.numpy as jnp
 import numpy as np
 import optuna
 
-from reinforced_lib.agents.mab import Exp3, Softmax
+from reinforced_lib.agents.mab import DiscreteThompsonSampling, Exp3, Softmax
 from ltc.agents import DCF, DiscountedThompsonSampling
 from ltc.sim import InitialStateConf, cox_traffic
+from ltc.sim.constants import all_rewards
 from ltc.sim.constants import INITIAL_CAPACITY, Actions
 from ltc.utils.scan_states import Carry
 from ltc.run import init_agents, init_traffic, rl_step, bias_initial_state_low_tx
@@ -23,6 +24,11 @@ def build_mab(mab_type, params, num_actions=2):
         return Exp3(n_arms=num_actions, **params)
     elif mab_type == 'ts':
         return DiscountedThompsonSampling(n_arms=num_actions, **params)
+    elif mab_type == 'discrete_ts':
+        outcomes = all_rewards()
+        alpha_init = params.get('alpha_init')
+        alpha = jnp.full(len(outcomes), alpha_init) if alpha_init is not None else params['alpha']
+        return DiscreteThompsonSampling(n_arms=num_actions, alpha=alpha, outcomes=outcomes)
     elif mab_type == 'softmax':
         return Softmax(n_arms=num_actions, **params)
     raise ValueError(f'Unknown MAB type: {mab_type}')
@@ -270,6 +276,9 @@ def suggest_params(trial, mab_type):
             'alpha': trial.suggest_float('alpha', 0., 1.0),
             'tau': trial.suggest_float('tau', 0.1, 10.0, log=True),
         }
+    elif mab_type == 'discrete_ts':
+        alpha_init = trial.suggest_float('alpha_init', 1e-3, 100.0, log=True)
+        return {'alpha': jnp.full(len(all_rewards()), alpha_init)}
     raise ValueError(f'Unknown MAB type: {mab_type}')
 
 
@@ -329,7 +338,7 @@ if __name__ == '__main__':
         description='Multi-objective tuning of MAB MAC agents for throughput & fairness, '
                     'robust across network sizes.'
     )
-    parser.add_argument('--mab_type', required=True, choices=['exp3', 'ts', 'softmax'])
+    parser.add_argument('--mab_type', required=True, choices=['exp3', 'ts', 'softmax', 'discrete_ts'])
     parser.add_argument('--n_trials', type=int, default=100)
     parser.add_argument('--n_epochs', type=int, default=500, help='Epochs for static scenarios.')
     parser.add_argument('--n_steps', type=int, default=50, help='Steps per epoch for static scenarios.')
@@ -382,6 +391,7 @@ if __name__ == '__main__':
         'exp3': {'gamma': 0.001, 'min_reward': -1.0, 'max_reward': 1.0},
         'ts': {'alpha': 0.75, 'beta': 0.06, 'lam': 0.004, 'mu': -0.2, 'gamma': 0.96},
         'softmax': {'lr': 0.02, 'alpha': 0.93, 'tau': 9.9},
+        'discrete_ts': {'alpha_init': 1.0},
     }
     print(f'Tuning {args.mab_type} | scenarios={labels} | seeds={seeds} | agg={args.agg}')
     print(f'  static: {args.n_epochs}x{args.n_steps} steps | dynamic: {dyn_n_epochs}x{dyn_n_steps} steps')

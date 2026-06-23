@@ -9,11 +9,11 @@ import jax
 import jax.numpy as jnp
 import lz4.frame
 from tqdm import trange
-from reinforced_lib.agents.mab import Exp3, Softmax
+from reinforced_lib.agents.mab import DiscreteThompsonSampling, Exp3, Softmax
 
 from ltc.agents import DCF, DiscountedThompsonSampling
 from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate
-from ltc.sim.constants import INITIAL_CAPACITY, Actions
+from ltc.sim.constants import INITIAL_CAPACITY, Actions, all_rewards
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
@@ -48,6 +48,13 @@ def bias_initial_state_low_tx(states, mab_type, init_params=None):
         mu = states.mu.at[:, arm_tx].set(mu_tx).at[:, arm_cs].set(mu_cs)
         lam = states.lam.at[:, arm_tx].set(lam0).at[:, arm_cs].set(lam0)
         return states.replace(mu=mu, lam=lam)
+    if mab_type == 'discrete_ts':
+        outcomes = all_rewards()
+        idx_worst = jnp.argmin(outcomes)
+        idx_best = jnp.argmax(outcomes)
+        alpha = states.alpha.at[:, arm_tx, idx_best].set(1e-3).at[:, arm_tx, idx_worst].set(10.0)
+        alpha = alpha.at[:, arm_cs, idx_best].set(10.0).at[:, arm_cs, idx_worst].set(1e-3)
+        return states.replace(alpha=alpha)
     raise ValueError(f'Unknown MAB type: {mab_type}')
 
 
@@ -202,7 +209,7 @@ def setup_args():
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
     parser.add_argument('--n_epochs', type=int, default=200, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=50, help='Number of steps per epoch.')
-    parser.add_argument('--mab_type', type=str, required=True, choices=['exp3', 'ts', 'softmax'], help='Type of MAB agent to use.')
+    parser.add_argument('--mab_type', type=str, required=True, choices=['exp3', 'ts', 'softmax', 'discrete_ts'], help='Type of MAB agent to use.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
@@ -288,6 +295,9 @@ if __name__ == '__main__':
         mab = DiscountedThompsonSampling(n_arms=num_actions, alpha=0.75, beta=0.06, lam=0.004, mu=-0.2, gamma=0.96)
     elif mab_type == 'softmax':
         mab = Softmax(n_arms=num_actions, lr=0.02, alpha=0.93, tau=9.9)
+    elif mab_type == 'discrete_ts':
+        outcomes = all_rewards()
+        mab = DiscreteThompsonSampling(n_arms=num_actions, alpha=jnp.full(len(outcomes), 94.0), outcomes=outcomes)
     else:
         raise ValueError(f'Unknown MAB type: {mab_type}')
 
