@@ -28,17 +28,25 @@ def init_agents(agent, key, n, has_obs):
 
 
 
-def bias_initial_state_low_tx(states, mab_type):
+def bias_initial_state_low_tx(states, mab_type, init_params=None):
+    """Nadpisuje stan poczatkowy tak, by P(TX) bylo niskie dla kazdego agenta.
+    init_params (klucze 'init_*') pozwalaja przestroic wartosci; brak -> domyslne."""
     arm_tx, arm_cs = 0, 1
+    p = init_params or {}
     if mab_type == 'exp3':
-        omega = states.omega.at[:, arm_tx].set(1e-3).at[:, arm_cs].set(1.0)
+        omega_tx = p.get('init_omega_tx', 1e-3)
+        omega = states.omega.at[:, arm_tx].set(omega_tx).at[:, arm_cs].set(1.0)
         return states.replace(omega=omega)
     if mab_type == 'softmax':
-        H = states.H.at[:, arm_tx].set(-5.0).at[:, arm_cs].set(0.0)
+        h_tx = p.get('init_h_tx', -5.0)
+        H = states.H.at[:, arm_tx].set(h_tx).at[:, arm_cs].set(0.0)
         return states.replace(H=H)
     if mab_type == 'ts':
-        mu = states.mu.at[:, arm_tx].set(-1.0).at[:, arm_cs].set(1.0)
-        lam = states.lam.at[:, arm_tx].set(10.0).at[:, arm_cs].set(10.0)
+        mu_tx = p.get('init_mu_tx', -1.0)
+        mu_cs = p.get('init_mu_cs', 1.0)
+        lam0 = p.get('init_lam', 10.0)
+        mu = states.mu.at[:, arm_tx].set(mu_tx).at[:, arm_cs].set(mu_cs)
+        lam = states.lam.at[:, arm_tx].set(lam0).at[:, arm_cs].set(lam0)
         return states.replace(mu=mu, lam=lam)
     raise ValueError(f'Unknown MAB type: {mab_type}')
 

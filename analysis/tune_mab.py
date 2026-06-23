@@ -30,7 +30,7 @@ def build_mab(mab_type, params, num_actions=2):
 
 def run_sim(mab, n, n_init=None, n_final=None, n_epochs=200, n_steps=50, seed=42,
             station_change_interval=None, station_change_delta=0,
-            mab_type=None, init_low_tx=False):
+            mab_type=None, init_low_tx=False, init_params=None):
     """Run one simulation. `n` is the total station slots; `n_init` how many start
     active (defaults to n = static). Dynamic scenarios mirror run.py exactly: with a
     station_change_interval the count ramps by station_change_delta every interval
@@ -62,7 +62,7 @@ def run_sim(mab, n, n_init=None, n_final=None, n_epochs=200, n_steps=50, seed=42
     key, init_key = jax.random.split(key)
     mab_states, mab_step = init_agents(mab, init_key, n, has_obs=False)
     if init_low_tx:
-        mab_states = bias_initial_state_low_tx(mab_states, mab_type)
+        mab_states = bias_initial_state_low_tx(mab_states, mab_type, init_params)
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
@@ -190,14 +190,17 @@ def evaluate(mab_type, params, scenarios, seeds, agg='mean', init_low_tx=False):
     per_scenario = {}
     fair_list, thr_list = [], []
 
+    mab_params, init_params = split_params(params)
+
     for s in scenarios:
         ne, ns = s['n_epochs'], s['n_steps']
         fair_seeds, thr_seeds = [], []
         for seed in seeds:
             try:
-                mab = build_mab(mab_type, params)
+                mab = build_mab(mab_type, mab_params)
                 outputs = run_sim(mab, n_epochs=ne, n_steps=ns, seed=seed,
-                                  mab_type=mab_type, init_low_tx=init_low_tx, **s['sim'])
+                                  mab_type=mab_type, init_low_tx=init_low_tx,
+                                  init_params=init_params, **s['sim'])
                 f, t = compute_metrics(outputs, ne)
             except Exception:
                 f, t = 0.0, 0.0
@@ -212,6 +215,38 @@ def evaluate(mab_type, params, scenarios, seeds, agg='mean', init_low_tx=False):
     # executable cache grows unbounded across trials and eventually OOMs.
     jax.clear_caches()
     return float(reducer(fair_list)), float(reducer(thr_list)), per_scenario
+
+
+def suggest_init_params(trial, mab_type):
+    """Tunowalne wartosci stanu poczatkowego dla --init_low_tx (klucze z prefiksem 'init_').
+
+    Zakresy utrzymuja startowa preferencje ramienia CS, ale pozwalaja tunerowi znalezc
+    'jak najnizej, ale jeszcze rusza'. Throughput floor w objective sam odrzuca konfiguracje,
+    ktore zamarzaja (zbyt silny bias dla softmax/exp3 -> ~0 throughput -> ponizej floor).
+
+    Uwagi:
+      - softmax: start P(TX) = sigmoid(init_h_tx / tau); zalezy tez od tuningowanego tau.
+      - ts: init_mu/init_lam nadpisuja mu/lam ze stanu poczatkowego (tuningowane lam/mu
+        agenta staja sie wtedy nieistotne dla startu, licza sie nadal alpha/beta/gamma)."""
+    if mab_type == 'exp3':
+        return {'init_omega_tx': trial.suggest_float('init_omega_tx', 1e-4, 1e-1, log=True)}
+    if mab_type == 'softmax':
+        return {'init_h_tx': trial.suggest_float('init_h_tx', -40.0, -1.0)}
+    if mab_type == 'ts':
+        return {
+            'init_mu_tx': trial.suggest_float('init_mu_tx', -1.0, 0.0),
+            'init_mu_cs': trial.suggest_float('init_mu_cs', 0.0, 1.0),
+            'init_lam': trial.suggest_float('init_lam', 0.5, 20.0, log=True),
+        }
+    raise ValueError(f'Unknown MAB type: {mab_type}')
+
+
+def split_params(all_params):
+    """Rozdziela parametry triala na hiperparametry agenta (do build_mab) i parametry
+    stanu poczatkowego init_low_tx (klucze z prefiksem 'init_', do bias_initial_state_low_tx)."""
+    mab_params = {k: v for k, v in all_params.items() if not k.startswith('init_')}
+    init_params = {k: v for k, v in all_params.items() if k.startswith('init_')}
+    return mab_params, init_params
 
 
 def suggest_params(trial, mab_type):
@@ -242,6 +277,8 @@ def make_objective(mab_type, scenarios, seeds, agg='mean', init_low_tx=False,
                    objective_mode='fairness', throughput_weight=0.01, throughput_floor=0.3):
     def objective(trial):
         params = suggest_params(trial, mab_type)
+        if init_low_tx:
+            params = {**params, **suggest_init_params(trial, mab_type)}
         fairness, throughput, per_scenario = evaluate(
             mab_type, params, scenarios, seeds, agg=agg, init_low_tx=init_low_tx
         )
