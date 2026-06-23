@@ -34,7 +34,7 @@ def bias_initial_state_low_tx(states, mab_type):
         omega = states.omega.at[:, arm_tx].set(1e-3).at[:, arm_cs].set(1.0)
         return states.replace(omega=omega)
     if mab_type == 'softmax':
-        H = states.H.at[:, arm_tx].set(-35.0).at[:, arm_cs].set(35.0)
+        H = states.H.at[:, arm_tx].set(-5.0).at[:, arm_cs].set(0.0)
         return states.replace(H=H)
     if mab_type == 'ts':
         mu = states.mu.at[:, arm_tx].set(-1.0).at[:, arm_cs].set(1.0)
