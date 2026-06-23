@@ -27,6 +27,22 @@ def init_agents(agent, key, n, has_obs):
     return states, step_fn
 
 
+
+def bias_initial_state_low_tx(states, mab_type):
+    arm_tx, arm_cs = 0, 1
+    if mab_type == 'exp3':
+        omega = states.omega.at[:, arm_tx].set(1e-3).at[:, arm_cs].set(1.0)
+        return states.replace(omega=omega)
+    if mab_type == 'softmax':
+        H = states.H.at[:, arm_tx].set(-35.0).at[:, arm_cs].set(35.0)
+        return states.replace(H=H)
+    if mab_type == 'ts':
+        mu = states.mu.at[:, arm_tx].set(-1.0).at[:, arm_cs].set(1.0)
+        lam = states.lam.at[:, arm_tx].set(10.0).at[:, arm_cs].set(10.0)
+        return states.replace(mu=mu, lam=lam)
+    raise ValueError(f'Unknown MAB type: {mab_type}')
+
+
 def agent_step(agent, state, key, obs, action, reward, terminal, active, has_obs):
     update_key, sample_key = jax.random.split(key)
 
@@ -195,6 +211,7 @@ def setup_args():
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
     parser.add_argument('--noise_dims', type=int, default=0, help='Gaussian noise dimensions appended to the observation.')
     parser.add_argument('--zero_obs', action='store_true', default=False, help='Replace real observations with pure noise (discard real obs).')
+    parser.add_argument('--init_low_tx', action='store_true', default=False, help='Initialize MAB state so that initial P(TX) is close to 0 for every agent.')
     args = parser.parse_args()
     return args
 
@@ -268,6 +285,9 @@ if __name__ == '__main__':
 
     key, init_key = jax.random.split(key)
     mab_states, mab_step = init_agents(mab, init_key, n, has_obs=False)
+    if args.init_low_tx:
+        mab_states = bias_initial_state_low_tx(mab_states, mab_type)
+
 
     dcf = DCF()
     key, init_key = jax.random.split(key)
