@@ -34,11 +34,11 @@ def bias_initial_state_low_tx(states, mab_type, init_params=None):
     arm_tx, arm_cs = 0, 1
     p = init_params or {}
     if mab_type == 'exp3':
-        omega_tx = p.get('init_omega_tx', 1e-3)
+        omega_tx = p.get('init_omega_tx', 0.031614592659498335)
         omega = states.omega.at[:, arm_tx].set(omega_tx).at[:, arm_cs].set(1.0)
         return states.replace(omega=omega)
     if mab_type == 'softmax':
-        h_tx = p.get('init_h_tx', -5.0)
+        h_tx = p.get('init_h_tx', -29.574722800074717)
         H = states.H.at[:, arm_tx].set(h_tx).at[:, arm_cs].set(0.0)
         return states.replace(H=H)
     if mab_type == 'ts':
@@ -290,11 +290,11 @@ if __name__ == '__main__':
     active = jnp.ones(n, dtype=bool).at[n_init:].set(False)
 
     if mab_type == 'exp3':
-        mab = Exp3(n_arms=num_actions, gamma=0.001, min_reward=-1., max_reward=1.)
+        mab = Exp3(n_arms=num_actions, gamma=0.0010043746185900361, min_reward=-1., max_reward=1.)
     elif mab_type == 'ts':
         mab = DiscountedThompsonSampling(n_arms=num_actions, alpha=0.75, beta=0.06, lam=0.004, mu=-0.2, gamma=0.96)
     elif mab_type == 'softmax':
-        mab = Softmax(n_arms=num_actions, lr=0.02, alpha=0.93, tau=9.9)
+        mab = Softmax(n_arms=num_actions, lr=0.01023877977328612, alpha=0.8449762228354345, tau=9.395278895354727)
     elif mab_type == 'discrete_ts':
         outcomes = all_rewards()
         mab = DiscreteThompsonSampling(n_arms=num_actions, alpha=jnp.full(len(outcomes), 94.0), outcomes=outcomes)
