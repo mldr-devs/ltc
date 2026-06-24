@@ -1,5 +1,7 @@
 from enum import Enum
 
+import jax.numpy as jnp
+
 
 class Actions(Enum):
     """
@@ -28,6 +30,13 @@ NO_TX_PENALTY = -1.0
 EMPTY_TX_PENALTY = -0.5
 COLLISION_PENALTY = -1.0
 MAX_RETRANSMISSION_PENALTY = -1.0
+
+def all_rewards() -> jnp.ndarray:
+    k = jnp.arange(1, PENALIZED_IDLE_PERIOD + 1, dtype=jnp.float32)
+    scaled_penalties = jnp.minimum(1.0, k / PENALIZED_IDLE_PERIOD) * NO_TX_PENALTY
+    fixed = jnp.array([TX_REWARD, EMPTY_BUFFER_REWARD, NO_TX_REWARD, EMPTY_TX_PENALTY, COLLISION_PENALTY, MAX_RETRANSMISSION_PENALTY], dtype=jnp.float32)
+    return jnp.unique(jnp.concatenate([scaled_penalties, fixed]))
+
 
 """
 Power consumption
