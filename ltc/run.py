@@ -356,7 +356,7 @@ if __name__ == '__main__':
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    filename = build_history_filename(n_init, n_final, seed, commit_hash)
+    filename = build_history_filename(n_init, n_final, seed, commit_hash, phy_error=args.phy_error_prob)
 
     with lz4.frame.open(filename, 'wb') as f:
         cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)

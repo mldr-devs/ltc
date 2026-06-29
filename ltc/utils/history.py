@@ -27,8 +27,19 @@ def get_short_commit_hash() -> str:
     return _run_git_command("rev-parse", "--short", "HEAD")
 
 
-def build_history_filename(n: int, n_drl: int, seed: int, commit_hash: str | None = None) -> str:
+PHY_ERROR_PREFIX = "pe"
+
+
+def build_history_filename(
+    n: int,
+    n_drl: int,
+    seed: int,
+    commit_hash: str | None = None,
+    phy_error: float | None = None,
+) -> str:
     parts = [f"history_{n}_{n_drl}_{seed}"]
+    if phy_error is not None:
+        parts.append(f"{PHY_ERROR_PREFIX}{phy_error}")
     if commit_hash is not None:
         parts.append(commit_hash)
     return f"{'_'.join(parts)}{HISTORY_SUFFIX}"
@@ -41,11 +52,16 @@ def parse_history_filename(path: str) -> tuple[int, int, int, str | None]:
 
     stem = filename[: -len(HISTORY_SUFFIX)]
     parts = stem.split("_")
-    if parts[0] != "history" or len(parts) not in (4, 5):
+    if parts[0] != "history" or len(parts) < 4:
         raise ValueError(f"Unsupported history filename format: {filename}")
 
-    _, n, n_drl, seed, *hash_part = parts
-    commit_hash = hash_part[0] if hash_part else None
+    _, n, n_drl, seed, *rest = parts
+    # Drop the optional phy_error token (e.g. "pe0.05"); the remaining trailing
+    # token, if any, is the commit hash.
+    rest = [token for token in rest if not token.startswith(PHY_ERROR_PREFIX)]
+    if len(rest) > 1:
+        raise ValueError(f"Unsupported history filename format: {filename}")
+    commit_hash = rest[0] if rest else None
     return int(n), int(n_drl), int(seed), commit_hash
 
 
