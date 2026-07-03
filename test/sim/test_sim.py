@@ -1,6 +1,7 @@
 import unittest
 
 import jax.numpy as jnp
+import jax.random as jr
 
 from ltc.sim.constants import Actions
 from ltc.sim.sim import *
@@ -51,6 +52,9 @@ class SimulateTestCase(unittest.TestCase):
         self.assertTrue(jnp.array_equal(result, expected))
 
     def test_simulate(self):
+        # error_probability=0.0 disables phy interference, keeping results deterministic
+        sim_key = jr.key(0)
+
         # Test full simulation
         buffer_states = jnp.array([1, 1, 1, 0])
         new_frames = jnp.array([0, 1, 1, 1])
@@ -59,7 +63,7 @@ class SimulateTestCase(unittest.TestCase):
         expected_buffer_states = jnp.array([0, 1, 1, 1])
         expected_channel_state = 1
 
-        result_buffer_states, result_channel_state = simulate(buffer_states, new_frames, actions)
+        result_buffer_states, result_channel_state, _ = simulate(buffer_states, new_frames, actions, sim_key, error_probability=0.0)
         self.assertTrue(jnp.array_equal(result_buffer_states, expected_buffer_states))
         self.assertEqual(result_channel_state, expected_channel_state)
 
@@ -71,7 +75,7 @@ class SimulateTestCase(unittest.TestCase):
         expected_buffer_states = jnp.array([1, 1, 1, 1])
         expected_channel_state = 0
 
-        result_buffer_states, result_channel_state = simulate(buffer_states, new_frames, actions)
+        result_buffer_states, result_channel_state, _ = simulate(buffer_states, new_frames, actions, sim_key, error_probability=0.0)
         self.assertTrue(jnp.array_equal(result_buffer_states, expected_buffer_states))
         self.assertEqual(result_channel_state, expected_channel_state)
 
@@ -83,9 +87,22 @@ class SimulateTestCase(unittest.TestCase):
         expected_buffer_states = jnp.array([0, 1, 0, 1])
         expected_channel_state = -1
 
-        result_buffer_states, result_channel_state = simulate(buffer_states, new_frames, actions)
+        result_buffer_states, result_channel_state, _ = simulate(buffer_states, new_frames, actions, sim_key, error_probability=0.0)
         self.assertTrue(jnp.array_equal(result_buffer_states, expected_buffer_states))
         self.assertEqual(result_channel_state, expected_channel_state)
+
+    def test_phy_interference(self):
+        # Zero probability never flags an error; certain probability always does
+        self.assertEqual(phy_interference(0.0, jr.key(0)), 0)
+        self.assertEqual(phy_interference(1.0, jr.key(0)), 1)
+
+        # A phy error forces the channel into collision (-1) even on a clean transmission
+        buffer_states = jnp.array([1, 0, 0, 0])
+        new_frames = jnp.array([0, 0, 0, 0])
+        actions = jnp.array([Actions.TX.value, Actions.CS.value, Actions.CS.value, Actions.CS.value])
+        _, channel_state, phy_error = simulate(buffer_states, new_frames, actions, jr.key(0), error_probability=1.0)
+        self.assertEqual(channel_state, -1)
+        self.assertEqual(phy_error, 1)
 
 
 if __name__ == "__main__":

@@ -133,7 +133,7 @@ def schedule_active_stations(
 
 
 def rl_step(
-    drl_step, legacy_steps, traffic_step, n, n_drl, n_bins=50,
+    drl_step, legacy_steps, traffic_step, n, n_drl, phy_error_prob, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0,
     station_change_start_step=0, station_change_stop_step=None, station_change_target=None,
 ):
@@ -153,7 +153,7 @@ def rl_step(
             station_change_target=station_change_target,
         )
 
-        key, drl_key_raw, legacy_key_raw, traffic_key, reward_key = jax.random.split(c.key, 5)
+        key, drl_key_raw, legacy_key_raw, traffic_key, reward_key, sim_key = jax.random.split(c.key, 6)
         n_legacy = n - n_drl
         traffic_keys = jax.random.split(traffic_key, n)
 
@@ -193,7 +193,7 @@ def rl_step(
         actions = jnp.concatenate([drl_actions] + all_legacy_actions)
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
-        buffer_states, channel_state = simulate(c.buffer_states, new_frames, actions)
+        buffer_states, channel_state, phy_error = simulate(c.buffer_states, new_frames, actions, sim_key, error_probability=phy_error_prob)
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, c.power_states, channel_state, c.obs, actions, c.terminals, reward_key
         )
@@ -214,7 +214,7 @@ def rl_step(
         )
         o = Output(
             legacy_states, obs, actions, rewards, terminals, buffer_states, powers,
-            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges
+            (new_frames > 0).astype(int), channel_state, active, hist, bin_edges, phy_error
         )
         yield c, o
 
@@ -263,6 +263,7 @@ def setup_args():
     parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'], help="Traffic model to use.")
+    parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
     args = parser.parse_args()
     return args
 
@@ -298,6 +299,7 @@ if __name__ == '__main__':
     station_change_delta = args.station_change_delta
     station_change_start_step = args.station_change_start_step
     station_change_stop_step = args.station_change_stop_step
+    phy_error_prob = args.phy_error_prob
 
     if station_change_interval is not None and station_change_interval <= 0:
         raise ValueError('--station_change_interval must be positive.')
@@ -389,6 +391,7 @@ if __name__ == '__main__':
         traffic_step,
         n,
         n_drl,
+        phy_error_prob,
         one_shot_step=one_shot_step,
         one_shot_target=one_shot_target,
         station_change_interval=station_change_interval,
