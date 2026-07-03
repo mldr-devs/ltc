@@ -263,7 +263,7 @@ def setup_args():
     parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'], help="Traffic model to use.")
-    parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
+    parser.add_argument('--phy_error_prob', type=float, default=0.1, help='Probability of error in phy channel')
     args = parser.parse_args()
     return args
 
