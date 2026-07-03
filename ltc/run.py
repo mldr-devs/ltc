@@ -11,7 +11,7 @@ import lz4.frame
 from tqdm import trange
 from reinforced_lib.agents.mab import DiscreteThompsonSampling, Exp3, Softmax
 
-from ltc.agents import DCF, DiscountedThompsonSampling
+from ltc.agents import DCF, DiscountedThompsonSampling, MTOAG, MTOAL
 from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate
 from ltc.sim.constants import INITIAL_CAPACITY, Actions, all_rewards
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
@@ -134,6 +134,7 @@ def rl_step(
     mab_step, legacy_step, traffic_step, n, n_mab, phy_error_prob, n_bins=50,
     one_shot_step=None, one_shot_target=None, station_change_interval=None, station_change_delta=0,
     station_change_start_step=0, station_change_stop_step=None, station_change_target=None, noise_dims=0, zero_obs=False,
+    mtoa_global_reward=False, mtoa_binary_reward=False,
 ):
     def rl_step_coroutine(c, step):
         active = schedule_active_stations(
@@ -159,8 +160,18 @@ def rl_step(
             obs_mab = noise if zero_obs else jnp.concatenate([obs_norm[:n_mab], noise], axis=-1)
         else:
             obs_mab = obs_norm[:n_mab]
+        if mtoa_binary_reward:
+            success = (c.channel_state == 1) & (c.actions == Actions.TX.value)
+            success = success.astype(jnp.float32)
+            if mtoa_global_reward:
+                network_success = (c.channel_state == 1).astype(jnp.float32)
+                mtoa_rewards = jnp.full((n_mab,), network_success)
+            else:
+                mtoa_rewards = success[:n_mab]
+        else:
+            mtoa_rewards = c.rewards[:n_mab]
         mab_states, mab_actions = yield mab_step(
-            c.drl_states, mab_keys, obs_mab, c.actions[:n_mab], c.rewards[:n_mab], c.terminals[:n_mab], active[:n_mab]
+            c.drl_states, mab_keys, obs_mab, c.actions[:n_mab], mtoa_rewards, c.terminals[:n_mab], active[:n_mab]
         )
         legacy_states, legacy_actions = legacy_step(
             c.legacy_states, legacy_keys, obs_norm[n_mab:], c.actions[n_mab:], c.rewards[n_mab:], c.terminals[n_mab:], active[n_mab:]
@@ -209,7 +220,11 @@ def setup_args():
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
     parser.add_argument('--n_epochs', type=int, default=200, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=50, help='Number of steps per epoch.')
-    parser.add_argument('--mab_type', type=str, required=True, choices=['exp3', 'ts', 'softmax', 'discrete_ts'], help='Type of MAB agent to use.')
+    parser.add_argument('--mab_type', type=str, required=True, choices=['exp3', 'ts', 'softmax', 'discrete_ts', 'mtoa_l', 'mtoa_g'], help='Type of MAB agent to use.')
+    parser.add_argument('--mtoa_alpha', type=float, default=0.9, help='Learning rate for MTOA-L/MTOA-G.')
+    parser.add_argument('--mtoa_Q_th', type=float, default=0.05, help='Q-value reset threshold for MTOA-L.')
+    parser.add_argument('--mtoa_M', type=int, default=300, help='Q-value reset window size for MTOA-G.')
+    parser.add_argument('--mtoa_L', type=int, default=160, help='Number of null actions for MTOA-L. Ignored for MTOA-G, which always uses L = n - 1.')
     parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
@@ -223,7 +238,7 @@ def setup_args():
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
-    parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
+    parser.add_argument('--phy_error_prob', type=float, default=0.0, help='Probability of error in phy channel')
     parser.add_argument('--noise_dims', type=int, default=0, help='Gaussian noise dimensions appended to the observation.')
     parser.add_argument('--zero_obs', action='store_true', default=False, help='Replace real observations with pure noise (discard real obs).')
     parser.add_argument('--init_low_tx', action='store_true', default=False, help='Initialize MAB state so that initial P(TX) is close to 0 for every agent.')
@@ -298,6 +313,10 @@ if __name__ == '__main__':
     elif mab_type == 'discrete_ts':
         outcomes = all_rewards()
         mab = DiscreteThompsonSampling(n_arms=num_actions, alpha=jnp.full(len(outcomes), 94.0), outcomes=outcomes)
+    elif mab_type == 'mtoa_l':
+        mab = MTOAL(n_arms=num_actions, alpha=args.mtoa_alpha, Q_th=args.mtoa_Q_th, L=args.mtoa_L)
+    elif mab_type == 'mtoa_g':
+        mab = MTOAG(n_arms=num_actions, alpha=args.mtoa_alpha, M=args.mtoa_M, L=max(1, n_init - 1))
     else:
         raise ValueError(f'Unknown MAB type: {mab_type}')
 
@@ -342,6 +361,8 @@ if __name__ == '__main__':
         station_change_target=station_change_target,
         noise_dims=noise_dims,
         zero_obs=zero_obs,
+        mtoa_global_reward=(mab_type == 'mtoa_g'),
+        mtoa_binary_reward=(mab_type in ('mtoa_l', 'mtoa_g')),
     )
     rl_step_fn = jax.jit(rl_step_fn)
     carry = Carry(
