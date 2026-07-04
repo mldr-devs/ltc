@@ -314,9 +314,9 @@ if __name__ == '__main__':
         outcomes = all_rewards()
         mab = DiscreteThompsonSampling(n_arms=num_actions, alpha=jnp.full(len(outcomes), 94.0), outcomes=outcomes)
     elif mab_type == 'mtoa_l':
-        mab = MTOAL(n_arms=num_actions, alpha=args.mtoa_alpha, Q_th=args.mtoa_Q_th, L=args.mtoa_L)
+        mab = MTOAL(alpha=args.mtoa_alpha, Q_th=args.mtoa_Q_th, L=args.mtoa_L)
     elif mab_type == 'mtoa_g':
-        mab = MTOAG(n_arms=num_actions, alpha=args.mtoa_alpha, M=args.mtoa_M, L=max(1, n_init - 1))
+        mab = MTOAG(alpha=args.mtoa_alpha, M=args.mtoa_M, L=max(1, n_init - 1))
     else:
         raise ValueError(f'Unknown MAB type: {mab_type}')
 
