@@ -13,6 +13,7 @@ import lz4.frame
 import optax
 from tqdm import trange
 from reinforced_lib.agents.deep.ddqn import DDQN
+from reinforced_lib.agents.deep.expected_sarsa import ExpectedSarsa
 
 from ltc.agents import QNetwork, SRJaxAgent
 from ltc.baselines import (
@@ -46,7 +47,7 @@ def agent_step(agent, state, key, obs, action, reward, terminal, active, aux, bu
     def power_on(state, update_key, sample_key, obs, action, reward, terminal, aux):
         extra = aux if uses_aux else ()
         state = agent.update(state, update_key, obs, action, reward, terminal, *extra)
-        action = agent.sample(state, sample_key, obs)
+        action = jnp.squeeze(agent.sample(state, sample_key, obs))
         return state, action
 
     def power_off(state, update_key, sample_key, obs, action, reward, terminal, aux):
@@ -236,7 +237,7 @@ def setup_args():
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf', 'q-aloha', 'eb-aloha', 'fw-aloha', 'tdma', 'idle-sense', 'dos'], help="Agent run by the stations not covered by --n_drl.")
-    parser.add_argument('--agent_type', type=str, default='ddqn', choices=['ddqn', 'sr-jax', 'aloha-qtf', 'dlma', 'stateless-q'], help='Agent run by the stations covered by --n_drl.')
+    parser.add_argument('--agent_type', type=str, default='ddqn', choices=['ddqn', 'expected-sarsa', 'sr-jax', 'aloha-qtf', 'dlma', 'stateless-q'], help='Agent run by the stations covered by --n_drl.')
     parser.add_argument('--n_slots', type=int, default=5, help='Frame length in slots (used by --agent_type stateless-q).')
     parser.add_argument('--tdma_slots', type=int, default=10, help='TDMA frame length in slots (used by --legacy_type tdma).')
     parser.add_argument('--tdma_assigned', type=int, default=5, help='Slots per TDMA station. The default pairs with --tdma_slots 10 for the DLMA benchmark; lower it when several TDMA stations share the channel.')
@@ -246,6 +247,7 @@ def setup_args():
     parser.add_argument('--sr_pkl', type=str, help='Path to the fitted symbolic regression model (required by --agent_type sr-jax).')
     parser.add_argument('--sr_eq', type=int, default=2, help='Equation index to use from the PySR Pareto front.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
+    parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
     parser.add_argument('--noise_dims', type=int, default=0, help='Gaussian noise dimensions appended to the observation.')
     parser.add_argument('--zero_obs', action='store_true', default=False, help='Replace real observations with pure noise (discard real obs).')
@@ -340,18 +342,19 @@ if __name__ == '__main__':
     )
 
     use_raw_obs = agent_type == 'sr-jax'
-    compute_hist = agent_type == 'ddqn'
+    compute_hist = agent_type in ('ddqn', 'expected-sarsa') and args.weight_hist
     node_ids = None
     reward_fn = {'dlma': dlma_reward, 'stateless-q': stateless_q_reward}.get(agent_type)
     force_idle_on_empty_buffer = args.force_idle_on_empty_buffer or agent_type == 'dlma'
 
+    if zero_obs and noise_dims > 0:
+        obs_space_shape = (window_size, noise_dims)
+    elif noise_dims > 0:
+        obs_space_shape = (window_size, len(Features) + noise_dims)
+    else:
+        obs_space_shape = (window_size, len(Features))
+
     if agent_type == 'ddqn':
-        if zero_obs and noise_dims > 0:
-            obs_space_shape = (window_size, noise_dims)
-        elif noise_dims > 0:
-            obs_space_shape = (window_size, len(Features) + noise_dims)
-        else:
-            obs_space_shape = (window_size, len(Features))
         drl = DDQN(
             q_network=QNetwork(num_actions, dim=64, num_layers=2),
             obs_space_shape=obs_space_shape,
@@ -365,6 +368,18 @@ if __name__ == '__main__':
             epsilon_decay=0.9997,
             epsilon_min=0.0,
             tau=0.01
+        )
+    elif agent_type == 'expected-sarsa':
+        drl = ExpectedSarsa(
+            q_network=QNetwork(num_actions, dim=64, num_layers=2),
+            obs_space_shape=obs_space_shape,
+            act_space_size=num_actions,
+            optimizer=optimizer,
+            experience_replay_buffer_size=512,
+            experience_replay_batch_size=128,
+            experience_replay_steps=1,
+            discount=0.95,
+            tau=0.1
         )
     elif agent_type == 'sr-jax':
         if args.sr_pkl is None:
