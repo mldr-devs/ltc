@@ -66,15 +66,15 @@ class ProcessOutputTestCase(unittest.TestCase):
         terminals = jnp.array([False, False, False, False])
         channel_state = -1
         obs = jnp.array([[
-            [1, 1, 6, 0, 100],
-            [1, 1, 7, 0, 100],
-            [1, 1, 8, 0, 100]
+            [1, 1, 6, 0, 1, 0],
+            [1, 1, 7, 0, 1, 0],
+            [1, 1, 8, 0, 1, 0]
         ]] * 4)
 
         expected_obs_0 = jnp.array([
-            [1, 1, 7, 0, 100],
-            [1, 1, 8, 0, 100],
-            [0, -1, 0, 0, Actions.TX.value],
+            [1, 1, 7, 0, 1, 0],
+            [1, 1, 8, 0, 1, 0],
+            [0, -1, 0, 0, 1, 0],
         ])
         expected_R_0 = -1.0
         expected_power = power_states + jnp.array([-TX_CONSUMPTION, -CS_CONSUMPTION, -TX_CONSUMPTION, -TX_CONSUMPTION])

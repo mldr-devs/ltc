@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, IntEnum
 
 
 class Actions(Enum):
@@ -8,6 +8,15 @@ class Actions(Enum):
     TX = 0
     CS = 1
     IDLE = 2
+
+
+class Features(IntEnum):
+    BUFFER = 0
+    CHANNEL = 1
+    RET_C = 2
+    NO_TX = 3
+    ACTION_TX = 4
+    ACTION_CS = 5
 
 
 """

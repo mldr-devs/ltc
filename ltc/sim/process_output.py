@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 
@@ -92,14 +94,18 @@ def successful_transmission(args):
     return reward, ret_c, no_tx
 
 
-def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal, key):
+def process_output_i(buffer_state, new_buffer_state, power_state, channel_state, obs, action, terminal, key,
+                     observed_channel_state=None, perfect_channel_obs=False):
     _, _, ret_c, no_tx, _, _ = obs[-1]
     args = (action, buffer_state, ret_c, channel_state, no_tx, key)
 
     reward, ret_c, no_tx = jax.lax.cond(action == Actions.TX.value, transmission, no_transmission, args)
     reward = jnp.where(terminal, 0., reward)
 
-    channel_state = jnp.where(action == Actions.CS.value, channel_state, -1)
+    if observed_channel_state is not None:
+        channel_state = observed_channel_state
+    if not perfect_channel_obs:
+        channel_state = jnp.where(action == Actions.CS.value, channel_state, -1)
     power = jnp.where(
         action == Actions.TX.value, power_state - TX_CONSUMPTION,
         jnp.where(
@@ -120,7 +126,14 @@ def process_output_i(buffer_state, new_buffer_state, power_state, channel_state,
     return obs, reward, power
 
 
-def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key):
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, None, 0, 0, 0, None))(
-        buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key
+def process_output(buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key,
+                   observed_channel_states=None, perfect_channel_obs=False, reward_fn=None):
+    step_fn = partial(process_output_i, perfect_channel_obs=perfect_channel_obs)
+    observed_axis = None if observed_channel_states is None else 0
+    obs, rewards, powers = jax.vmap(step_fn, in_axes=(0, 0, 0, None, 0, 0, 0, None, observed_axis))(
+        buffer_states, new_buffer_states, power_states, channel_state, obs, actions, terminals, key,
+        observed_channel_states
     )
+    if reward_fn is not None:
+        rewards = reward_fn(rewards, channel_state, actions, new_buffer_states, terminals)
+    return obs, rewards, powers

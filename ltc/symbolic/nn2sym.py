@@ -46,8 +46,9 @@ randomization = {'ret_c': stats.geom(p=0.3, loc=-1),
                  'channel': stats.randint(-1, 2),
                  # 'buffer': stats.randint(1, 2),
                  'buffer': stats.randint(0, 2),#Try empty buffer
-                 'action':stats.randint(0, 2)}
-F_ORDER = ['buffer', 'channel', 'ret_c', 'no_tx', 'action']
+                 'action_tx': stats.randint(0, 2),
+                 'action_cs': stats.randint(0, 2)}
+F_ORDER = ['buffer', 'channel', 'ret_c', 'no_tx', 'action_tx', 'action_cs']
 def make_xr(observations) -> xr.DataArray:
     observations = xr.DataArray(np.asarray(observations),
                                 dims=['step', 'agent', 'window',

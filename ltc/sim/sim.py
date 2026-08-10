@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 import jax.random as jr
 
-from ltc.sim.constants import Actions
+from ltc.sim.constants import Actions, Features
 
 
 def channel_state_selector(actions, ):
@@ -45,6 +45,35 @@ def add_new_frames(buffer_states, new_frames):
     """
     new_frames = (new_frames > 0).astype(int)
     return jnp.bitwise_or(buffer_states, new_frames)
+
+def transmission_outcome(actions, channel_state):
+    transmitted = actions == Actions.TX.value
+    return jnp.where(transmitted, jnp.where(channel_state == 1, 1, -1), 0)
+
+
+def get_successful_station_id(actions, channel_state):
+    transmitting = jnp.where(actions == Actions.TX.value, 1, 0)
+    return jnp.where(channel_state == 1, jnp.argmax(transmitting), -1)
+
+
+def hidden_station_observation(visibility_matrix, channel_state, actions):
+    tx = (actions == Actions.TX.value).astype(jnp.int32)
+    counts = (visibility_matrix * tx).sum(axis=1)
+    idle_state = jnp.where(tx.sum() == 0, channel_state, 0)
+    return jnp.where(counts > 1, -1, jnp.where(counts == 1, channel_state, idle_state))
+
+
+def apply_lbt_constraint(actions, prev_actions, prev_obs):
+    prev_channel = prev_obs[:, -1, Features.CHANNEL]
+    tx_after_idle_cs = jnp.logical_and(prev_actions == Actions.CS.value, prev_channel == 0)
+    invalid_tx = jnp.logical_and(actions == Actions.TX.value, jnp.logical_not(tx_after_idle_cs))
+    return jnp.where(invalid_tx, Actions.CS.value, actions)
+
+
+def apply_empty_buffer_constraint(actions, buffer_states):
+    empty_buffer_tx = jnp.logical_and(actions == Actions.TX.value, buffer_states == 0)
+    return jnp.where(empty_buffer_tx, Actions.CS.value, actions)
+
 
 def phy_interference(error_probability, sim_key):
     return jr.bernoulli(sim_key, error_probability).astype(int)

@@ -3,7 +3,8 @@ import jax.numpy as jnp
 from chex import dataclass
 from reinforced_lib.agents import BaseAgent, AgentState
 
-from ltc.sim.constants import Actions
+from ltc.sim.constants import Actions, Features
+from ltc.sim.features import select_features
 
 
 @dataclass
@@ -15,6 +16,8 @@ class DCFState(AgentState):
 class DCF(BaseAgent):
     CW_MIN = 16
     CW_MAX = 1024
+    FEATURES = (Features.BUFFER, Features.CHANNEL, Features.RET_C)
+    USES_AUX = True
 
     def __init__(self):
         self.init = jax.jit(self.init)
@@ -28,7 +31,7 @@ class DCF(BaseAgent):
         return DCFState(cw=cw, backoff=backoff)
 
     @staticmethod
-    def update(state, key, env_state, action, reward, terminal):
+    def update(state, key, env_state, action, reward, terminal, successful_station_id=-1, outcome=0):
         def reset():
             return DCF.init(key)
 
@@ -44,7 +47,7 @@ class DCF(BaseAgent):
             backoff = jax.random.randint(key, (), 0, state.cw)
             return DCFState(cw=cw, backoff=backoff)
 
-        buffer, channel, ret_c, _, _, _ = env_state[-1]
+        buffer, channel, ret_c = select_features(env_state, DCF.FEATURES)[-1]
 
         return jax.lax.cond(
             buffer == 0,
@@ -56,10 +59,10 @@ class DCF(BaseAgent):
                     jax.lax.bitwise_and(state.backoff > 0, channel != 0),
                     freeze,
                     lambda: jax.lax.cond(
-                        jax.lax.bitwise_or(reward > 0, ret_c == 0),
+                        jax.lax.bitwise_or(outcome > 0, ret_c == 0),
                         reset,
                         lambda: jax.lax.cond(
-                            reward < 0,
+                            outcome < 0,
                             double_cw,
                             freeze
                         )
@@ -70,7 +73,7 @@ class DCF(BaseAgent):
 
     @staticmethod
     def sample(state, key, env_state):
-        buffer, channel, _, _, _, _ = env_state[-1]
+        buffer, channel, _ = select_features(env_state, DCF.FEATURES)[-1]
 
         return jnp.where(
             buffer == 0,
