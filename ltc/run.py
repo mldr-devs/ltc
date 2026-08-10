@@ -240,6 +240,9 @@ def setup_args():
     parser.add_argument('--n_slots', type=int, default=5, help='Frame length in slots (used by --agent_type stateless-q).')
     parser.add_argument('--tdma_slots', type=int, default=10, help='TDMA frame length in slots (used by --legacy_type tdma).')
     parser.add_argument('--tdma_assigned', type=int, default=5, help='Slots per TDMA station. The default pairs with --tdma_slots 10 for the DLMA benchmark; lower it when several TDMA stations share the channel.')
+    parser.add_argument('--idle_sense_eps', type=float, default=0.001, help='Idle Sense AIMD additive increase on the attempt probability.')
+    parser.add_argument('--idle_sense_inv_alpha', type=float, default=1.2, help='Idle Sense AIMD multiplicative factor, the paper\'s 1/alpha. CW is multiplied by it below the idle-slot target.')
+    parser.add_argument('--idle_sense_update_interval', type=int, default=50, help='Transmissions Idle Sense averages before adjusting CW (the paper\'s maxtrans).')
     parser.add_argument('--sr_pkl', type=str, help='Path to the fitted symbolic regression model (required by --agent_type sr-jax).')
     parser.add_argument('--sr_eq', type=int, default=2, help='Equation index to use from the PySR Pareto front.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
@@ -338,13 +341,6 @@ if __name__ == '__main__':
 
     use_raw_obs = agent_type == 'sr-jax'
     compute_hist = agent_type == 'ddqn'
-    # These baselines were written against simulators that never masked the channel state,
-    # and they count idle slots or classify the channel outcome, so they need the true value.
-    perfect_channel_obs = (
-        args.perfect_channel_obs
-        or agent_type in ('aloha-qtf', 'dlma')
-        or (n_drl < n and legacy_type in ('idle-sense', 'dos', 'eb-aloha'))
-    )
     node_ids = None
     reward_fn = {'dlma': dlma_reward, 'stateless-q': stateless_q_reward}.get(agent_type)
     force_idle_on_empty_buffer = args.force_idle_on_empty_buffer or agent_type == 'dlma'
@@ -413,7 +409,11 @@ if __name__ == '__main__':
     elif legacy_type == 'tdma':
         legacy = TDMA(state_size=args.tdma_slots, assigned_slots=args.tdma_assigned)
     elif legacy_type == 'idle-sense':
-        legacy = Idle_sense()
+        legacy = Idle_sense(
+            eps=args.idle_sense_eps,
+            inv_alpha=args.idle_sense_inv_alpha,
+            update_interval=args.idle_sense_update_interval,
+        )
     elif legacy_type == 'dos':
         legacy = DOS()
     else:
@@ -455,7 +455,7 @@ if __name__ == '__main__':
         zero_obs=zero_obs,
         use_raw_obs=use_raw_obs,
         compute_hist=compute_hist,
-        perfect_channel_obs=perfect_channel_obs,
+        perfect_channel_obs=args.perfect_channel_obs,
         lbt=args.lbt,
         force_cs_on_empty_buffer=args.force_cs_on_empty_buffer,
         visibility_matrix=visibility_matrix,

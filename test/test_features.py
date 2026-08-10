@@ -46,7 +46,7 @@ class AgentFeatureContractTestCase(unittest.TestCase):
         )
 
         expected_widths = {
-            DCF: 3, Idle_sense: 3, DOS: 2, ALOHAQTF: 2,
+            DCF: 3, Idle_sense: 2, DOS: 2, ALOHAQTF: 2,
             QALOHA: 1, EBALOHA: 2, FWALOHA: 1, TDMA: 1, StatelessQLearning: 1,
             SRJaxAgent: len(Features), DLMANetwork: 4,
         }
