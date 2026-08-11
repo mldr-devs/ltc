@@ -377,7 +377,7 @@ if __name__ == '__main__':
             optimizer=optimizer,
             experience_replay_buffer_size=512,
             experience_replay_batch_size=128,
-            experience_replay_steps=1,
+            experience_replay_steps=5,
             discount=0.95,
             tau=0.1
         )
