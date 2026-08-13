@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ltc.agents import QNetwork
+from ltc.symbolic.util import history_reshape
 from ltc.utils.history import resolve_history_file, unpack_history
 
 FEATURE_NAMES = ["buffer", "channel", "ret_c", "no_tx", "action_tx", "action_cs"]
@@ -80,7 +81,7 @@ if __name__ == "__main__":
 
     # Build flat feature matrix: [n_agents * n_steps, window_size * n_features]
     # transpose [n_steps, n_agents, w, f] -> [n_agents, n_steps, w, f] then flatten last two dims
-    XX = np.asarray(observations).transpose(1, 0, 2, 3).reshape(n_agents * n_steps, -1)
+    XX = history_reshape(observations)
     actions = np.asarray(qvals.argmax(axis=-1)).flatten()  # [n_agents * n_steps]
     agent_ids = np.repeat(np.arange(n_agents), n_steps)
 

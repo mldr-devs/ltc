@@ -8,7 +8,7 @@ from reinforced_lib.agents import BaseAgent, AgentState
 
 from ltc.sim.constants import Features
 from ltc.sim.features import select_features
-from ltc.symbolic.util import SimplexCode
+from ltc.symbolic.util import SimplexCode, history_reshape
 
 
 @dataclass
@@ -54,7 +54,8 @@ class SRJaxAgent(BaseAgent):
     ) -> Array:
         # env_state: [window_size, n_features] raw int obs
         env_state = select_features(env_state, SRJaxAgent.FEATURES)
-        x = env_state.reshape(-1).astype(jnp.float32)[jnp.newaxis]  # [1, w*f]
+        # a single obs is a one-step, one-agent history: [1, 1, w, f] -> [1, w*f]
+        x = history_reshape(env_state[jnp.newaxis, jnp.newaxis]).astype(jnp.float32)
         yhat = callable_fn(x, state.parameters)                     # [T-1] or [1*(T-1)]
         codes = yhat.reshape(1, simplex.T - 1)                      # [1, T-1]
         return simplex.decode(codes)[0]                             # scalar
