@@ -19,7 +19,19 @@ class SRJaxState(AgentState):
 class SRJaxAgent(BaseAgent):
     FEATURES = tuple(Features)
 
-    def __init__(self, sr_model, equation_index: int, n_actions: int = 2):
+    def __init__(self, sr_model, equation_index: int, n_actions: int = 2, n_features: int | None = None):
+        feature_names = getattr(sr_model, 'feature_names_in_', None)
+        expected = 0 if feature_names is None else len(feature_names)
+        if n_features is not None and expected and n_features != expected:
+            # PySR's jax callable indexes X by fit-time column, and JAX clamps out-of-range
+            # indices instead of raising, so a mismatch silently evaluates the expression on
+            # the wrong columns and the policy degenerates to a constant action.
+            raise ValueError(
+                f'The symbolic model was fitted on {expected} features but the simulation supplies '
+                f'{n_features}. Set --window_size {expected // len(Features)} to match the history '
+                f'the model was distilled from.'
+            )
+
         jaxeq = sr_model.jax(equation_index)
         callable_fn = jax.jit(jaxeq["callable"])
         parameters = jaxeq["parameters"]

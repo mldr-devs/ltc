@@ -7,9 +7,12 @@ SR_SPLIT_STAMP := $(addprefix out/, $(addsuffix .split.done, $(BASENAMES)))
 SR_RUN_STAMPS  := $(addprefix out/, $(addsuffix .srrun.done, $(BASENAMES)))
 
 # Simulation replaying a distilled expression through SRJaxAgent.
-SR_EQ          ?= 5
-SR_RUN_EPOCHS  ?= 1
+SR_EQ          ?= 2
+# The `all_*` plots draw one point per epoch, so a single epoch renders as blank axes.
+SR_RUN_EPOCHS  ?= 10
 SR_RUN_STEPS   ?= 2000
+# Must match the window the model was distilled from, else the expression reads wrong columns.
+SR_WINDOW      ?= 10
 SR_RUN_FLAGS   ?=
 
 .PHONY: all distill sr report split report-split sr-run clean
@@ -57,7 +60,8 @@ out/%.srrun.done: out/%.split.done
 	python -m ltc.run --agent_type sr-jax \
 		--sr_pkl "out/$*.split_sr.pkl" --sr_eq $(SR_EQ) \
 		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
-		--n_epochs $(SR_RUN_EPOCHS) --n_steps $(SR_RUN_STEPS) $(SR_RUN_FLAGS) --save_plots
+		--n_epochs $(SR_RUN_EPOCHS) --n_steps $(SR_RUN_STEPS) --window_size $(SR_WINDOW) \
+		$(SR_RUN_FLAGS) --save_plots
 	touch "$@"
 
 out/report_split.html: $(SR_SPLIT_STAMP)
