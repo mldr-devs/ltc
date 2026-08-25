@@ -15,8 +15,13 @@ TRAIN_NONSAT_TRAFFIC ?= bursty
 # Add --skip_git_check here when running from a dirty worktree.
 TRAIN_FLAGS    ?=
 
-TRAIN_SAT      := $(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(TRAIN_SAT_SEED)_$(COMMIT).pkl.lz4
-TRAIN_NONSAT   := $(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(TRAIN_NONSAT_SEED)_$(COMMIT).pkl.lz4
+# Reuse a history already trained for this (n, seed) whatever commit it carries, and
+# fall back to a HEAD-stamped name only when there is none. Pinning the target to
+# HEAD instead would retrain everything on every new commit.
+train_history = $(or $(lastword $(sort $(wildcard $(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(1)_*.pkl.lz4))),$(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(1)_$(COMMIT).pkl.lz4)
+
+TRAIN_SAT      := $(call train_history,$(TRAIN_SAT_SEED))
+TRAIN_NONSAT   := $(call train_history,$(TRAIN_NONSAT_SEED))
 TRAIN_FILES    := $(TRAIN_SAT) $(TRAIN_NONSAT)
 
 PKL_FILES      := $(sort $(wildcard $(DATA_DIR)/*.pkl.lz4) $(TRAIN_FILES))
