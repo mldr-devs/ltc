@@ -30,7 +30,7 @@ gpu = [
     "jax[cuda12-local]",
 ]
 symbolic = [
-    "pysr>=1.5.9",
+    "pysr~=2.0.0",
     "scikit-learn>=1.8.0",
     "pandas>=2.0.0",
     "seaborn>=0.13.2",

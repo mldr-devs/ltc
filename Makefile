@@ -43,7 +43,7 @@ SR_RUN_FLAGS   ?=
 
 .PHONY: all train distill sr report split report-split sr-run clean
 
-all: train distill  split report-split
+all: train distill  split
 
 train: $(TRAIN_FILES)
 

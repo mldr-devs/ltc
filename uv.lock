@@ -7,11 +7,11 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
     "python_full_version >= '3.14' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
-    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version == '3.13.*' and sys_platform == 'linux'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform == 'linux'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
@@ -681,14 +681,14 @@ wheels = [
 
 [[package]]
 name = "juliacall"
-version = "0.9.26"
+version = "0.9.35"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "juliapkg" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/51/5662ad9cb56bb37ccd4b1711b8438c96b146304e07a4331cf6ea963d2a88/juliacall-0.9.26.tar.gz", hash = "sha256:e8ccffd017f60d0b4db33b9f67660c8acbb6e2f37f364ebb5798babde036c985", size = 472361, upload-time = "2025-07-15T18:48:49.624Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d6/25/58cd25408a347f848174528f2d77b2da5d2b31fef19b0c2ba30571a39745/juliacall-0.9.35.tar.gz", hash = "sha256:7b1ad7572aff3651bbe4fa554140f0f5fd970c9820d998af6ae0deb98a270ad3", size = 499488, upload-time = "2026-06-08T07:37:55.526Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/06/e2/9ba7fb4869d2675d53f8c157c84bde77d25240f3cc96b2d33cc2f8aa39b2/juliacall-0.9.26-py3-none-any.whl", hash = "sha256:4a5c93b477cc13ddc48a6a5526626edc0826d5128c522d91e0e0da1b5abe09bc", size = 12053, upload-time = "2025-07-15T18:48:47.67Z" },
+    { url = "https://files.pythonhosted.org/packages/10/3b/ce7b39f8572f78f8946380e7cf53477f8cffbb8085e49fc54ad34124cc62/juliacall-0.9.35-py3-none-any.whl", hash = "sha256:fd58e7858b12a8e1aa44f9f9eeaea05ff8029dd9a19d98521a5451ca94f2f81a", size = 12593, upload-time = "2026-06-08T07:37:56.782Z" },
 ]
 
 [[package]]
@@ -856,7 +856,6 @@ wheels = [
 name = "ltc"
 source = { editable = "." }
 dependencies = [
-    { name = "joblib" },
     { name = "reinforced-lib" },
     { name = "tqdm" },
 ]
@@ -870,6 +869,7 @@ gpu = [
 ]
 symbolic = [
     { name = "jinja2" },
+    { name = "joblib" },
     { name = "marimo" },
     { name = "pandas" },
     { name = "pysr" },
@@ -881,10 +881,10 @@ symbolic = [
 requires-dist = [
     { name = "jax", extras = ["cuda12-local"], marker = "extra == 'gpu'" },
     { name = "jinja2", marker = "extra == 'symbolic'", specifier = ">=3.1.6" },
-    { name = "joblib", specifier = ">=1.5.3" },
+    { name = "joblib", marker = "extra == 'symbolic'", specifier = ">=1.5.3" },
     { name = "marimo", marker = "extra == 'symbolic'", specifier = ">=0.23.5" },
     { name = "pandas", marker = "extra == 'symbolic'", specifier = ">=2.0.0" },
-    { name = "pysr", marker = "extra == 'symbolic'", specifier = ">=1.5.9" },
+    { name = "pysr", marker = "extra == 'symbolic'", specifier = "~=2.0.0" },
     { name = "reinforced-lib", specifier = "==2.0.0" },
     { name = "salib", marker = "extra == 'analysis'", specifier = "~=1.5.2" },
     { name = "scikit-learn", marker = "extra == 'symbolic'", specifier = ">=1.8.0" },
@@ -1741,7 +1741,7 @@ wheels = [
 
 [[package]]
 name = "pysr"
-version = "1.5.10"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1752,9 +1752,9 @@ dependencies = [
     { name = "sympy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3d/30/774fa751e86af935c9b89ae9a1480b748e3cca7df7743710a2f751901106/pysr-1.5.10.tar.gz", hash = "sha256:1f6bfc424dc9f22d07a6d36eb98c54ca2755893ad534a8805e4fbcd9b8208767", size = 2398585, upload-time = "2026-03-30T17:37:01.198Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/1b/2caf184921e44cf08ace187db18ceec19ee79b6309c54c5916dc1d2bcc66/pysr-2.0.0.tar.gz", hash = "sha256:73673f002f5d2b2986066f0d0b194756280912e978fe27be80b2bb7053d913ab", size = 2525279, upload-time = "2026-08-26T08:29:33.638Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/64/87547c34d4e88aa8c7976fa1be8627ab8a06fccb4d8710224391f6df8a0d/pysr-1.5.10-py3-none-any.whl", hash = "sha256:856dc287beb7bc652f0ddbc6f5aa3540c278ab2180a61fd02727984f72dc26a6", size = 99301, upload-time = "2026-03-30T17:37:00.172Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/c2/5dc6814808f29fe4fc5609e7fb469198e04d7d2c274c74ca14a2542babc3/pysr-2.0.0-py3-none-any.whl", hash = "sha256:4bacdce5eb3784983e8fec7b169b7065b00578c135c61ce7d448775334d9330d", size = 144601, upload-time = "2026-08-26T08:29:32.069Z" },
 ]
 
 [[package]]
