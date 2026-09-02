@@ -65,6 +65,20 @@ class SimplexCode:
         return jnp.argmax(inner_products, axis=1)
 
 
+@jax.jit
+def history_reshape(observations: jax.Array) -> jax.Array:
+    """
+    Flatten a history of observations into a PySR-style feature matrix.
+
+    [n_steps, n_agents, window_size, n_features] -> [n_agents * n_steps, window_size * n_features]
+
+    Rows are grouped by agent (agent-major), and within a row the features are
+    window-step-major, matching ``build_column_names`` in ``history2csv``.
+    """
+    n_steps, n_agents = observations.shape[0], observations.shape[1]
+    return observations.transpose(1, 0, 2, 3).reshape(n_agents * n_steps, -1)
+
+
 if __name__ == "__main__":
     T = 5
     sc = SimplexCode(T=T)

@@ -387,13 +387,17 @@ if __name__ == '__main__':
             raise ValueError('--sr_pkl is required when --agent_type is sr-jax.')
         with open(args.sr_pkl, 'rb') as f:
             sr_model = pickle.load(f)
-        drl = SRJaxAgent(sr_model, equation_index=args.sr_eq, n_actions=num_actions)
+        drl = SRJaxAgent(
+            sr_model, equation_index=args.sr_eq, n_actions=num_actions,
+            n_features=window_size * len(Features)
+        )
     elif agent_type == 'forester':
         if args.forest_pkl is None:
             raise ValueError('--forest_pkl is required when --agent_type is forester.')
         import joblib  # ships with scikit-learn, part of the optional symbolic extra
         forest = joblib.load(args.forest_pkl)
         drl = Forester(forest, n_actions=num_actions)
+
     elif agent_type == 'aloha-qtf':
         drl = ALOHAQTF()
         node_ids = jnp.arange(n, dtype=jnp.int32)
