@@ -219,7 +219,7 @@ def rl_step(
 
 
 def setup_args():
-    parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
+    parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.",fromfile_prefix_chars='@')
     parser.add_argument('--n', type=int, default=10, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, help='Number of stations running the learning agent. Defaults to all of them.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')

@@ -1,4 +1,4 @@
-DATA_DIR       := data/nosvi
+DATA_DIR       := out/data
 
 # Training runs that produce the histories the distillation pipeline consumes.
 # ltc.run stamps the current commit into the filename, so it has to be known here too.
