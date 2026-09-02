@@ -91,7 +91,7 @@ class JaxRandomForest:
 
     # ---- inference ---------------------------------------------------------
 
-    def predict_proba(self, X) -> Array:
+    def predict_proba(self, X) -> jax.Array:
         if not self.is_classifier:
             raise ValueError("predict_proba is only defined for classifiers.")
         X = jnp.asarray(X, dtype=jnp.float32)
@@ -164,7 +164,7 @@ def _forest_forward(feature, threshold, left, right, value, X, max_depth):
 # --------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.ensemble import RandomForestClassifier  # noqa: I001
     from sklearn.datasets import make_classification
     from sklearn.model_selection import train_test_split
 
