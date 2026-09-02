@@ -1,141 +1,108 @@
-DATA_DIR       := out/data
+# Experiment pipeline, one chain per config file:
+#
+#   cfg/<exp>.txt            experiment definition (ltc.run flags)
+#     -> out/data/<exp>.pkl.lz4        training history
+#     -> out/<exp>.csv                 (observation, action) dataset
+#     -> out/<exp>.split.done          half/half distillation: forest + SR
+#          -> out/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
+#          -> out/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
+#
+# Adding an experiment means adding a cfg/<name>.txt; nothing here needs editing.
 
-# Training runs that produce the histories the distillation pipeline consumes.
-# ltc.run stamps the current commit into the filename, so it has to be known here too.
-COMMIT         := $(shell git rev-parse --short HEAD)
-TRAIN_N        ?= 10
-TRAIN_EPOCHS   ?= 50
-TRAIN_STEPS    ?= 2000
-TRAIN_WINDOW   ?= 10
-# The two traffic variants only differ by seed in the filename, since ltc.run encodes
-# nothing else; keep them distinct or the second run would overwrite the first.
-TRAIN_SAT_SEED    ?= 42
-TRAIN_NONSAT_SEED ?= 43
-TRAIN_NONSAT_TRAFFIC ?= bursty
-# Add --skip_git_check here when running from a dirty worktree.
-TRAIN_FLAGS    ?=
+DATA_DIR  := out/data
+RUN_DIR   := out/runs
 
-# Reuse a history already trained for this (n, seed) whatever commit it carries, and
-# fall back to a HEAD-stamped name only when there is none. Pinning the target to
-# HEAD instead would retrain everything on every new commit.
-train_history = $(or $(lastword $(sort $(wildcard $(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(1)_*.pkl.lz4))),$(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(1)_$(COMMIT).pkl.lz4)
+CONFIGS   := $(wildcard cfg/*.txt)
+EXPS      := $(notdir $(basename $(CONFIGS)))
 
-TRAIN_SAT      := $(call train_history,$(TRAIN_SAT_SEED))
-TRAIN_NONSAT   := $(call train_history,$(TRAIN_NONSAT_SEED))
-TRAIN_FILES    := $(TRAIN_SAT) $(TRAIN_NONSAT)
+HISTORIES     := $(addprefix $(DATA_DIR)/, $(addsuffix .pkl.lz4, $(EXPS)))
+CSV_FILES     := $(addprefix out/, $(addsuffix .csv, $(EXPS)))
+SPLIT_STAMPS  := $(addprefix out/, $(addsuffix .split.done, $(EXPS)))
+FOREST_RUNS   := $(addprefix out/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
+SR_RUNS       := $(addprefix out/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
 
-PKL_FILES      := $(sort $(wildcard $(DATA_DIR)/*.pkl.lz4) $(TRAIN_FILES))
-BASENAMES      := $(notdir $(PKL_FILES:.pkl.lz4=))
-CSV_FILES      := $(addprefix out/, $(addsuffix .csv, $(BASENAMES)))
-FOREST_FILES   := $(addprefix out/, $(addsuffix .forest.pkl, $(BASENAMES)))
-SR_STAMPS      := $(addprefix out/, $(addsuffix .sr.done, $(BASENAMES)))
-SR_SPLIT_STAMP := $(addprefix out/, $(addsuffix .split.done, $(BASENAMES)))
-FOREST_RUN_STAMPS := $(addprefix out/, $(addsuffix .forestrun.done, $(BASENAMES)))
+# Add --skip_git_check here when running from a dirty worktree; it is passed to
+# every ltc.run invocation, training and replay alike.
+RUN_FLAGS ?=
 
-# Simulation replaying a distilled random forest through the Forester agent.
-FOREST_RUN_EPOCHS ?= 1
-FOREST_RUN_STEPS  ?= 2000
-FOREST_RUN_FLAGS  ?=
+# Replay of the distilled policies. Epoch/step counts are overridden rather than
+# taken from the cfg: no learning happens, and the `all_*` plots draw one point per
+# epoch, so a single epoch would render as blank axes.
+REPLAY_EPOCHS ?= 10
+REPLAY_STEPS  ?= 2000
+SR_EQ         ?= 2
 
-.PHONY: all distill sr report split report-split forest-run clean
-SR_RUN_STAMPS  := $(addprefix out/, $(addsuffix .srrun.done, $(BASENAMES)))
+# Distillation size knobs, forwarded to ltc.symbolic.sr_split.
+SR_ITERATIONS    ?= 100
+SR_POPULATIONS   ?= 10
+FOREST_ESTIMATORS ?= 1500
 
-# Simulation replaying a distilled expression through SRJaxAgent.
-SR_EQ          ?= 2
-# The `all_*` plots draw one point per epoch, so a single epoch renders as blank axes.
-SR_RUN_EPOCHS  ?= 10
-SR_RUN_STEPS   ?= 2000
-# Must match the window the model was distilled from, else the expression reads wrong columns.
-SR_WINDOW      ?= 10
-SR_RUN_FLAGS   ?=
+# The flags of one experiment, expanded by the shell at recipe time.
+# The '\#' is escaped because make would otherwise read it as a comment.
+cfg_flags = $$(sed -e 's/\#.*//' $(CURDIR)/cfg/$(1).txt | tr '\n' ' ')
 
-.PHONY: all train distill sr report split report-split sr-run clean
+# ltc.run names its history itself (history_<n>_<n_final>_<seed>_<commit>.pkl.lz4) and
+# writes it, plus any --save_plots figures, into the current directory. Every stage
+# therefore gets its own scratch directory -- $(RUN_DIR)/<exp>.<stage>, where the plots
+# stay -- and the single history produced there is moved to the target.
+# $(1) is the experiment, $(2) the stage name, $(3) the extra ltc.run flags.
+define run_ltc
+	rm -rf $(RUN_DIR)/$(1).$(2)
+	mkdir -p $(RUN_DIR)/$(1).$(2)
+	cd $(RUN_DIR)/$(1).$(2) && PYTHONPATH=$(CURDIR) python -m ltc.run \
+		$(call cfg_flags,$(1)) $(3) $(RUN_FLAGS)
+	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
+endef
 
-all: train distill  split
+.PHONY: all train csv split forest-run sr-run report-split clean
+.PRECIOUS: $(HISTORIES) $(CSV_FILES)
 
-train: $(TRAIN_FILES)
+all: forest-run sr-run
 
-distill: $(FOREST_FILES)
+train: $(HISTORIES)
 
-sr: $(SR_STAMPS)
+csv: $(CSV_FILES)
 
-split: $(SR_SPLIT_STAMP)
+split: $(SPLIT_STAMPS)
 
-report: out/report.html
+forest-run: $(FOREST_RUNS)
+
+sr-run: $(SR_RUNS)
 
 report-split: out/report_split.html
 
-forest-run: $(FOREST_RUN_STAMPS)
+out $(DATA_DIR) $(RUN_DIR):
+	mkdir -p $@
 
-.PRECIOUS: $(CSV_FILES)
-sr-run: $(SR_RUN_STAMPS)
+# 1. Training run: one history per config file.
+$(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
+	$(call run_ltc,$*,train,)
 
-.PRECIOUS: $(CSV_FILES) $(TRAIN_FILES)
-
-out:
-	mkdir -p out
-
-$(DATA_DIR):
-	mkdir -p $(DATA_DIR)
-
-# Training runs feeding the distillation pipeline. ltc.run always writes its history
-# into the repo root under a name it builds itself, so move it into $(DATA_DIR) after.
-$(TRAIN_SAT): | $(DATA_DIR)
-	python -m ltc.run --traffic_type saturated \
-		--n $(TRAIN_N) --seed $(TRAIN_SAT_SEED) \
-		--n_epochs $(TRAIN_EPOCHS) --n_steps $(TRAIN_STEPS) --window_size $(TRAIN_WINDOW) \
-		$(TRAIN_FLAGS)
-	mv "$(notdir $@)" "$@"
-
-$(TRAIN_NONSAT): | $(DATA_DIR)
-	python -m ltc.run --traffic_type $(TRAIN_NONSAT_TRAFFIC) \
-		--n $(TRAIN_N) --seed $(TRAIN_NONSAT_SEED) \
-		--n_epochs $(TRAIN_EPOCHS) --n_steps $(TRAIN_STEPS) --window_size $(TRAIN_WINDOW) \
-		$(TRAIN_FLAGS)
-	mv "$(notdir $@)" "$@"
-
+# 2. Flatten the history into the distillation dataset.
 out/%.csv: $(DATA_DIR)/%.pkl.lz4 | out
 	python -m ltc.symbolic.history2csv --file "$<" --output "$@"
 
-out/%.forest.pkl: out/%.csv
-	python -m ltc.symbolic.tree --file "$<" --output "$@"
-
-out/%.sr.done: out/%.csv ltc/symbolic/sr.py
-	python -m ltc.symbolic.sr --file "$<" --output "out/$*" --pysr_output_dir out/output
-	touch "$@"
-
-out/report.html: $(SR_STAMPS) $(FOREST_FILES)
-	marimo export html ltc/symbolic/report.py -o "$@" -f
-
+# 3. Distillation on the half/half agent split: the train half fits both a random
+# forest and a symbolic expression, the test half is held out. One PySR fit produces
+# <exp>.split_forest.pkl, <exp>.split_sr.pkl and <exp>.split.json together, hence the
+# single stamp guarding all three.
 out/%.split.done: out/%.csv ltc/symbolic/sr_split.py
-	python -m ltc.symbolic.sr_split --file "$<" --output "out/$*" --pysr_output_dir out/output_split
+	python -m ltc.symbolic.sr_split --file "$<" --output "out/$*" --pysr_output_dir out/output_split \
+		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) --n_estimators $(FOREST_ESTIMATORS)
 	touch "$@"
 
-# Run the simulator with the distilled split forest as the agent policy.
-# The stem is history_<n>_<n_final>_<seed>_<commit>, so n and seed come back out of it.
-# ltc.run writes its own history_*.pkl.lz4 in the repo root, hence the stamp file.
-out/%.forestrun.done: out/%.split.done
-	python -m ltc.run --agent_type forester \
-		--forest_pkl "out/$*.split_forest.pkl" \
-		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
-		--n_epochs $(FOREST_RUN_EPOCHS) --n_steps $(FOREST_RUN_STEPS) $(FOREST_RUN_FLAGS) --save_plots
-	touch "$@"
+# 4a. Replay the distilled forest as the station policy, under the experiment's own
+# traffic and topology flags.
+out/%.forestrun.pkl.lz4: out/%.split.done | $(RUN_DIR)
+	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(CURDIR)/out/$*.split_forest.pkl \
+		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
 
-# Run the simulator with the distilled expression as the agent policy.
-# The stem is history_<n>_<n_final>_<seed>_<commit>, so n and seed come back out of it.
-# ltc.run writes its own history_*.pkl.lz4 in the repo root, hence the stamp file.
-out/%.srrun.done: out/%.split.done
-	python -m ltc.run --agent_type sr-jax \
-		--sr_pkl "out/$*.split_sr.pkl" --sr_eq $(SR_EQ) \
-		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
-		--n_epochs $(SR_RUN_EPOCHS) --n_steps $(SR_RUN_STEPS) --window_size $(SR_WINDOW) \
-		$(SR_RUN_FLAGS) --save_plots
-	touch "$@"
+# 4b. Same for the distilled symbolic expression.
+out/%.srrun.pkl.lz4: out/%.split.done | $(RUN_DIR)
+	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl --sr_eq $(SR_EQ) \
+		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
 
-# Replay the non-saturated history under the traffic it was trained on.
-$(patsubst $(DATA_DIR)/%.pkl.lz4,out/%.srrun.done,$(TRAIN_NONSAT)): SR_RUN_FLAGS += --traffic_type $(TRAIN_NONSAT_TRAFFIC)
-
-out/report_split.html: $(SR_SPLIT_STAMP)
+out/report_split.html: $(SPLIT_STAMPS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
 
 clean:
