@@ -40,7 +40,7 @@ class AgentFeatureContractTestCase(unittest.TestCase):
     """Each ported agent must unpack exactly as many features as it declares."""
 
     def test_declared_widths_match_the_unpacking(self):
-        from ltc.agents import SRJaxAgent
+        from ltc.agents import Forester, SRJaxAgent
         from ltc.baselines import (
             ALOHAQTF, DCF, DLMANetwork, DOS, EBALOHA, FWALOHA, Idle_sense, QALOHA, StatelessQLearning, TDMA
         )
@@ -48,7 +48,7 @@ class AgentFeatureContractTestCase(unittest.TestCase):
         expected_widths = {
             DCF: 3, Idle_sense: 2, DOS: 2, ALOHAQTF: 2,
             QALOHA: 1, EBALOHA: 2, FWALOHA: 1, TDMA: 1, StatelessQLearning: 1,
-            SRJaxAgent: len(Features), DLMANetwork: 4,
+            SRJaxAgent: len(Features), Forester: len(Features), DLMANetwork: 4,
         }
         obs = jnp.arange(len(Features))[None, :]
 
