@@ -55,6 +55,14 @@ if __name__ == "__main__":
         "--seed", type=int, default=42, help="Seed used for filename matching"
     )
     parser.add_argument("--output", type=str, default=None, help="Output .csv path")
+    parser.add_argument(
+        "--labels",
+        type=str,
+        default="qvals",
+        choices=["qvals", "actions"],
+        help="Label source: the argmax of the trained Q-network, or the actions the agent "
+        "actually took as recorded in the history.",
+    )
 
     args = parser.parse_args()
 
@@ -72,6 +80,13 @@ if __name__ == "__main__":
 
     # Last epoch: shape [n_steps, n_agents, window_size, n_features]
     observations = history.observations[-1, ...]
+
+    # A recorded observation is the state *after* its step: its newest window slot
+    # already holds the action taken at that step. The action it leads to is the
+    # next one, so pair observation t with action t+1 -- labelling it with action t
+    # instead leaks the answer into the features and distills "repeat last action".
+    recorded = history.actions[-1, ...][1:]  # [n_steps - 1, n_agents]
+    observations = observations[:-1]
     n_steps, _, window_size, _ = observations.shape
 
     key = jax.random.key(42)
@@ -82,7 +97,11 @@ if __name__ == "__main__":
     # Build flat feature matrix: [n_agents * n_steps, window_size * n_features]
     # transpose [n_steps, n_agents, w, f] -> [n_agents, n_steps, w, f] then flatten last two dims
     XX = history_reshape(observations)
-    actions = np.asarray(qvals.argmax(axis=-1)).flatten()  # [n_agents * n_steps]
+    if args.labels == "actions":
+        # Agent-major, matching history_reshape's row order.
+        actions = np.asarray(recorded).T.flatten()
+    else:
+        actions = np.asarray(qvals.argmax(axis=-1)).flatten()  # [n_agents * n_steps]
     agent_ids = np.repeat(np.arange(n_agents), n_steps)
 
     df = pd.DataFrame(XX, columns=build_column_names(window_size))
