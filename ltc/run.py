@@ -15,7 +15,7 @@ from tqdm import trange
 from reinforced_lib.agents.deep.ddqn import DDQN
 from reinforced_lib.agents.deep.expected_sarsa import ExpectedSarsa
 
-from ltc.agents import QNetwork, SRJaxAgent
+from ltc.agents import Forester, QNetwork, SRJaxAgent
 from ltc.baselines import (
     ALOHAQTF, DCF, DLMANetwork, DOS, EBALOHA, FWALOHA, Idle_sense, QALOHA, StatelessQLearning, TDMA,
     dlma_reward, stateless_q_reward
@@ -237,7 +237,7 @@ def setup_args():
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf', 'q-aloha', 'eb-aloha', 'fw-aloha', 'tdma', 'idle-sense', 'dos'], help="Agent run by the stations not covered by --n_drl.")
-    parser.add_argument('--agent_type', type=str, default='ddqn', choices=['ddqn', 'expected-sarsa', 'sr-jax', 'aloha-qtf', 'dlma', 'stateless-q'], help='Agent run by the stations covered by --n_drl.')
+    parser.add_argument('--agent_type', type=str, default='ddqn', choices=['ddqn', 'expected-sarsa', 'sr-jax', 'forester', 'aloha-qtf', 'dlma', 'stateless-q'], help='Agent run by the stations covered by --n_drl.')
     parser.add_argument('--n_slots', type=int, default=5, help='Frame length in slots (used by --agent_type stateless-q).')
     parser.add_argument('--tdma_slots', type=int, default=10, help='TDMA frame length in slots (used by --legacy_type tdma).')
     parser.add_argument('--tdma_assigned', type=int, default=5, help='Slots per TDMA station. The default pairs with --tdma_slots 10 for the DLMA benchmark; lower it when several TDMA stations share the channel.')
@@ -245,6 +245,7 @@ def setup_args():
     parser.add_argument('--idle_sense_inv_alpha', type=float, default=1.2, help='Idle Sense AIMD multiplicative factor, the paper\'s 1/alpha. CW is multiplied by it below the idle-slot target.')
     parser.add_argument('--idle_sense_update_interval', type=int, default=50, help='Transmissions Idle Sense averages before adjusting CW (the paper\'s maxtrans).')
     parser.add_argument('--sr_pkl', type=str, help='Path to the fitted symbolic regression model (required by --agent_type sr-jax).')
+    parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.sr_split or ltc.symbolic.tree (required by --agent_type forester).')
     parser.add_argument('--sr_eq', type=int, default=2, help='Equation index to use from the PySR Pareto front.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
@@ -341,7 +342,7 @@ if __name__ == '__main__':
         optax.adam(lr_schedule),
     )
 
-    use_raw_obs = agent_type == 'sr-jax'
+    use_raw_obs = agent_type in ('sr-jax', 'forester')
     compute_hist = agent_type in ('ddqn', 'expected-sarsa') and args.weight_hist
     node_ids = None
     reward_fn = {'dlma': dlma_reward, 'stateless-q': stateless_q_reward}.get(agent_type)
@@ -387,6 +388,12 @@ if __name__ == '__main__':
         with open(args.sr_pkl, 'rb') as f:
             sr_model = pickle.load(f)
         drl = SRJaxAgent(sr_model, equation_index=args.sr_eq, n_actions=num_actions)
+    elif agent_type == 'forester':
+        if args.forest_pkl is None:
+            raise ValueError('--forest_pkl is required when --agent_type is forester.')
+        import joblib  # ships with scikit-learn, part of the optional symbolic extra
+        forest = joblib.load(args.forest_pkl)
+        drl = Forester(forest, n_actions=num_actions)
     elif agent_type == 'aloha-qtf':
         drl = ALOHAQTF()
         node_ids = jnp.arange(n, dtype=jnp.int32)
