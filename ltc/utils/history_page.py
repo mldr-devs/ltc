@@ -123,7 +123,7 @@ def draw_header(ax, path, meta, n, n_drl, n_epochs, n_steps, epoch):
         ('detail epoch', str(epoch + 1)),
     ]
     if agent == 'sr-jax' and meta.get('sr_pkl'):
-        fields.append(('sr', f"{Path(meta['sr_pkl']).name} eq {meta.get('sr_eq')}"))
+        fields.append(('sr', f"{Path(meta['sr_pkl']).name} eq {meta.get('sr_eq') or 'best'}"))
     if agent == 'forester' and meta.get('forest_pkl'):
         fields.append(('forest', Path(meta['forest_pkl']).name))
 

@@ -248,7 +248,7 @@ def setup_args():
     parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.sr_split or ltc.symbolic.tree (required by --agent_type forester).')
     parser.add_argument('--stochastic_policy', action='store_true', default=False, help='Sample the action from the distilled policy instead of taking its argmax (--agent_type sr-jax and forester). One shared deterministic policy puts every station in lockstep.')
     parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy. Below 1.0 sharpens towards the argmax, above 1.0 flattens towards uniform.')
-    parser.add_argument('--sr_eq', type=int, default=2, help='Equation index to use from the PySR Pareto front.')
+    parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the one PySR itself reports as best under its model_selection criterion.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')

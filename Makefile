@@ -37,7 +37,8 @@ RUN_FLAGS ?=
 # epoch, so a single epoch would render as blank axes.
 REPLAY_EPOCHS ?= 10
 REPLAY_STEPS  ?= 2000
-SR_EQ         ?= 2
+# Empty lets PySR choose off its own Pareto front; set an index to pin one.
+SR_EQ         ?=
 # Extra flags for both replays. Sampling the distilled action is the default: one
 # shared deterministic policy puts every station in lockstep, and with argmax the
 # replays reach zero throughput however the models are labelled or fit.
@@ -144,7 +145,7 @@ out/%.forestrun.pkl.lz4: out/%.split_forest.pkl | $(RUN_DIR)
 
 # 4b. Same for the distilled symbolic expression.
 out/%.srrun.pkl.lz4: out/%.split_sr.pkl | $(RUN_DIR)
-	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl --sr_eq $(SR_EQ) \
+	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 
 # 5. One page per rollout. Each stage keeps its own history path, hence one rule

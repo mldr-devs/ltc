@@ -20,7 +20,7 @@ class SRJaxAgent(BaseAgent):
     FEATURES = tuple(Features)
 
     def __init__(
-        self, sr_model, equation_index: int, n_actions: int = 2, n_features: int | None = None,
+        self, sr_model, equation_index: int | None = None, n_actions: int = 2, n_features: int | None = None,
         stochastic: bool = False, temperature: float = 1.0,
     ):
         feature_names = getattr(sr_model, 'feature_names_in_', None)
@@ -33,6 +33,17 @@ class SRJaxAgent(BaseAgent):
                 f'The symbolic model was fitted on {expected} features but the simulation supplies '
                 f'{n_features}. Set --window_size {expected // len(Features)} to match the history '
                 f'the model was distilled from.'
+            )
+
+        # None lets PySR pick off its own Pareto front, by whatever criterion its
+        # model_selection is set to, instead of pinning an index that may be far from
+        # the knee: on the bursty run the front's own choice scored a loss of 0.0014
+        # where the previously hardcoded index 2 scored 0.91.
+        selected = sr_model.get_best(index=equation_index)
+        if not isinstance(selected, list):
+            print(
+                f'SR equation {selected.name} (complexity {selected["complexity"]}, '
+                f'loss {selected["loss"]:.5g}): {selected["equation"]}'
             )
 
         jaxeq = sr_model.jax(equation_index)
