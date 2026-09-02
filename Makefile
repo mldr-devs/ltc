@@ -3,9 +3,11 @@
 #   cfg/<exp>.txt            experiment definition (ltc.run flags)
 #     -> out/data/<exp>.pkl.lz4        training history
 #     -> out/<exp>.csv                 (observation, action) dataset
-#     -> out/<exp>.split.done          half/half distillation: forest + SR
-#          -> out/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
-#          -> out/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
+#     -> out/<exp>.split.json           half/half agent split, shared by both paths
+#          -> out/<exp>.split_forest.pkl    distilled random forest
+#               -> out/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
+#          -> out/<exp>.split_sr.pkl        distilled symbolic model
+#               -> out/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
 #
 # Adding an experiment means adding a cfg/<name>.txt; nothing here needs editing.
 
@@ -17,7 +19,9 @@ EXPS      := $(notdir $(basename $(CONFIGS)))
 
 HISTORIES     := $(addprefix $(DATA_DIR)/, $(addsuffix .pkl.lz4, $(EXPS)))
 CSV_FILES     := $(addprefix out/, $(addsuffix .csv, $(EXPS)))
-SPLIT_STAMPS  := $(addprefix out/, $(addsuffix .split.done, $(EXPS)))
+SPLIT_FILES   := $(addprefix out/, $(addsuffix .split.json, $(EXPS)))
+FOREST_MODELS := $(addprefix out/, $(addsuffix .split_forest.pkl, $(EXPS)))
+SR_MODELS     := $(addprefix out/, $(addsuffix .split_sr.pkl, $(EXPS)))
 FOREST_RUNS   := $(addprefix out/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
 SR_RUNS       := $(addprefix out/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
 
@@ -71,8 +75,8 @@ define render_page
 		--smooth $(PAGE_SMOOTH) $(PAGE_FLAGS)
 endef
 
-.PHONY: all train csv split forest-run sr-run pages report-split clean
-.PRECIOUS: $(HISTORIES) $(CSV_FILES)
+.PHONY: all train csv split forest sr distill forest-run sr-run pages report-split clean
+.PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 
 all: forest-run sr-run pages
 
@@ -80,7 +84,13 @@ train: $(HISTORIES)
 
 csv: $(CSV_FILES)
 
-split: $(SPLIT_STAMPS)
+split: $(SPLIT_FILES)
+
+forest: $(FOREST_MODELS)
+
+sr: $(SR_MODELS)
+
+distill: forest sr
 
 forest-run: $(FOREST_RUNS)
 
@@ -101,23 +111,30 @@ $(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
 out/%.csv: $(DATA_DIR)/%.pkl.lz4 | out
 	python -m ltc.symbolic.history2csv --file "$<" --output "$@"
 
-# 3. Distillation on the half/half agent split: the train half fits both a random
-# forest and a symbolic expression, the test half is held out. One PySR fit produces
-# <exp>.split_forest.pkl, <exp>.split_sr.pkl and <exp>.split.json together, hence the
-# single stamp guarding all three.
-out/%.split.done: out/%.csv ltc/symbolic/sr_split.py
-	python -m ltc.symbolic.sr_split --file "$<" --output "out/$*" --pysr_output_dir out/output_split \
-		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) --n_estimators $(FOREST_ESTIMATORS)
-	touch "$@"
+# 3. The half/half agent split, written once so both distillations train on the
+# same agents and hold out the same ones.
+out/%.split.json: out/%.csv ltc/symbolic/split.py | out
+	python -m ltc.symbolic.split --file "$<" --output "$@"
+
+# 3a/3b. The two distillations. They share the split and nothing else, so either
+# can be refit without disturbing the other.
+out/%.split_forest.pkl: out/%.csv out/%.split.json ltc/symbolic/forest_split.py
+	python -m ltc.symbolic.forest_split --file "out/$*.csv" --split "out/$*.split.json" \
+		--output "out/$*" --n_estimators $(FOREST_ESTIMATORS)
+
+out/%.split_sr.pkl: out/%.csv out/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
+	python -m ltc.symbolic.sr_split --file "out/$*.csv" --split "out/$*.split.json" \
+		--output "out/$*" --pysr_output_dir out/output_split \
+		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS)
 
 # 4a. Replay the distilled forest as the station policy, under the experiment's own
 # traffic and topology flags.
-out/%.forestrun.pkl.lz4: out/%.split.done | $(RUN_DIR)
+out/%.forestrun.pkl.lz4: out/%.split_forest.pkl | $(RUN_DIR)
 	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(CURDIR)/out/$*.split_forest.pkl \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
 
 # 4b. Same for the distilled symbolic expression.
-out/%.srrun.pkl.lz4: out/%.split.done | $(RUN_DIR)
+out/%.srrun.pkl.lz4: out/%.split_sr.pkl | $(RUN_DIR)
 	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl --sr_eq $(SR_EQ) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
 
@@ -132,7 +149,7 @@ out/%.forestrun.page.pdf: out/%.forestrun.pkl.lz4 ltc/utils/history_page.py | ou
 out/%.srrun.page.pdf: out/%.srrun.pkl.lz4 ltc/utils/history_page.py | out
 	$(render_page)
 
-out/report_split.html: $(SPLIT_STAMPS)
+out/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
 
 clean:
