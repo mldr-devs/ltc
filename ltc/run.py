@@ -386,7 +386,10 @@ if __name__ == '__main__':
             raise ValueError('--sr_pkl is required when --agent_type is sr-jax.')
         with open(args.sr_pkl, 'rb') as f:
             sr_model = pickle.load(f)
-        drl = SRJaxAgent(sr_model, equation_index=args.sr_eq, n_actions=num_actions)
+        drl = SRJaxAgent(
+            sr_model, equation_index=args.sr_eq, n_actions=num_actions,
+            n_features=window_size * len(Features)
+        )
     elif agent_type == 'aloha-qtf':
         drl = ALOHAQTF()
         node_ids = jnp.arange(n, dtype=jnp.int32)
