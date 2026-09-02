@@ -21,6 +21,9 @@ SPLIT_STAMPS  := $(addprefix out/, $(addsuffix .split.done, $(EXPS)))
 FOREST_RUNS   := $(addprefix out/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
 SR_RUNS       := $(addprefix out/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
 
+# One A4 summary page per ltc.run rollout: the training run and both replays.
+PAGES         := $(addprefix out/, $(foreach s,train forestrun srrun, $(addsuffix .$(s).page.pdf, $(EXPS))))
+
 # Add --skip_git_check here when running from a dirty worktree; it is passed to
 # every ltc.run invocation, training and replay alike.
 RUN_FLAGS ?=
@@ -31,6 +34,14 @@ RUN_FLAGS ?=
 REPLAY_EPOCHS ?= 10
 REPLAY_STEPS  ?= 2000
 SR_EQ         ?= 2
+
+# Summary page. The raster panel shows one epoch, so by default it lands on the
+# last one (the trained policy) and on the first steps of it.
+PAGE_EPOCH      ?= -1
+PAGE_ZOOM_STEPS ?= 200
+PAGE_ZOOM_START ?= 0
+PAGE_SMOOTH     ?= 1
+PAGE_FLAGS      ?=
 
 # Distillation size knobs, forwarded to ltc.symbolic.sr_split.
 SR_ITERATIONS    ?= 100
@@ -54,10 +65,16 @@ define run_ltc
 	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
 endef
 
-.PHONY: all train csv split forest-run sr-run report-split clean
+define render_page
+	python -m ltc.utils.history_page --file "$<" --output "$@" \
+		--epoch $(PAGE_EPOCH) --zoom_steps $(PAGE_ZOOM_STEPS) --zoom_start $(PAGE_ZOOM_START) \
+		--smooth $(PAGE_SMOOTH) $(PAGE_FLAGS)
+endef
+
+.PHONY: all train csv split forest-run sr-run pages report-split clean
 .PRECIOUS: $(HISTORIES) $(CSV_FILES)
 
-all: forest-run sr-run
+all: forest-run sr-run pages
 
 train: $(HISTORIES)
 
@@ -68,6 +85,8 @@ split: $(SPLIT_STAMPS)
 forest-run: $(FOREST_RUNS)
 
 sr-run: $(SR_RUNS)
+
+pages: $(PAGES)
 
 report-split: out/report_split.html
 
@@ -101,6 +120,17 @@ out/%.forestrun.pkl.lz4: out/%.split.done | $(RUN_DIR)
 out/%.srrun.pkl.lz4: out/%.split.done | $(RUN_DIR)
 	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl --sr_eq $(SR_EQ) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
+
+# 5. One page per rollout. Each stage keeps its own history path, hence one rule
+# per stage rather than a single out/%.page.pdf pattern.
+out/%.train.page.pdf: $(DATA_DIR)/%.pkl.lz4 ltc/utils/history_page.py | out
+	$(render_page)
+
+out/%.forestrun.page.pdf: out/%.forestrun.pkl.lz4 ltc/utils/history_page.py | out
+	$(render_page)
+
+out/%.srrun.page.pdf: out/%.srrun.pkl.lz4 ltc/utils/history_page.py | out
+	$(render_page)
 
 out/report_split.html: $(SPLIT_STAMPS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
