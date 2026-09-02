@@ -17,7 +17,7 @@ class ForesterState(AgentState):
 
 
 class Forester(BaseAgent):
-    """Deterministic agent whose policy is a scikit-learn random forest.
+    """Agent whose policy is a scikit-learn random forest.
 
     Mirrors `SRJaxAgent`, with the symbolic expression replaced by a fitted
     `RandomForestClassifier` converted to JAX arrays by `JaxRandomForest`.
@@ -25,7 +25,7 @@ class Forester(BaseAgent):
 
     FEATURES = tuple(Features)
 
-    def __init__(self, forest, n_actions: int = 2):
+    def __init__(self, forest, n_actions: int = 2, stochastic: bool = False, temperature: float = 1.0):
         jrf = JaxRandomForest.from_sklearn(forest)
 
         if not jrf.is_classifier:
@@ -49,7 +49,9 @@ class Forester(BaseAgent):
 
         self.init = jax.jit(partial(self.init, parameters=parameters))
         self.update = jax.jit(self.update)
-        self.sample = jax.jit(partial(self.sample, max_depth=jrf.max_depth))
+        self.sample = jax.jit(partial(
+            self.sample, max_depth=jrf.max_depth, stochastic=stochastic, temperature=temperature,
+        ))
 
     @staticmethod
     def init(key: PRNGKey, parameters: Any) -> ForesterState:
@@ -72,6 +74,8 @@ class Forester(BaseAgent):
         key: PRNGKey,
         env_state: Array,
         max_depth: int,
+        stochastic: bool,
+        temperature: float,
     ) -> Array:
         # env_state: [window_size, n_features] raw int obs
         env_state = select_features(env_state, Forester.FEATURES)
@@ -81,4 +85,13 @@ class Forester(BaseAgent):
             p['feature'], p['threshold'], p['left'], p['right'], p['value'],
             x, max_depth,
         )                                                           # [1, n_classes]
-        return p['classes'][jnp.argmax(probs[0])]                   # scalar
+
+        if stochastic:
+            # Draw from the forest's own vote distribution. A shared deterministic
+            # policy makes every station pick the same action from the same
+            # observation, which locks the network into permanent collisions.
+            index = jax.random.categorical(key, jnp.log(probs[0]) / temperature)
+        else:
+            index = jnp.argmax(probs[0])
+
+        return p['classes'][index]                                  # scalar

@@ -38,6 +38,9 @@ RUN_FLAGS ?=
 REPLAY_EPOCHS ?= 10
 REPLAY_STEPS  ?= 2000
 SR_EQ         ?= 2
+# Extra flags for both replays, e.g. --stochastic_policy to sample the distilled
+# action instead of taking its argmax.
+REPLAY_FLAGS  ?=
 
 # Summary page. The raster panel shows one epoch, so by default it lands on the
 # last one (the trained policy) and on the first steps of it.
@@ -131,12 +134,12 @@ out/%.split_sr.pkl: out/%.csv out/%.split.json ltc/symbolic/sr_split.py ltc/symb
 # traffic and topology flags.
 out/%.forestrun.pkl.lz4: out/%.split_forest.pkl | $(RUN_DIR)
 	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(CURDIR)/out/$*.split_forest.pkl \
-		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
+		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 
 # 4b. Same for the distilled symbolic expression.
 out/%.srrun.pkl.lz4: out/%.split_sr.pkl | $(RUN_DIR)
 	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl --sr_eq $(SR_EQ) \
-		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots)
+		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 
 # 5. One page per rollout. Each stage keeps its own history path, hence one rule
 # per stage rather than a single out/%.page.pdf pattern.

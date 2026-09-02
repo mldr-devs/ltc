@@ -19,7 +19,10 @@ class SRJaxState(AgentState):
 class SRJaxAgent(BaseAgent):
     FEATURES = tuple(Features)
 
-    def __init__(self, sr_model, equation_index: int, n_actions: int = 2, n_features: int | None = None):
+    def __init__(
+        self, sr_model, equation_index: int, n_actions: int = 2, n_features: int | None = None,
+        stochastic: bool = False, temperature: float = 1.0,
+    ):
         feature_names = getattr(sr_model, 'feature_names_in_', None)
         expected = 0 if feature_names is None else len(feature_names)
         if n_features is not None and expected and n_features != expected:
@@ -39,7 +42,10 @@ class SRJaxAgent(BaseAgent):
 
         self.init = jax.jit(partial(self.init, parameters=parameters))
         self.update = jax.jit(self.update)
-        self.sample = jax.jit(partial(self.sample, callable_fn=callable_fn, simplex=simplex))
+        self.sample = jax.jit(partial(
+            self.sample, callable_fn=callable_fn, simplex=simplex,
+            stochastic=stochastic, temperature=temperature,
+        ))
 
     @staticmethod
     def init(key: PRNGKey, parameters: Any) -> SRJaxState:
@@ -63,6 +69,8 @@ class SRJaxAgent(BaseAgent):
         env_state: Array,
         callable_fn,
         simplex: SimplexCode,
+        stochastic: bool,
+        temperature: float,
     ) -> Array:
         # env_state: [window_size, n_features] raw int obs
         env_state = select_features(env_state, SRJaxAgent.FEATURES)
@@ -70,4 +78,11 @@ class SRJaxAgent(BaseAgent):
         x = history_reshape(env_state[jnp.newaxis, jnp.newaxis]).astype(jnp.float32)
         yhat = callable_fn(x, state.parameters)                     # [T-1] or [1*(T-1)]
         codes = yhat.reshape(1, simplex.T - 1)                      # [1, T-1]
+
+        if stochastic:
+            # See Forester.sample: one shared deterministic policy puts every
+            # station in lockstep. Unlike the forest's votes these logits are
+            # uncalibrated inner products, so the temperature does real work here.
+            return jax.random.categorical(key, simplex.logits(codes)[0] / temperature)
+
         return simplex.decode(codes)[0]                             # scalar
