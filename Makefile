@@ -38,9 +38,10 @@ RUN_FLAGS ?=
 REPLAY_EPOCHS ?= 10
 REPLAY_STEPS  ?= 2000
 SR_EQ         ?= 2
-# Extra flags for both replays, e.g. --stochastic_policy to sample the distilled
-# action instead of taking its argmax.
-REPLAY_FLAGS  ?=
+# Extra flags for both replays. Sampling the distilled action is the default: one
+# shared deterministic policy puts every station in lockstep, and with argmax the
+# replays reach zero throughput however the models are labelled or fit.
+REPLAY_FLAGS  ?= --stochastic_policy
 
 # Summary page. The raster panel shows one epoch, so by default it lands on the
 # last one (the trained policy) and on the first steps of it.
@@ -110,9 +111,14 @@ out $(DATA_DIR) $(RUN_DIR):
 $(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
 	$(call run_ltc,$*,train,)
 
-# 2. Flatten the history into the distillation dataset.
-out/%.csv: $(DATA_DIR)/%.pkl.lz4 | out
-	python -m ltc.symbolic.history2csv --file "$<" --output "$@"
+# 2. Flatten the history into the distillation dataset. The labels are the actions
+# the agent actually took: the argmax of its trained Q-network disagrees with them
+# on 72% of the steps, and distilling that argmax yields a policy that collides
+# permanently.
+CSV_LABELS ?= actions
+
+out/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | out
+	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --labels $(CSV_LABELS)
 
 # 3. The half/half agent split, written once so both distillations train on the
 # same agents and hold out the same ones.
