@@ -25,12 +25,17 @@ def split_agents(agents: list[int]) -> tuple[list[int], list[int]]:
 def fit_forest_split(
     df_train: pd.DataFrame, n_estimators: int = 1500
 ) -> RandomForestClassifier:
-    """Random forest on the same feature set as SR (agent id excluded)."""
+    """Random forest on the same feature set as SR (agent id excluded).
+
+    Class-balanced like fit_sr: 'balanced' reweights each sample by
+    len(y) / (n_classes * count), the same formula, so neither model can win by
+    always predicting the dominant action.
+    """
     feat_cols = [c for c in df_train.columns if c not in {"agent", "action"}]
     X = df_train[feat_cols]
     y = df_train["action"]
     forest = RandomForestClassifier(
-        n_estimators=n_estimators, oob_score=True, n_jobs=-1
+        n_estimators=n_estimators, oob_score=True, n_jobs=-1, class_weight="balanced"
     )
     forest.fit(X, y)
     return forest
