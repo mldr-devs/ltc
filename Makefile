@@ -24,6 +24,8 @@ FOREST_MODELS := $(addprefix out/, $(addsuffix .split_forest.pkl, $(EXPS)))
 SR_MODELS     := $(addprefix out/, $(addsuffix .split_sr.pkl, $(EXPS)))
 FOREST_RUNS   := $(addprefix out/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
 SR_RUNS       := $(addprefix out/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
+# Trained teacher vs both distillates, overlaid on shared axes.
+COMPARES      := $(addprefix out/compare_, $(addsuffix /summary.csv, $(EXPS)))
 
 # One A4 summary page per ltc.run rollout: the training run and both replays.
 PAGES         := $(addprefix out/, $(foreach s,train forestrun srrun, $(addsuffix .$(s).page.pdf, $(EXPS))))
@@ -80,10 +82,10 @@ define render_page
 		--smooth $(PAGE_SMOOTH) $(PAGE_FLAGS)
 endef
 
-.PHONY: all train csv split forest sr distill forest-run sr-run pages report-split clean
+.PHONY: all train csv split forest sr distill forest-run sr-run pages compare report-split clean
 .PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 
-all: forest-run sr-run pages
+all: forest-run sr-run pages compare
 
 train: $(HISTORIES)
 
@@ -102,6 +104,8 @@ forest-run: $(FOREST_RUNS)
 sr-run: $(SR_RUNS)
 
 pages: $(PAGES)
+
+compare: $(COMPARES)
 
 report-split: out/report_split.html
 
@@ -158,6 +162,14 @@ out/%.forestrun.page.pdf: out/%.forestrun.pkl.lz4 ltc/utils/history_page.py | ou
 
 out/%.srrun.page.pdf: out/%.srrun.pkl.lz4 ltc/utils/history_page.py | out
 	$(render_page)
+
+# 6. Overlay the trained teacher against both distillates: aggregate throughput
+# and Jain's fairness over time, plus the steady-state values side by side.
+out/compare_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 out/%.forestrun.pkl.lz4 out/%.srrun.pkl.lz4 plots_compare_distilled.py | out
+	python plots_compare_distilled.py \
+		--trained "$(DATA_DIR)/$*.pkl.lz4" \
+		--forester "out/$*.forestrun.pkl.lz4" --sr "out/$*.srrun.pkl.lz4" \
+		--output_dir "out/compare_$*"
 
 out/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
