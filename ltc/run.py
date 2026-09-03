@@ -219,7 +219,7 @@ def rl_step(
 
 
 def setup_args():
-    parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
+    parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.",fromfile_prefix_chars='@')
     parser.add_argument('--n', type=int, default=10, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, help='Number of stations running the learning agent. Defaults to all of them.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
@@ -246,7 +246,9 @@ def setup_args():
     parser.add_argument('--idle_sense_update_interval', type=int, default=50, help='Transmissions Idle Sense averages before adjusting CW (the paper\'s maxtrans).')
     parser.add_argument('--sr_pkl', type=str, help='Path to the fitted symbolic regression model (required by --agent_type sr-jax).')
     parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.sr_split or ltc.symbolic.tree (required by --agent_type forester).')
-    parser.add_argument('--sr_eq', type=int, default=2, help='Equation index to use from the PySR Pareto front.')
+    parser.add_argument('--stochastic_policy', action='store_true', default=False, help='Sample the action from the distilled policy instead of taking its argmax (--agent_type sr-jax and forester). One shared deterministic policy puts every station in lockstep.')
+    parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy. Below 1.0 sharpens towards the argmax, above 1.0 flattens towards uniform.')
+    parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the one PySR itself reports as best under its model_selection criterion.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
@@ -389,14 +391,18 @@ if __name__ == '__main__':
             sr_model = pickle.load(f)
         drl = SRJaxAgent(
             sr_model, equation_index=args.sr_eq, n_actions=num_actions,
-            n_features=window_size * len(Features)
+            n_features=window_size * len(Features),
+            stochastic=args.stochastic_policy, temperature=args.policy_temperature,
         )
     elif agent_type == 'forester':
         if args.forest_pkl is None:
             raise ValueError('--forest_pkl is required when --agent_type is forester.')
         import joblib  # ships with scikit-learn, part of the optional symbolic extra
         forest = joblib.load(args.forest_pkl)
-        drl = Forester(forest, n_actions=num_actions)
+        drl = Forester(
+            forest, n_actions=num_actions,
+            stochastic=args.stochastic_policy, temperature=args.policy_temperature,
+        )
 
     elif agent_type == 'aloha-qtf':
         drl = ALOHAQTF()

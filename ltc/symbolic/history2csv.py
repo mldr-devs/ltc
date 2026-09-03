@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ltc.agents import QNetwork
+from ltc.sim.process_output import normalize_obs
 from ltc.symbolic.util import history_reshape
 from ltc.utils.history import resolve_history_file, unpack_history
 
@@ -55,6 +56,14 @@ if __name__ == "__main__":
         "--seed", type=int, default=42, help="Seed used for filename matching"
     )
     parser.add_argument("--output", type=str, default=None, help="Output .csv path")
+    parser.add_argument(
+        "--labels",
+        type=str,
+        default="qvals",
+        choices=["qvals", "actions"],
+        help="Label source: the argmax of the trained Q-network, or the actions the agent "
+        "actually took as recorded in the history.",
+    )
 
     args = parser.parse_args()
 
@@ -72,17 +81,36 @@ if __name__ == "__main__":
 
     # Last epoch: shape [n_steps, n_agents, window_size, n_features]
     observations = history.observations[-1, ...]
+
+    # A recorded observation is the state *after* its step: its newest window slot
+    # already holds the action taken at that step. The action it leads to is the
+    # next one, so pair observation t with action t+1 -- labelling it with action t
+    # instead leaks the answer into the features and distills "repeat last action".
+    recorded = history.actions[-1, ...][1:]  # [n_steps - 1, n_agents]
+    observations = observations[:-1]
     n_steps, _, window_size, _ = observations.shape
 
     key = jax.random.key(42)
+    # The history records the raw observation, but the Q-network acted on the
+    # normalized one (ltc.run feeds agents normalize_obs(obs), which rescales the
+    # retransmission counter and the idle counter). Feeding it raw counts puts the
+    # input an order of magnitude out of range: its greedy action then claims TX in
+    # 73% of the steps where the agent actually transmitted in 8.5%. Normalized, the
+    # two agree on 99.7%.
     qvals = compute_qvals(
-        params, state, observations, key
+        params, state, normalize_obs(observations), key
     )  # [n_agents, n_steps, n_actions]
 
+    # The features stay raw: ltc.run hands the distilled agents the raw observation
+    # (use_raw_obs covers sr-jax and forester), so this is what they see at replay.
     # Build flat feature matrix: [n_agents * n_steps, window_size * n_features]
     # transpose [n_steps, n_agents, w, f] -> [n_agents, n_steps, w, f] then flatten last two dims
     XX = history_reshape(observations)
-    actions = np.asarray(qvals.argmax(axis=-1)).flatten()  # [n_agents * n_steps]
+    if args.labels == "actions":
+        # Agent-major, matching history_reshape's row order.
+        actions = np.asarray(recorded).T.flatten()
+    else:
+        actions = np.asarray(qvals.argmax(axis=-1)).flatten()  # [n_agents * n_steps]
     agent_ids = np.repeat(np.arange(n_agents), n_steps)
 
     df = pd.DataFrame(XX, columns=build_column_names(window_size))
