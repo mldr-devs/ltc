@@ -82,7 +82,7 @@ define render_page
 		--smooth $(PAGE_SMOOTH) $(PAGE_FLAGS)
 endef
 
-.PHONY: all train csv split forest sr distill forest-run sr-run pages compare report-split clean
+.PHONY: all train csv split forest sr distill forest-run sr-run pages compare report-split clean cleanforestrun cleansrrun
 .PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 
 all: forest-run sr-run pages compare
@@ -176,3 +176,9 @@ out/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 
 clean:
 	rm -rf out
+
+cleansrrun:
+	rm -rf out/*srun*
+
+cleansforestrun:
+	rm -rf out/*forestrun*
