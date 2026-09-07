@@ -94,6 +94,7 @@ class SRJaxAgent(BaseAgent):
             # See Forester.sample: one shared deterministic policy puts every
             # station in lockstep. Unlike the forest's votes these logits are
             # uncalibrated inner products, so the temperature does real work here.
-            return jax.random.categorical(key, simplex.logits(codes)[0] / temperature)
+            logits = jax.nn.log_softmax(simplex.probs(codes)[0])
+            return jax.random.categorical(key, logits)
 
         return simplex.decode(codes)[0]                             # scalar

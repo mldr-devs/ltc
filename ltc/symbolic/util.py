@@ -56,21 +56,26 @@ class SimplexCode:
         return jnp.take(self.codes, labels, axis=1).T
 
     @jax.jit
-    def logits(self, codes: jax.Array) -> jax.Array:
+    def probs(self, codes: jax.Array) -> jax.Array:
         """
-        Per-class scores of simplex codes (shape (N, T-1)) -> shape (N, T).
+        Per-class conditional probabilities of simplex codes (shape (N, T-1)) -> shape (N, T).
 
-        These are the inner products ``decode`` takes the argmax of, so they rank
-        the classes the same way while also supporting a stochastic choice.
+        Supporting a stochastic choice.
         """
-        return codes @ self.codes
+        fT =  jnp.asarray(self.T, dtype=codes.dtype)
+        one = jnp.ones_like(fT)
+        rho = (fT-one)/fT * codes @ self.codes + one/fT
+
+        rho = jnp.clip(rho, a_min=0.0, a_max=1.0)
+        rho = rho / jnp.sum(rho, axis=1, keepdims=True)
+        return rho
 
     @jax.jit
     def decode(self, codes: jax.Array) -> jax.Array:
         """
         Decode simplex codes (shape (N, T-1)) to integer labels (shape (N,)).
         """
-        return jnp.argmax(self.logits(codes), axis=1)
+        return jnp.argmax(codes @ self.codes, axis=1)
 
 
 @jax.jit
