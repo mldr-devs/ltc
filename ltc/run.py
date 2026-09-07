@@ -32,6 +32,22 @@ from ltc.utils.plots import plot_all, plot_first
 
 
 
+def _sr_scale(args):
+    """--sr_scale, else the scale ltc.symbolic.sr_split fitted next to the model, else 1."""
+    if args.sr_scale is not None:
+        return args.sr_scale
+
+    sidecar = f"{args.sr_pkl.removesuffix('.pkl')}.scale.json"
+
+    if not os.path.exists(sidecar):
+        return 1.0
+
+    import json
+
+    with open(sidecar) as f:
+        return float(json.load(f)['scale'])
+
+
 def init_agents(agent, key, n, node_ids=None, force_idle_on_empty_buffer=False):
     keys = jax.random.split(key, n)
     states = jax.vmap(agent.init)(keys) if node_ids is None else jax.vmap(agent.init)(keys, node_ids[:n])
@@ -248,6 +264,7 @@ def setup_args():
     parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.sr_split or ltc.symbolic.tree (required by --agent_type forester).')
     parser.add_argument('--stochastic_policy', action='store_true', default=False, help='Sample the action from the distilled policy instead of taking its argmax (--agent_type sr-jax and forester). One shared deterministic policy puts every station in lockstep.')
     parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy. Below 1.0 sharpens towards the argmax, above 1.0 flattens towards uniform.')
+    parser.add_argument('--sr_scale', type=float, help='Scale of the simplex probability decoder used by --stochastic_policy. Defaults to the value fitted by ltc.symbolic.sr_split into <sr_pkl without .pkl>.scale.json, or 1.0 when there is none. Affects sampling only, never the argmax.')
     parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the one PySR itself reports as best under its model_selection criterion.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
@@ -393,6 +410,7 @@ if __name__ == '__main__':
             sr_model, equation_index=args.sr_eq, n_actions=num_actions,
             n_features=window_size * len(Features),
             stochastic=args.stochastic_policy, temperature=args.policy_temperature,
+            scale=_sr_scale(args),
         )
     elif agent_type == 'forester':
         if args.forest_pkl is None:

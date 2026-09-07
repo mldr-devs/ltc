@@ -21,7 +21,7 @@ class SRJaxAgent(BaseAgent):
 
     def __init__(
         self, sr_model, equation_index: int | None = None, n_actions: int = 2, n_features: int | None = None,
-        stochastic: bool = False, temperature: float = 1.0,
+        stochastic: bool = False, temperature: float = 1.0, scale: float = 1.0,
     ):
         feature_names = getattr(sr_model, 'feature_names_in_', None)
         expected = 0 if feature_names is None else len(feature_names)
@@ -49,7 +49,11 @@ class SRJaxAgent(BaseAgent):
         jaxeq = sr_model.jax(equation_index)
         callable_fn = jax.jit(jaxeq["callable"])
         parameters = jaxeq["parameters"]
-        simplex = SimplexCode(T=n_actions)
+        # scale is the ScaleCalibrator constant fitted after the distillation; it
+        # only sharpens the sampling distribution, never the argmax.
+        simplex = SimplexCode(T=n_actions, scale=scale)
+        if stochastic and scale != 1.0:
+            print(f'SR probability decoder calibrated with scale a={scale:.4g}')
 
         self.init = jax.jit(partial(self.init, parameters=parameters))
         self.update = jax.jit(self.update)
@@ -92,9 +96,11 @@ class SRJaxAgent(BaseAgent):
 
         if stochastic:
             # See Forester.sample: one shared deterministic policy puts every
-            # station in lockstep. Unlike the forest's votes these logits are
-            # uncalibrated inner products, so the temperature does real work here.
-            logits = jax.nn.log_softmax(simplex.probs(codes)[0])
+            # station in lockstep. simplex.probs already returns probabilities, so
+            # they go into categorical as logs -- a softmax on top of them would
+            # squash every gap to a factor of at most e and flatten the policy
+            # (0.988 -> 0.739 for CS on the nonsaturated run).
+            logits = jnp.log(jnp.clip(simplex.probs(codes)[0], 1e-12)) / temperature
             return jax.random.categorical(key, logits)
 
         return simplex.decode(codes)[0]                             # scalar

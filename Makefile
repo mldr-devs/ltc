@@ -7,6 +7,7 @@
 #          -> out/<exp>.split_forest.pkl    distilled random forest
 #               -> out/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
 #          -> out/<exp>.split_sr.pkl        distilled symbolic model
+#             (+ out/<exp>.split_sr.scale.json, the decoder scale ltc.run reads back)
 #               -> out/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
 #
 # Adding an experiment means adding a cfg/<name>.txt; nothing here needs editing.
