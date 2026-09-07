@@ -48,6 +48,30 @@ def _sr_scale(args):
         return float(json.load(f)['scale'])
 
 
+def _sr_eq(args):
+    """--sr_eq, else the index ltc.symbolic.sr_select replayed its way to, else None.
+
+    None hands the choice back to PySR's own model_selection. That is what
+    sr_select itself runs with an explicit --sr_eq to avoid, so the sidecar it is
+    about to write can never feed back into the replays that produce it.
+    """
+    if args.sr_eq is not None:
+        return args.sr_eq
+
+    sidecar = f"{args.sr_pkl.removesuffix('.pkl')}.eq.json"
+
+    if not os.path.exists(sidecar):
+        return None
+
+    import json
+
+    with open(sidecar) as f:
+        index = int(json.load(f)['index'])
+
+    print(f'SR equation {index} selected by ltc.symbolic.sr_select ({sidecar})')
+    return index
+
+
 def init_agents(agent, key, n, node_ids=None, force_idle_on_empty_buffer=False):
     keys = jax.random.split(key, n)
     states = jax.vmap(agent.init)(keys) if node_ids is None else jax.vmap(agent.init)(keys, node_ids[:n])
@@ -265,7 +289,7 @@ def setup_args():
     parser.add_argument('--stochastic_policy', action='store_true', default=False, help='Sample the action from the distilled policy instead of taking its argmax (--agent_type sr-jax and forester). One shared deterministic policy puts every station in lockstep.')
     parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy. Below 1.0 sharpens towards the argmax, above 1.0 flattens towards uniform.')
     parser.add_argument('--sr_scale', type=float, help='Scale of the simplex probability decoder used by --stochastic_policy. Defaults to the value fitted by ltc.symbolic.sr_split into <sr_pkl without .pkl>.scale.json, or 1.0 when there is none. Affects sampling only, never the argmax.')
-    parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the one PySR itself reports as best under its model_selection criterion.')
+    parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the index ltc.symbolic.sr_select recorded in <sr_pkl without .pkl>.eq.json, and to the one PySR itself reports as best when there is no such file. PySR ranks the front by fit, which does not predict whether the decoded expression is a working policy.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
@@ -407,7 +431,7 @@ if __name__ == '__main__':
         with open(args.sr_pkl, 'rb') as f:
             sr_model = pickle.load(f)
         drl = SRJaxAgent(
-            sr_model, equation_index=args.sr_eq, n_actions=num_actions,
+            sr_model, equation_index=_sr_eq(args), n_actions=num_actions,
             n_features=window_size * len(Features),
             stochastic=args.stochastic_policy, temperature=args.policy_temperature,
             scale=_sr_scale(args),

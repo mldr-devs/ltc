@@ -8,6 +8,7 @@
 #               -> out/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
 #          -> out/<exp>.split_sr.pkl        distilled symbolic model
 #             (+ out/<exp>.split_sr.scale.json, the decoder scale ltc.run reads back)
+#            -> out/<exp>.split_sr.eq.json    the Pareto-front equation that replays best
 #               -> out/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
 #
 # Adding an experiment means adding a cfg/<name>.txt; nothing here needs editing.
@@ -23,6 +24,7 @@ CSV_FILES     := $(addprefix out/, $(addsuffix .csv, $(EXPS)))
 SPLIT_FILES   := $(addprefix out/, $(addsuffix .split.json, $(EXPS)))
 FOREST_MODELS := $(addprefix out/, $(addsuffix .split_forest.pkl, $(EXPS)))
 SR_MODELS     := $(addprefix out/, $(addsuffix .split_sr.pkl, $(EXPS)))
+SR_PICKS      := $(addprefix out/, $(addsuffix .split_sr.eq.json, $(EXPS)))
 FOREST_RUNS   := $(addprefix out/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
 SR_RUNS       := $(addprefix out/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
 # Trained teacher vs both distillates, overlaid on shared axes.
@@ -40,12 +42,21 @@ RUN_FLAGS ?=
 # epoch, so a single epoch would render as blank axes.
 REPLAY_EPOCHS ?= 10
 REPLAY_STEPS  ?= 2000
-# Empty lets PySR choose off its own Pareto front; set an index to pin one.
+# Empty lets ltc.symbolic.sr_select choose, by replaying the whole front; set an
+# index to pin one and skip that. PySR's own ranking is not an option worth
+# offering here -- it ranks by fit, and on the bursty run its pick is the one
+# equation on the front that deadlocks the network.
 SR_EQ         ?=
 # Extra flags for both replays. Sampling the distilled action is the default: one
 # shared deterministic policy puts every station in lockstep, and with argmax the
 # replays reach zero throughput however the models are labelled or fit.
-REPLAY_FLAGS  ?= --stochastic_policy
+#
+# --sr_scale 1 disables the calibration: ltc.symbolic.sr_split still fits the scale
+# and writes the sidecar, but the replay ignores it. The calibrator maximizes the
+# likelihood of hard labels, so it sharpens an already-saturated decoder rather than
+# softening it -- on the nonsaturated run it returned a=4.12 with every row clipped
+# onto a vertex. Drop the flag to let ltc.run read the sidecar back.
+REPLAY_FLAGS  ?= --stochastic_policy --sr_scale 1
 
 # Summary page. The raster panel shows one epoch, so by default it lands on the
 # last one (the trained policy) and on the first steps of it.
@@ -59,6 +70,11 @@ PAGE_FLAGS      ?=
 SR_ITERATIONS    ?= 100
 SR_POPULATIONS   ?= 10
 FOREST_ESTIMATORS ?= 1500
+# Set to --balanced to class-balance the symbolic fit. Empty by default: the squared
+# loss on simplex-coded labels has E[y|x] = 2p(x)-1 as its minimizer, which is exactly
+# what the decoder turns back into a sampling probability, and balancing replaces it
+# with the decision boundary. See ltc.symbolic.sr.fit_sr.
+SR_BALANCED      ?=
 
 # The flags of one experiment, expanded by the shell at recipe time.
 # The '\#' is escaped because make would otherwise read it as a comment.
@@ -83,8 +99,8 @@ define render_page
 		--smooth $(PAGE_SMOOTH) $(PAGE_FLAGS)
 endef
 
-.PHONY: all train csv split forest sr distill forest-run sr-run pages compare report-split clean cleanforestrun cleansrrun
-.PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
+.PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare report-split clean cleanforestrun cleansrrun
+.PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS) $(SR_PICKS)
 
 all: forest-run sr-run pages compare
 
@@ -97,6 +113,8 @@ split: $(SPLIT_FILES)
 forest: $(FOREST_MODELS)
 
 sr: $(SR_MODELS)
+
+sr-select: $(SR_PICKS)
 
 distill: forest sr
 
@@ -122,9 +140,14 @@ $(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
 # on 72% of the steps, and distilling that argmax yields a policy that collides
 # permanently.
 CSV_LABELS ?= actions
+# How many trailing epochs the dataset pools. The last epoch alone is the converged
+# policy but barely visits the congested states -- 207 buffer-full steps on the bursty
+# run, 26 of them after a collision -- which is too few to fit the teacher's backoff.
+CSV_EPOCHS ?= 10
 
 out/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | out
-	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --labels $(CSV_LABELS)
+	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --labels $(CSV_LABELS) \
+		--epochs $(CSV_EPOCHS)
 
 # 3. The half/half agent split, written once so both distillations train on the
 # same agents and hold out the same ones.
@@ -140,7 +163,7 @@ out/%.split_forest.pkl: out/%.csv out/%.split.json ltc/symbolic/forest_split.py
 out/%.split_sr.pkl: out/%.csv out/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
 	python -m ltc.symbolic.sr_split --file "out/$*.csv" --split "out/$*.split.json" \
 		--output "out/$*" --pysr_output_dir out/output_split \
-		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS)
+		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) $(SR_BALANCED)
 
 # 4a. Replay the distilled forest as the station policy, under the experiment's own
 # traffic and topology flags.
@@ -148,8 +171,23 @@ out/%.forestrun.pkl.lz4: out/%.split_forest.pkl | $(RUN_DIR)
 	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(CURDIR)/out/$*.split_forest.pkl \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 
-# 4b. Same for the distilled symbolic expression.
-out/%.srrun.pkl.lz4: out/%.split_sr.pkl | $(RUN_DIR)
+# 3c. Pick the equation off the front by replaying all of them. PySR ranks the
+# front by fit, which says nothing about whether the decoded expression is a
+# working policy: see the table in ltc.symbolic.sr_select. Skipped when SR_EQ pins
+# an index, since then there is nothing to choose.
+out/%.split_sr.eq.json: out/%.split_sr.pkl cfg/%.txt ltc/symbolic/sr_select.py
+ifeq ($(strip $(SR_EQ)),)
+	python -m ltc.symbolic.sr_select --sr_pkl "out/$*.split_sr.pkl" --cfg "cfg/$*.txt" \
+		--output "$@" --n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) \
+		--replay_flags "$(REPLAY_FLAGS)"
+else
+	@echo "SR_EQ=$(SR_EQ) pins the equation; skipping the front replay."
+	@printf '{"index": %s, "pinned": true}\n' "$(SR_EQ)" > "$@"
+endif
+
+# 4b. Same for the distilled symbolic expression. ltc.run reads the selected index
+# out of the .eq.json sidecar unless SR_EQ overrides it.
+out/%.srrun.pkl.lz4: out/%.split_sr.pkl out/%.split_sr.eq.json | $(RUN_DIR)
 	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 

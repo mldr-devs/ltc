@@ -48,6 +48,13 @@ if __name__ == "__main__":
         default=None,
         help="Directory for PySR equation files (default: system temp)",
     )
+    parser.add_argument(
+        "--balanced",
+        action="store_true",
+        default=False,
+        help="Class-balance the sample weights. Off by default; see ltc.symbolic.sr.fit_sr "
+        "for why the unweighted fit is what the simplex decoder needs.",
+    )
     args = parser.parse_args()
 
     df = pd.read_csv(args.file)
@@ -61,6 +68,7 @@ if __name__ == "__main__":
         n_iterations=args.n_iterations,
         n_populations=args.n_populations,
         output_directory=args.pysr_output_dir,
+        balanced=args.balanced,
     )
 
     sr_path = f"{out_prefix}.split_sr.pkl"
