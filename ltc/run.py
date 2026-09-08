@@ -1,6 +1,16 @@
 import os
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
-os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+# setdefault, not assignment: a plain assignment here silently overrode whatever
+# the caller had exported, so no amount of tuning from the outside could reach
+# JAX. Preallocation off is the right default on a shared workstation, but it is
+# also what fragments the BFC pool on a busy GPU -- a large contiguous allocation
+# then fails with free memory still on the card. Export
+# XLA_PYTHON_CLIENT_PREALLOCATE=true (optionally with
+# XLA_PYTHON_CLIENT_MEM_FRACTION) to get the single up-front arena back.
+os.environ.setdefault('XLA_PYTHON_CLIENT_PREALLOCATE', 'false')
+# Appended rather than assigned, so exported XLA_FLAGS survive.
+os.environ['XLA_FLAGS'] = (
+    os.environ.get('XLA_FLAGS', '') + ' --xla_gpu_enable_triton_gemm=false'
+).strip()
 
 import argparse
 import pickle
@@ -291,6 +301,7 @@ def setup_args():
     parser.add_argument('--sr_scale', type=float, help='Scale of the simplex probability decoder used by --stochastic_policy. Defaults to the value fitted by ltc.symbolic.sr_split into <sr_pkl without .pkl>.scale.json, or 1.0 when there is none. Affects sampling only, never the argmax.')
     parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the index ltc.symbolic.sr_select recorded in <sr_pkl without .pkl>.eq.json, and to the one PySR itself reports as best when there is no such file. PySR ranks the front by fit, which does not predict whether the decoded expression is a working policy.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
+    parser.add_argument('--replay_buffer_size', type=int, default=30000, help='Experience replay buffer of --agent_type ddqn, per agent. The buffer is allocated whole at init and vmapped over the stations, which makes it the largest single allocation of a training run: two [n, size, window_size, n_features] float32 arrays, 141 MiB at n=10 and 706 MiB at n=50 with the default. Lower it when the GPU runs out of memory at init -- it changes what the agent learns, so try the allocator first (export XLA_PYTHON_CLIENT_PREALLOCATE=true).')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
     parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
     parser.add_argument('--noise_dims', type=int, default=0, help='Gaussian noise dimensions appended to the observation.')
@@ -404,7 +415,7 @@ if __name__ == '__main__':
             obs_space_shape=obs_space_shape,
             act_space_size=num_actions,
             optimizer=optimizer,
-            experience_replay_buffer_size=30000,
+            experience_replay_buffer_size=args.replay_buffer_size,
             experience_replay_batch_size=128,
             experience_replay_steps=5,
             discount=0.95,

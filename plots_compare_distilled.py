@@ -17,8 +17,18 @@ station counts.
 """
 
 import os
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
-os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
+# setdefault, not assignment: a plain assignment here silently overrode whatever
+# the caller had exported, so no amount of tuning from the outside could reach
+# JAX. Preallocation off is the right default on a shared workstation, but it is
+# also what fragments the BFC pool on a busy GPU -- a large contiguous allocation
+# then fails with free memory still on the card. Export
+# XLA_PYTHON_CLIENT_PREALLOCATE=true (optionally with
+# XLA_PYTHON_CLIENT_MEM_FRACTION) to get the single up-front arena back.
+os.environ.setdefault('XLA_PYTHON_CLIENT_PREALLOCATE', 'false')
+# Appended rather than assigned, so exported XLA_FLAGS survive.
+os.environ['XLA_FLAGS'] = (
+    os.environ.get('XLA_FLAGS', '') + ' --xla_gpu_enable_triton_gemm=false'
+).strip()
 
 import sys
 import types
