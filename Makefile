@@ -229,7 +229,7 @@ clean:
 	rm -rf $(OUT)
 
 cleansrrun:
-	rm -rf $(OUT)/*srun*
+	rm -rf $(OUT)/*srrun*
 
-cleansforestrun:
+cleanforestrun:
 	rm -rf $(OUT)/*forestrun*
