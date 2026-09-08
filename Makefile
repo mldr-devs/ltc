@@ -43,7 +43,7 @@ RUN_FLAGS ?=
 # Replay of the distilled policies. Epoch/step counts are overridden rather than
 # taken from the cfg: no learning happens, and the `all_*` plots draw one point per
 # epoch, so a single epoch would render as blank axes.
-REPLAY_EPOCHS ?= 10
+REPLAY_EPOCHS ?= 3
 REPLAY_STEPS  ?= 2000
 # Empty lets ltc.symbolic.sr_select choose, by replaying the whole front; set an
 # index to pin one and skip that. PySR's own ranking is not an option worth
@@ -72,7 +72,7 @@ PAGE_FLAGS      ?=
 # Distillation size knobs, forwarded to ltc.symbolic.sr_split.
 SR_ITERATIONS    ?= 100
 SR_POPULATIONS   ?= 10
-FOREST_ESTIMATORS ?= 1500
+FOREST_ESTIMATORS ?= 50
 # Set to --balanced to class-balance the symbolic fit. Empty by default: the squared
 # loss on simplex-coded labels has E[y|x] = 2p(x)-1 as its minimizer, which is exactly
 # what the decoder turns back into a sampling probability, and balancing replaces it
