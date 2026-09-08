@@ -40,18 +40,19 @@ PAGES         := $(addprefix $(OUT)/, $(foreach s,train forestrun srrun, $(addsu
 # every ltc.run invocation, training and replay alike.
 RUN_FLAGS ?=
 
-# Replay of the distilled policies. Epoch/step counts are overridden rather than
-# taken from the cfg: no learning happens, and the `all_*` plots draw one point per
-# epoch, so a single epoch would render as blank axes.
-REPLAY_EPOCHS ?= 3
+# Replay of the distilled policies. Nothing is learned, so a replay is one rollout
+# and one epoch; the summary page bins that rollout into step windows rather than
+# drawing a point per epoch, so there is nothing left for extra epochs to add.
+# Lengthen REPLAY_STEPS, not REPLAY_EPOCHS, when a replay needs to run longer.
+REPLAY_EPOCHS ?= 1
 REPLAY_STEPS  ?= 2000
 # Length of each candidate replay inside ltc.symbolic.sr_select, kept apart from
 # REPLAY_EPOCHS because the two answer different questions. The final replay only
-# has to render a readable plot, so it can be short; the selection has to *rank*
-# equations, and its metric averages the last 10% of the run. At REPLAY_EPOCHS=3
-# that is 600 steps, about 40 successful transmissions on the bursty run -- enough
-# to tell a deadlocked policy from a working one, nowhere near enough to order the
-# working ones, and it is that order which decides the equation that gets reported.
+# has to render a readable page; the selection has to *rank* equations, and its
+# metric averages the last 10% of the run. At one epoch of 2000 steps that is 200
+# steps, a dozen or so successful transmissions on the bursty run -- enough to tell
+# a deadlocked policy from a working one, nowhere near enough to order the working
+# ones, and it is that order which decides the equation that gets reported.
 SELECT_EPOCHS ?= 10
 SELECT_STEPS  ?= $(REPLAY_STEPS)
 # Empty lets ltc.symbolic.sr_select choose, by replaying the whole front; set an
@@ -70,11 +71,15 @@ SR_EQ         ?=
 # onto a vertex. Drop the flag to let ltc.run read the sidecar back.
 REPLAY_FLAGS  ?= --stochastic_policy --sr_scale 1
 
-# Summary page. The raster panel shows one epoch, so by default it lands on the
-# last one (the trained policy) and on the first steps of it.
+# Summary page. The whole page is one rollout: a replay has only the one, and a
+# training run defaults to its last epoch, i.e. the converged policy. The raster
+# zooms into a stretch of that same rollout, shaded on every curve.
 PAGE_EPOCH      ?= -1
 PAGE_ZOOM_STEPS ?= 200
 PAGE_ZOOM_START ?= 0
+# Steps summarised by one point of every curve. Empty lets the page pick
+# n_steps // 100.
+PAGE_WINDOW     ?=
 PAGE_SMOOTH     ?= 1
 PAGE_FLAGS      ?=
 
@@ -108,7 +113,7 @@ endef
 define render_page
 	python -m ltc.utils.history_page --file "$<" --output "$@" \
 		--epoch $(PAGE_EPOCH) --zoom_steps $(PAGE_ZOOM_STEPS) --zoom_start $(PAGE_ZOOM_START) \
-		--smooth $(PAGE_SMOOTH) $(PAGE_FLAGS)
+		--smooth $(PAGE_SMOOTH) $(if $(PAGE_WINDOW),--window $(PAGE_WINDOW),) $(PAGE_FLAGS)
 endef
 
 .PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare report-split clean cleanforestrun cleansrrun
