@@ -37,13 +37,14 @@ import shutil
 import importlib.abc
 import importlib.machinery
 from argparse import ArgumentParser
-from enum import IntEnum
 
 import cloudpickle
 import lz4.frame
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
+
+from ltc.utils.metrics import per_agent_success, steady_state_metrics
 
 # --- Mocks and Patches ---------------------------------------------------------
 # The histories pickle references classes from the training package. We stub the
@@ -137,12 +138,6 @@ sys.meta_path.append(_MockFinder())
 
 # --- Constants -----------------------------------------------------------------
 
-class Actions(IntEnum):
-    TX = 0
-    CS = 1
-    IDLE = 2
-
-
 TRAINED_LABEL = 'Trained (KISS)'
 FOREST_LABEL = 'Distilled (Forest)'
 SR_LABEL = 'Distilled (SR)'
@@ -202,45 +197,11 @@ def load_data(file_path):
         return data
 
 
-def _flatten(history):
-    """Return (actions, buffer_before, channel) flattened to (T, n_agents) / (T,)."""
-    actions = np.array(history.actions)
-    buffer = np.array(history.buffer_states)
-    channel = np.array(history.channel_state)
-
-    if actions.ndim == 3:
-        n_agents = actions.shape[2]
-        actions = actions.reshape(-1, n_agents)
-        buffer = buffer.reshape(-1, n_agents)
-        channel = channel.reshape(-1)
-    elif actions.ndim == 1:
-        actions = actions.reshape(-1, 1)
-        buffer = buffer.reshape(-1, 1)
-
-    buffer_before = np.zeros_like(buffer)
-    buffer_before[1:] = buffer[:-1]
-    return actions, buffer_before, channel
-
-
-def per_agent_success(history):
-    """Per-step, per-agent successful-transmission mask, shape (T, n_agents)."""
-    actions, buffer_before, channel = _flatten(history)
-    return (actions == Actions.TX.value) & (channel[:, None] == 1) & (buffer_before == 1)
-
-
-def steady_state_metrics(history, last_percent=0.1):
-    """Aggregate throughput and Jain's fairness over the final ``last_percent``."""
-    success = per_agent_success(history)
-    total_steps, n_agents = success.shape
-    start = int(total_steps * (1 - last_percent))
-
-    tail = success[start:]
-    agg_throughput = tail.sum(axis=1).mean()
-
-    agent_throughput = tail.mean(axis=0)
-    denom = n_agents * (agent_throughput ** 2).sum()
-    fairness = 0.0 if denom == 0 else (agent_throughput.sum() ** 2) / denom
-    return float(agg_throughput), float(fairness)
+# per_agent_success and steady_state_metrics come from ltc.utils.metrics, which is
+# where ltc.symbolic.sr_select reads them from too: the Pareto-front selection has
+# to rank equations by the same throughput this script reports, and two copies of
+# that definition would eventually disagree. The module is numpy-only and imports
+# nothing from ltc.sim, so it does not drag jax in past the mocks above.
 
 
 def throughput_series(history, window_agg):

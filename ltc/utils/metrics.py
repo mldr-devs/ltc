@@ -12,13 +12,20 @@ import numpy as np
 TX_ACTION = 0
 
 
-def flatten(history):
+def as_timeline(history):
     """Return ``(actions, buffer_before, channel)`` as ``(T, n_agents)`` / ``(T,)``.
 
     A history is recorded per epoch, so ``actions`` arrives as
     ``[n_epochs, n_steps, n_agents]``; the epochs are concatenated into one
     timeline. ``buffer_before`` is the buffer as it stood *going into* the step,
     which is what decides whether a transmission had anything to carry.
+
+    Not to be confused with ``ltc.symbolic.util.history_reshape``, which collapses
+    a different pair of axes for a different purpose: it turns the observation
+    tensor ``[n_steps, n_agents, window_size, n_features]`` into the agent-major
+    design matrix ``[n_agents * n_steps, window_size * n_features]`` that the
+    distillation fits on. This one drops the epoch axis of the recorded rollout
+    and derives a lagged buffer; there is no window or feature axis in sight.
     """
     actions = np.asarray(history.actions)
     buffer = np.asarray(history.buffer_states)
@@ -45,7 +52,7 @@ def per_agent_success(history, tx_action: int = TX_ACTION):
     (``channel_state == 1``, i.e. exactly one transmitter) and it actually had a
     frame buffered.
     """
-    actions, buffer_before, channel = flatten(history)
+    actions, buffer_before, channel = as_timeline(history)
     return (actions == tx_action) & (channel[:, None] == 1) & (buffer_before == 1)
 
 
