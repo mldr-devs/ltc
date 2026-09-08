@@ -10,6 +10,46 @@ reason.
 import numpy as np
 
 TX_ACTION = 0
+# ltc.sim.sim.channel_state_selector: exactly one transmitter in the slot.
+CHANNEL_SUCCESS = 1
+
+
+def buffer_before(buffer):
+    """The buffer as it stood *going into* each step, same shape as ``buffer``.
+
+    Accepts the recorded ``[n_epochs, n_steps, n_agents]`` layout or an already
+    flat ``[T, n_agents]`` timeline. The shift deliberately crosses epoch
+    boundaries: ltc.run threads one ``Carry`` through every epoch's ``lax.scan``
+    over a continuous ``global_steps``, so the epochs are consecutive chunks of a
+    single rollout, not independent episodes. Only the very first step of the run
+    has no predecessor.
+    """
+    flat = buffer.reshape(-1, buffer.shape[-1])
+    shifted = np.zeros_like(flat)
+    shifted[1:] = flat[:-1]
+    return shifted.reshape(buffer.shape)
+
+
+def success_mask(actions, buffer, channel, live=None, tx_action: int = TX_ACTION):
+    """Successful-transmission mask, preserving whatever shape it is given.
+
+    Three conditions, and the third is the one that is easy to forget: the station
+    transmitted, the channel came back clean, *and* it had a frame to send. The
+    simulator lets a station transmit on an empty buffer -- that is what
+    ``EMPTY_TX_PENALTY`` exists for -- and such a slot occupies the medium and
+    reads as ``CHANNEL_SUCCESS`` while carrying nothing. Counting it inflates
+    throughput by 30% on the bursty teacher, where buffers are usually empty; under
+    saturated traffic the two definitions agree to 0.04%.
+
+    ``live`` is the optional presence mask for runs where stations join or leave.
+    ``channel`` is per-slot, so it is broadcast over the station axis.
+    """
+    mask = (
+        (actions == tx_action)
+        & (channel[..., None] == CHANNEL_SUCCESS)
+        & (buffer_before(buffer) == 1)
+    )
+    return mask if live is None else mask & live
 
 
 def as_timeline(history):
@@ -27,6 +67,12 @@ def as_timeline(history):
     distillation fits on. This one drops the epoch axis of the recorded rollout
     and derives a lagged buffer; there is no window or feature axis in sight.
     """
+    actions, buffer, channel = _flat_arrays(history)
+    return actions, buffer_before(buffer), channel
+
+
+def _flat_arrays(history):
+    """``(actions, buffer, channel)`` collapsed to one timeline, buffer unshifted."""
     actions = np.asarray(history.actions)
     buffer = np.asarray(history.buffer_states)
     channel = np.asarray(history.channel_state)
@@ -40,20 +86,12 @@ def as_timeline(history):
         actions = actions.reshape(-1, 1)
         buffer = buffer.reshape(-1, 1)
 
-    buffer_before = np.zeros_like(buffer)
-    buffer_before[1:] = buffer[:-1]
-    return actions, buffer_before, channel
+    return actions, buffer, channel
 
 
 def per_agent_success(history, tx_action: int = TX_ACTION):
-    """Per-step, per-agent successful-transmission mask, shape ``(T, n_agents)``.
-
-    A step counts only when the station transmitted, the channel came back clean
-    (``channel_state == 1``, i.e. exactly one transmitter) and it actually had a
-    frame buffered.
-    """
-    actions, buffer_before, channel = as_timeline(history)
-    return (actions == tx_action) & (channel[:, None] == 1) & (buffer_before == 1)
+    """Per-step, per-agent successful-transmission mask, shape ``(T, n_agents)``."""
+    return success_mask(*_flat_arrays(history), tx_action=tx_action)
 
 
 def steady_state_metrics(history, last_percent: float = 0.1, tx_action: int = TX_ACTION):

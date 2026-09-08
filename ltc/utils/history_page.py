@@ -22,6 +22,7 @@ from matplotlib.patches import Patch
 
 from ltc.sim.constants import Actions, INITIAL_CAPACITY
 from ltc.utils.history import unpack_history
+from ltc.utils.metrics import success_mask
 
 A4 = (8.27, 11.69)
 
@@ -159,8 +160,11 @@ def build_page(path, output, epoch=-1, zoom_steps=200, zoom_start=0, smooth=1, n
     # Steps a station was actually present for, the denominator of every rate below.
     live_steps = np.maximum(live.sum(axis=1), 1)
 
-    tx = (actions == Actions.TX.value) & live
-    success = tx & (channel[..., None] == SUCCESS)
+    # Shared with plots_compare_distilled and ltc.symbolic.sr_select, so the page
+    # and the summary table cannot disagree about what a successful transmission
+    # is. In particular a transmission on an empty buffer does not count: it holds
+    # the medium and reads as SUCCESS while carrying no frame.
+    success = success_mask(actions, buffers, channel, live=live, tx_action=Actions.TX.value)
     throughput = smoothed(success.sum(axis=1) / live_steps, smooth)
 
     plt.rcParams.update(PAGE_PARAMS)
