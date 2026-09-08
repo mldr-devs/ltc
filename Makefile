@@ -1,37 +1,40 @@
 # Experiment pipeline, one chain per config file:
 #
 #   cfg/<exp>.txt            experiment definition (ltc.run flags)
-#     -> out/data/<exp>.pkl.lz4        training history
-#     -> out/<exp>.csv                 (observation, action) dataset
-#     -> out/<exp>.split.json           half/half agent split, shared by both paths
-#          -> out/<exp>.split_forest.pkl    distilled random forest
-#               -> out/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
-#          -> out/<exp>.split_sr.pkl        distilled symbolic model
-#             (+ out/<exp>.split_sr.scale.json, the decoder scale ltc.run reads back)
-#            -> out/<exp>.split_sr.eq.json    the Pareto-front equation that replays best
-#               -> out/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
+#     -> $(OUT)/data/<exp>.pkl.lz4        training history
+#     -> $(OUT)/<exp>.csv                 (observation, action) dataset
+#     -> $(OUT)/<exp>.split.json           half/half agent split, shared by both paths
+#          -> $(OUT)/<exp>.split_forest.pkl    distilled random forest
+#               -> $(OUT)/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
+#          -> $(OUT)/<exp>.split_sr.pkl        distilled symbolic model
+#             (+ $(OUT)/<exp>.split_sr.scale.json, the decoder scale ltc.run reads back)
+#            -> $(OUT)/<exp>.split_sr.eq.json    the Pareto-front equation that replays best
+#               -> $(OUT)/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
 #
 # Adding an experiment means adding a cfg/<name>.txt; nothing here needs editing.
 
-DATA_DIR  := out/data
-RUN_DIR   := out/runs
+# Root of every generated artifact. Override to keep a run's outputs apart, e.g.
+# `make all OUT=out/sweep-b`; nothing below writes outside it.
+OUT       ?= out
+DATA_DIR  := $(OUT)/data
+RUN_DIR   := $(OUT)/runs
 
 CONFIGS   := $(wildcard cfg/*.txt)
 EXPS      := $(notdir $(basename $(CONFIGS)))
 
 HISTORIES     := $(addprefix $(DATA_DIR)/, $(addsuffix .pkl.lz4, $(EXPS)))
-CSV_FILES     := $(addprefix out/, $(addsuffix .csv, $(EXPS)))
-SPLIT_FILES   := $(addprefix out/, $(addsuffix .split.json, $(EXPS)))
-FOREST_MODELS := $(addprefix out/, $(addsuffix .split_forest.pkl, $(EXPS)))
-SR_MODELS     := $(addprefix out/, $(addsuffix .split_sr.pkl, $(EXPS)))
-SR_PICKS      := $(addprefix out/, $(addsuffix .split_sr.eq.json, $(EXPS)))
-FOREST_RUNS   := $(addprefix out/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
-SR_RUNS       := $(addprefix out/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
+CSV_FILES     := $(addprefix $(OUT)/, $(addsuffix .csv, $(EXPS)))
+SPLIT_FILES   := $(addprefix $(OUT)/, $(addsuffix .split.json, $(EXPS)))
+FOREST_MODELS := $(addprefix $(OUT)/, $(addsuffix .split_forest.pkl, $(EXPS)))
+SR_MODELS     := $(addprefix $(OUT)/, $(addsuffix .split_sr.pkl, $(EXPS)))
+SR_PICKS      := $(addprefix $(OUT)/, $(addsuffix .split_sr.eq.json, $(EXPS)))
+FOREST_RUNS   := $(addprefix $(OUT)/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
+SR_RUNS       := $(addprefix $(OUT)/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
 # Trained teacher vs both distillates, overlaid on shared axes.
-COMPARES      := $(addprefix out/compare_, $(addsuffix /summary.csv, $(EXPS)))
+COMPARES      := $(addprefix $(OUT)/compare_, $(addsuffix /summary.csv, $(EXPS)))
 
 # One A4 summary page per ltc.run rollout: the training run and both replays.
-PAGES         := $(addprefix out/, $(foreach s,train forestrun srrun, $(addsuffix .$(s).page.pdf, $(EXPS))))
+PAGES         := $(addprefix $(OUT)/, $(foreach s,train forestrun srrun, $(addsuffix .$(s).page.pdf, $(EXPS))))
 
 # Add --skip_git_check here when running from a dirty worktree; it is passed to
 # every ltc.run invocation, training and replay alike.
@@ -126,9 +129,9 @@ pages: $(PAGES)
 
 compare: $(COMPARES)
 
-report-split: out/report_split.html
+report-split: $(OUT)/report_split.html
 
-out $(DATA_DIR) $(RUN_DIR):
+$(OUT) $(DATA_DIR) $(RUN_DIR):
 	mkdir -p $@
 
 # 1. Training run: one history per config file.
@@ -145,41 +148,41 @@ CSV_LABELS ?= actions
 # run, 26 of them after a collision -- which is too few to fit the teacher's backoff.
 CSV_EPOCHS ?= 10
 
-out/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | out
+$(OUT)/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | $(OUT)
 	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --labels $(CSV_LABELS) \
 		--epochs $(CSV_EPOCHS)
 
 # 3. The half/half agent split, written once so both distillations train on the
 # same agents and hold out the same ones.
-out/%.split.json: out/%.csv ltc/symbolic/split.py | out
+$(OUT)/%.split.json: $(OUT)/%.csv ltc/symbolic/split.py | $(OUT)
 	python -m ltc.symbolic.split --file "$<" --output "$@"
 
 # 3a/3b. The two distillations. They share the split and nothing else, so either
 # can be refit without disturbing the other.
-out/%.split_forest.pkl: out/%.csv out/%.split.json ltc/symbolic/forest_split.py
-	python -m ltc.symbolic.forest_split --file "out/$*.csv" --split "out/$*.split.json" \
-		--output "out/$*" --n_estimators $(FOREST_ESTIMATORS)
+$(OUT)/%.split_forest.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/forest_split.py
+	python -m ltc.symbolic.forest_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
+		--output "$(OUT)/$*" --n_estimators $(FOREST_ESTIMATORS)
 
-out/%.split_sr.pkl: out/%.csv out/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
-	python -m ltc.symbolic.sr_split --file "out/$*.csv" --split "out/$*.split.json" \
-		--output "out/$*" --pysr_output_dir out/output_split \
+$(OUT)/%.split_sr.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
+	python -m ltc.symbolic.sr_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
+		--output "$(OUT)/$*" --pysr_output_dir $(OUT)/output_split \
 		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) $(SR_BALANCED)
 
 # 4a. Replay the distilled forest as the station policy, under the experiment's own
 # traffic and topology flags.
-out/%.forestrun.pkl.lz4: out/%.split_forest.pkl | $(RUN_DIR)
-	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(CURDIR)/out/$*.split_forest.pkl \
+$(OUT)/%.forestrun.pkl.lz4: $(OUT)/%.split_forest.pkl | $(RUN_DIR)
+	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(abspath $(OUT))/$*.split_forest.pkl \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 
 # 3c. Pick the equation off the front by replaying all of them. PySR ranks the
 # front by fit, which says nothing about whether the decoded expression is a
 # working policy: see the table in ltc.symbolic.sr_select. Skipped when SR_EQ pins
 # an index, since then there is nothing to choose.
-out/%.split_sr.eq.json: out/%.split_sr.pkl cfg/%.txt ltc/symbolic/sr_select.py
+$(OUT)/%.split_sr.eq.json: $(OUT)/%.split_sr.pkl cfg/%.txt ltc/symbolic/sr_select.py
 ifeq ($(strip $(SR_EQ)),)
-	python -m ltc.symbolic.sr_select --sr_pkl "out/$*.split_sr.pkl" --cfg "cfg/$*.txt" \
+	python -m ltc.symbolic.sr_select --sr_pkl "$(OUT)/$*.split_sr.pkl" --cfg "cfg/$*.txt" \
 		--output "$@" --n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) \
-		--replay_flags "$(REPLAY_FLAGS)"
+		--replay_flags "$(REPLAY_FLAGS)" --work_dir "$(RUN_DIR)/sr_select.$*"
 else
 	@echo "SR_EQ=$(SR_EQ) pins the equation; skipping the front replay."
 	@printf '{"index": %s, "pinned": true}\n' "$(SR_EQ)" > "$@"
@@ -187,37 +190,37 @@ endif
 
 # 4b. Same for the distilled symbolic expression. ltc.run reads the selected index
 # out of the .eq.json sidecar unless SR_EQ overrides it.
-out/%.srrun.pkl.lz4: out/%.split_sr.pkl out/%.split_sr.eq.json | $(RUN_DIR)
-	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(CURDIR)/out/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
+$(OUT)/%.srrun.pkl.lz4: $(OUT)/%.split_sr.pkl $(OUT)/%.split_sr.eq.json | $(RUN_DIR)
+	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(abspath $(OUT))/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 
 # 5. One page per rollout. Each stage keeps its own history path, hence one rule
-# per stage rather than a single out/%.page.pdf pattern.
-out/%.train.page.pdf: $(DATA_DIR)/%.pkl.lz4 ltc/utils/history_page.py | out
+# per stage rather than a single $(OUT)/%.page.pdf pattern.
+$(OUT)/%.train.page.pdf: $(DATA_DIR)/%.pkl.lz4 ltc/utils/history_page.py | $(OUT)
 	$(render_page)
 
-out/%.forestrun.page.pdf: out/%.forestrun.pkl.lz4 ltc/utils/history_page.py | out
+$(OUT)/%.forestrun.page.pdf: $(OUT)/%.forestrun.pkl.lz4 ltc/utils/history_page.py | $(OUT)
 	$(render_page)
 
-out/%.srrun.page.pdf: out/%.srrun.pkl.lz4 ltc/utils/history_page.py | out
+$(OUT)/%.srrun.page.pdf: $(OUT)/%.srrun.pkl.lz4 ltc/utils/history_page.py | $(OUT)
 	$(render_page)
 
 # 6. Overlay the trained teacher against both distillates: aggregate throughput
 # and Jain's fairness over time, plus the steady-state values side by side.
-out/compare_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 out/%.forestrun.pkl.lz4 out/%.srrun.pkl.lz4 plots_compare_distilled.py | out
+$(OUT)/compare_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.forestrun.pkl.lz4 $(OUT)/%.srrun.pkl.lz4 plots_compare_distilled.py | $(OUT)
 	python plots_compare_distilled.py \
 		--trained "$(DATA_DIR)/$*.pkl.lz4" \
-		--forester "out/$*.forestrun.pkl.lz4" --sr "out/$*.srrun.pkl.lz4" \
-		--output_dir "out/compare_$*"
+		--forester "$(OUT)/$*.forestrun.pkl.lz4" --sr "$(OUT)/$*.srrun.pkl.lz4" \
+		--output_dir "$(OUT)/compare_$*"
 
-out/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
+$(OUT)/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
 
 clean:
-	rm -rf out
+	rm -rf $(OUT)
 
 cleansrrun:
-	rm -rf out/*srun*
+	rm -rf $(OUT)/*srun*
 
 cleansforestrun:
-	rm -rf out/*forestrun*
+	rm -rf $(OUT)/*forestrun*
