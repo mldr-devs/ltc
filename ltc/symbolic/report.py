@@ -24,7 +24,7 @@ def _():
     import seaborn as sns
     import sympy
 
-    os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
+    # os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
 
     from ltc.symbolic.util import SimplexCode
 

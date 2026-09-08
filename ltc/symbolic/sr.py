@@ -4,7 +4,7 @@ import pickle
 
 from ltc.symbolic.util import SimplexCode
 
-os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
+# os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
 
 import numpy as np
 import pandas as pd

@@ -16,7 +16,7 @@ from ltc.symbolic.sr import fit_sr
 from ltc.symbolic.split import train_frame
 from ltc.symbolic.util import SimplexCode
 
-os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
+# os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
 
 import pandas as pd
 
