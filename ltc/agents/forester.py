@@ -13,7 +13,19 @@ from ltc.symbolic.jax_random_forest import JaxRandomForest, _forest_forward
 
 @dataclass
 class ForesterState(AgentState):
-    parameters: Any
+    """Empty on purpose: nothing about this policy is per-station.
+
+    The forest used to live here. ``ltc.run`` builds the agent states with
+    ``jax.vmap(agent.init)`` and then threads them through ``jax.lax.scan`` as the
+    carry, so every array in the state is replicated once per station and stays
+    live for the whole rollout -- identical copies of the same thresholds. A
+    1500-tree forest is 39 MiB, which is 393 MiB across ten stations before the
+    scan doubles it for its input and output arguments; on the saturated run that
+    reached 6.6 GB of scan arguments and exhausted the GPU.
+
+    The tree arrays are constants, so they are closed over by ``sample`` the way
+    ``max_depth`` already was, and leave the carry empty.
+    """
 
 
 class Forester(BaseAgent):
@@ -47,15 +59,16 @@ class Forester(BaseAgent):
             'classes': classes,
         }
 
-        self.init = jax.jit(partial(self.init, parameters=parameters))
+        self.init = jax.jit(self.init)
         self.update = jax.jit(self.update)
         self.sample = jax.jit(partial(
-            self.sample, max_depth=jrf.max_depth, stochastic=stochastic, temperature=temperature,
+            self.sample, parameters=parameters, max_depth=jrf.max_depth,
+            stochastic=stochastic, temperature=temperature,
         ))
 
     @staticmethod
-    def init(key: PRNGKey, parameters: Any) -> ForesterState:
-        return ForesterState(parameters=parameters)
+    def init(key: PRNGKey) -> ForesterState:
+        return ForesterState()
 
     @staticmethod
     def update(
@@ -73,6 +86,7 @@ class Forester(BaseAgent):
         state: ForesterState,
         key: PRNGKey,
         env_state: Array,
+        parameters: Any,
         max_depth: int,
         stochastic: bool,
         temperature: float,
@@ -80,7 +94,7 @@ class Forester(BaseAgent):
         # env_state: [window_size, n_features] raw int obs
         env_state = select_features(env_state, Forester.FEATURES)
         x = env_state.reshape(-1).astype(jnp.float32)[jnp.newaxis]  # [1, w*f]
-        p = state.parameters
+        p = parameters
         probs = _forest_forward(
             p['feature'], p['threshold'], p['left'], p['right'], p['value'],
             x, max_depth,
