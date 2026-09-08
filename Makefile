@@ -45,6 +45,15 @@ RUN_FLAGS ?=
 # epoch, so a single epoch would render as blank axes.
 REPLAY_EPOCHS ?= 3
 REPLAY_STEPS  ?= 2000
+# Length of each candidate replay inside ltc.symbolic.sr_select, kept apart from
+# REPLAY_EPOCHS because the two answer different questions. The final replay only
+# has to render a readable plot, so it can be short; the selection has to *rank*
+# equations, and its metric averages the last 10% of the run. At REPLAY_EPOCHS=3
+# that is 600 steps, about 40 successful transmissions on the bursty run -- enough
+# to tell a deadlocked policy from a working one, nowhere near enough to order the
+# working ones, and it is that order which decides the equation that gets reported.
+SELECT_EPOCHS ?= 10
+SELECT_STEPS  ?= $(REPLAY_STEPS)
 # Empty lets ltc.symbolic.sr_select choose, by replaying the whole front; set an
 # index to pin one and skip that. PySR's own ranking is not an option worth
 # offering here -- it ranks by fit, and on the bursty run its pick is the one
@@ -181,7 +190,7 @@ $(OUT)/%.forestrun.pkl.lz4: $(OUT)/%.split_forest.pkl | $(RUN_DIR)
 $(OUT)/%.split_sr.eq.json: $(OUT)/%.split_sr.pkl cfg/%.txt ltc/symbolic/sr_select.py
 ifeq ($(strip $(SR_EQ)),)
 	python -m ltc.symbolic.sr_select --sr_pkl "$(OUT)/$*.split_sr.pkl" --cfg "cfg/$*.txt" \
-		--output "$@" --n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) \
+		--output "$@" --n_epochs $(SELECT_EPOCHS) --n_steps $(SELECT_STEPS) \
 		--replay_flags "$(REPLAY_FLAGS)" --work_dir "$(RUN_DIR)/sr_select.$*"
 else
 	@echo "SR_EQ=$(SR_EQ) pins the equation; skipping the front replay."

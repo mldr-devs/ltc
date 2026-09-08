@@ -121,8 +121,12 @@ if __name__ == "__main__":
                         help="Output .json. Defaults to <sr_pkl without .pkl>.eq.json, "
                              "which is where ltc.run looks for it.")
     parser.add_argument("--n_epochs", type=int, default=10,
-                        help="Epochs per candidate replay. No learning happens; this only "
-                             "has to be long enough for the steady state to settle.")
+                        help="Epochs per candidate replay. No learning happens, but the "
+                             "metric averages the last 10% of the run, so this has to be "
+                             "long enough to *rank* the working equations and not merely "
+                             "to tell them from the deadlocked ones. Too short and the "
+                             "ranking is noise, which matters because it decides the "
+                             "equation that gets reported.")
     parser.add_argument("--n_steps", type=int, default=2000, help="Steps per epoch.")
     parser.add_argument("--replay_flags", type=str, default="--stochastic_policy --sr_scale 1",
                         help="Extra ltc.run flags shared by every candidate. Must match the "
