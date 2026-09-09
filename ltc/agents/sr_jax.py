@@ -19,7 +19,10 @@ class SRJaxState(AgentState):
 class SRJaxAgent(BaseAgent):
     FEATURES = tuple(Features)
 
-    def __init__(self, sr_model, equation_index: int, n_actions: int = 2, n_features: int | None = None):
+    def __init__(
+        self, sr_model, equation_index: int | None = None, n_actions: int = 2, n_features: int | None = None,
+        stochastic: bool = False, temperature: float = 1.0, scale: float = 1.0,
+    ):
         feature_names = getattr(sr_model, 'feature_names_in_', None)
         expected = 0 if feature_names is None else len(feature_names)
         if n_features is not None and expected and n_features != expected:
@@ -32,14 +35,32 @@ class SRJaxAgent(BaseAgent):
                 f'the model was distilled from.'
             )
 
+        # None lets PySR pick off its own Pareto front, by whatever criterion its
+        # model_selection is set to, instead of pinning an index that may be far from
+        # the knee: on the bursty run the front's own choice scored a loss of 0.0014
+        # where the previously hardcoded index 2 scored 0.91.
+        selected = sr_model.get_best(index=equation_index)
+        if not isinstance(selected, list):
+            print(
+                f'SR equation {selected.name} (complexity {selected["complexity"]}, '
+                f'loss {selected["loss"]:.5g}): {selected["equation"]}'
+            )
+
         jaxeq = sr_model.jax(equation_index)
         callable_fn = jax.jit(jaxeq["callable"])
         parameters = jaxeq["parameters"]
-        simplex = SimplexCode(T=n_actions)
+        # scale is the ScaleCalibrator constant fitted after the distillation; it
+        # only sharpens the sampling distribution, never the argmax.
+        simplex = SimplexCode(T=n_actions, scale=scale)
+        if stochastic and scale != 1.0:
+            print(f'SR probability decoder calibrated with scale a={scale:.4g}')
 
         self.init = jax.jit(partial(self.init, parameters=parameters))
         self.update = jax.jit(self.update)
-        self.sample = jax.jit(partial(self.sample, callable_fn=callable_fn, simplex=simplex))
+        self.sample = jax.jit(partial(
+            self.sample, callable_fn=callable_fn, simplex=simplex,
+            stochastic=stochastic, temperature=temperature,
+        ))
 
     @staticmethod
     def init(key: PRNGKey, parameters: Any) -> SRJaxState:
@@ -63,6 +84,8 @@ class SRJaxAgent(BaseAgent):
         env_state: Array,
         callable_fn,
         simplex: SimplexCode,
+        stochastic: bool,
+        temperature: float,
     ) -> Array:
         # env_state: [window_size, n_features] raw int obs
         env_state = select_features(env_state, SRJaxAgent.FEATURES)
@@ -70,4 +93,14 @@ class SRJaxAgent(BaseAgent):
         x = history_reshape(env_state[jnp.newaxis, jnp.newaxis]).astype(jnp.float32)
         yhat = callable_fn(x, state.parameters)                     # [T-1] or [1*(T-1)]
         codes = yhat.reshape(1, simplex.T - 1)                      # [1, T-1]
+
+        if stochastic:
+            # See Forester.sample: one shared deterministic policy puts every
+            # station in lockstep. simplex.probs already returns probabilities, so
+            # they go into categorical as logs -- a softmax on top of them would
+            # squash every gap to a factor of at most e and flatten the policy
+            # (0.988 -> 0.739 for CS on the nonsaturated run).
+            logits = jnp.log(jnp.clip(simplex.probs(codes)[0], 1e-12)) / temperature
+            return jax.random.categorical(key, logits)
+
         return simplex.decode(codes)[0]                             # scalar

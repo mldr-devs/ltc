@@ -8,7 +8,10 @@ from sklearn.ensemble import RandomForestClassifier
 def fit_forest(df: pd.DataFrame, n_estimators: int = 1500) -> RandomForestClassifier:
     X = df.drop(columns=["action"])
     y = df["action"]
-    forest = RandomForestClassifier(n_estimators=n_estimators, oob_score=True, n_jobs=-1)
+    # Class-balanced, matching fit_sr and fit_forest_split.
+    forest = RandomForestClassifier(
+        n_estimators=n_estimators, oob_score=True, n_jobs=-1, class_weight="balanced"
+    )
     forest.fit(X, y)
     return forest
 

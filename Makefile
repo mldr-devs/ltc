@@ -1,142 +1,247 @@
-DATA_DIR       := data/nosvi
+# Experiment pipeline, one chain per config file:
+#
+#   cfg/<exp>.txt            experiment definition (ltc.run flags)
+#     -> $(OUT)/data/<exp>.pkl.lz4        training history
+#     -> $(OUT)/<exp>.csv                 (observation, action) dataset
+#     -> $(OUT)/<exp>.split.json           half/half agent split, shared by both paths
+#          -> $(OUT)/<exp>.split_forest.pkl    distilled random forest
+#               -> $(OUT)/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
+#          -> $(OUT)/<exp>.split_sr.pkl        distilled symbolic model
+#             (+ $(OUT)/<exp>.split_sr.scale.json, the decoder scale ltc.run reads back)
+#            -> $(OUT)/<exp>.split_sr.eq.json    the Pareto-front equation that replays best
+#               -> $(OUT)/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
+#
+# Adding an experiment means adding a cfg/<name>.txt; nothing here needs editing.
 
-# Training runs that produce the histories the distillation pipeline consumes.
-# ltc.run stamps the current commit into the filename, so it has to be known here too.
-COMMIT         := $(shell git rev-parse --short HEAD)
-TRAIN_N        ?= 10
-TRAIN_EPOCHS   ?= 50
-TRAIN_STEPS    ?= 2000
-TRAIN_WINDOW   ?= 10
-# The two traffic variants only differ by seed in the filename, since ltc.run encodes
-# nothing else; keep them distinct or the second run would overwrite the first.
-TRAIN_SAT_SEED    ?= 42
-TRAIN_NONSAT_SEED ?= 43
-TRAIN_NONSAT_TRAFFIC ?= bursty
-# Add --skip_git_check here when running from a dirty worktree.
-TRAIN_FLAGS    ?=
+# Root of every generated artifact. Override to keep a run's outputs apart, e.g.
+# `make all OUT=out/sweep-b`; nothing below writes outside it.
+OUT       ?= out
+DATA_DIR  := $(OUT)/data
+RUN_DIR   := $(OUT)/runs
 
-# Reuse a history already trained for this (n, seed) whatever commit it carries, and
-# fall back to a HEAD-stamped name only when there is none. Pinning the target to
-# HEAD instead would retrain everything on every new commit.
-train_history = $(or $(lastword $(sort $(wildcard $(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(1)_*.pkl.lz4))),$(DATA_DIR)/history_$(TRAIN_N)_$(TRAIN_N)_$(1)_$(COMMIT).pkl.lz4)
+CONFIGS   := $(wildcard cfg/*.txt)
+EXPS      := $(notdir $(basename $(CONFIGS)))
 
-TRAIN_SAT      := $(call train_history,$(TRAIN_SAT_SEED))
-TRAIN_NONSAT   := $(call train_history,$(TRAIN_NONSAT_SEED))
-TRAIN_FILES    := $(TRAIN_SAT) $(TRAIN_NONSAT)
+HISTORIES     := $(addprefix $(DATA_DIR)/, $(addsuffix .pkl.lz4, $(EXPS)))
+CSV_FILES     := $(addprefix $(OUT)/, $(addsuffix .csv, $(EXPS)))
+SPLIT_FILES   := $(addprefix $(OUT)/, $(addsuffix .split.json, $(EXPS)))
+FOREST_MODELS := $(addprefix $(OUT)/, $(addsuffix .split_forest.pkl, $(EXPS)))
+SR_MODELS     := $(addprefix $(OUT)/, $(addsuffix .split_sr.pkl, $(EXPS)))
+SR_PICKS      := $(addprefix $(OUT)/, $(addsuffix .split_sr.eq.json, $(EXPS)))
+FOREST_RUNS   := $(addprefix $(OUT)/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
+SR_RUNS       := $(addprefix $(OUT)/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
+# Trained teacher vs both distillates, overlaid on shared axes.
+COMPARES      := $(addprefix $(OUT)/compare_, $(addsuffix /summary.csv, $(EXPS)))
 
-PKL_FILES      := $(sort $(wildcard $(DATA_DIR)/*.pkl.lz4) $(TRAIN_FILES))
-BASENAMES      := $(notdir $(PKL_FILES:.pkl.lz4=))
-CSV_FILES      := $(addprefix out/, $(addsuffix .csv, $(BASENAMES)))
-FOREST_FILES   := $(addprefix out/, $(addsuffix .forest.pkl, $(BASENAMES)))
-SR_STAMPS      := $(addprefix out/, $(addsuffix .sr.done, $(BASENAMES)))
-SR_SPLIT_STAMP := $(addprefix out/, $(addsuffix .split.done, $(BASENAMES)))
-FOREST_RUN_STAMPS := $(addprefix out/, $(addsuffix .forestrun.done, $(BASENAMES)))
+# One A4 summary page per ltc.run rollout: the training run and both replays.
+PAGES         := $(addprefix $(OUT)/, $(foreach s,train forestrun srrun, $(addsuffix .$(s).page.pdf, $(EXPS))))
 
-# Simulation replaying a distilled random forest through the Forester agent.
-FOREST_RUN_EPOCHS ?= 1
-FOREST_RUN_STEPS  ?= 2000
-FOREST_RUN_FLAGS  ?=
+# Add --skip_git_check here when running from a dirty worktree; it is passed to
+# every ltc.run invocation, training and replay alike.
+RUN_FLAGS ?=
 
-.PHONY: all distill sr report split report-split forest-run clean
-SR_RUN_STAMPS  := $(addprefix out/, $(addsuffix .srrun.done, $(BASENAMES)))
+# Replay of the distilled policies. Nothing is learned, so a replay is one rollout
+# and one epoch; the summary page bins that rollout into step windows rather than
+# drawing a point per epoch, so there is nothing left for extra epochs to add.
+# Lengthen REPLAY_STEPS, not REPLAY_EPOCHS, when a replay needs to run longer.
+# 3000 steps against ltc.utils.metrics.DEFAULT_LAST_PERCENT of 0.5: the first 1500
+# are dropped as warm-up, comfortably past the few hundred a replay needs to settle,
+# and the remaining 1500 are enough for Jain's index to stop being biased by how few
+# successes each station happened to get.
+REPLAY_EPOCHS ?= 1
+REPLAY_STEPS  ?= 3000
+# Candidate replays in ltc.symbolic.sr_select must match the production replay, or
+# the winner is picked on behaviour it never shows: a metastable bursty policy that
+# escapes mutual collision late scored 0.0689 over 30000 steps and 0.002 over 3000.
+# The price is a ranking decided by 1500 steps, which still separates working from
+# deadlocked -- the point of the selection -- but not near-ties.
+SELECT_EPOCHS ?= $(REPLAY_EPOCHS)
+SELECT_STEPS  ?= $(REPLAY_STEPS)
+# Empty lets ltc.symbolic.sr_select choose, by replaying the whole front; set an
+# index to pin one and skip that. PySR's own ranking is not an option worth
+# offering here -- it ranks by fit, and on the bursty run its pick is the one
+# equation on the front that deadlocks the network.
+SR_EQ         ?=
+# Extra flags for both replays. Sampling the distilled action is the default: one
+# shared deterministic policy puts every station in lockstep, and with argmax the
+# replays reach zero throughput however the models are labelled or fit.
+#
+# --sr_scale 1 disables the calibration: ltc.symbolic.sr_split still fits the scale
+# and writes the sidecar, but the replay ignores it. The calibrator maximizes the
+# likelihood of hard labels, so it sharpens an already-saturated decoder rather than
+# softening it -- on the nonsaturated run it returned a=4.12 with every row clipped
+# onto a vertex. Drop the flag to let ltc.run read the sidecar back.
+REPLAY_FLAGS  ?= --stochastic_policy --sr_scale 1
 
-# Simulation replaying a distilled expression through SRJaxAgent.
-SR_EQ          ?= 2
-# The `all_*` plots draw one point per epoch, so a single epoch renders as blank axes.
-SR_RUN_EPOCHS  ?= 10
-SR_RUN_STEPS   ?= 2000
-# Must match the window the model was distilled from, else the expression reads wrong columns.
-SR_WINDOW      ?= 10
-SR_RUN_FLAGS   ?=
+# Summary page. The whole page is one rollout: a replay has only the one, and a
+# training run defaults to its last epoch, i.e. the converged policy. The raster
+# zooms into a stretch of that same rollout, shaded on every curve.
+PAGE_EPOCH      ?= -1
+PAGE_ZOOM_STEPS ?= 200
+PAGE_ZOOM_START ?= 2000
+# Steps summarised by one point of every curve. Empty lets the page pick
+# n_steps // 100.
+PAGE_WINDOW     ?=
+PAGE_SMOOTH     ?= 1
+PAGE_FLAGS      ?=
 
-.PHONY: all train distill sr report split report-split sr-run clean
+# Distillation size knobs, forwarded to ltc.symbolic.sr_split.
+SR_ITERATIONS    ?= 100
+SR_POPULATIONS   ?= 10
+FOREST_ESTIMATORS ?= 50
+# Set to --balanced to class-balance the forest. Empty by default: balancing
+# deadlocked the replayed forest in every cell of a {50, 1500} trees x {pooled, last
+# epoch} grid, while every unweighted fit reached full throughput. See
+# ltc.symbolic.forest_split.fit_forest_split for the table.
+FOREST_BALANCED  ?=
+# Set to --balanced to class-balance the symbolic fit. Empty by default: the squared
+# loss on simplex-coded labels has E[y|x] = 2p(x)-1 as its minimizer, which is exactly
+# what the decoder turns back into a sampling probability, and balancing replaces it
+# with the decision boundary. See ltc.symbolic.sr.fit_sr.
+SR_BALANCED      ?=
 
-all: train distill  split
+# The flags of one experiment, expanded by the shell at recipe time.
+# The '\#' is escaped because make would otherwise read it as a comment.
+cfg_flags = $$(sed -e 's/\#.*//' $(CURDIR)/cfg/$(1).txt | tr '\n' ' ')
 
-train: $(TRAIN_FILES)
+# ltc.run names its history itself (history_<n>_<n_final>_<seed>_<commit>.pkl.lz4) and
+# writes it, plus any --save_plots figures, into the current directory. Every stage
+# therefore gets its own scratch directory -- $(RUN_DIR)/<exp>.<stage>, where the plots
+# stay -- and the single history produced there is moved to the target.
+# $(1) is the experiment, $(2) the stage name, $(3) the extra ltc.run flags.
+define run_ltc
+	rm -rf $(RUN_DIR)/$(1).$(2)
+	mkdir -p $(RUN_DIR)/$(1).$(2)
+	cd $(RUN_DIR)/$(1).$(2) && PYTHONPATH=$(CURDIR) python -m ltc.run \
+		$(call cfg_flags,$(1)) $(3) $(RUN_FLAGS)
+	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
+endef
 
-distill: $(FOREST_FILES)
+define render_page
+	python -m ltc.utils.history_page --file "$<" --output "$@" \
+		--epoch $(PAGE_EPOCH) --zoom_steps $(PAGE_ZOOM_STEPS) --zoom_start $(PAGE_ZOOM_START) \
+		--smooth $(PAGE_SMOOTH) $(if $(PAGE_WINDOW),--window $(PAGE_WINDOW),) $(PAGE_FLAGS)
+endef
 
-sr: $(SR_STAMPS)
+.PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare report-split clean cleanforestrun cleansrrun
+.PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS) $(SR_PICKS)
 
-split: $(SR_SPLIT_STAMP)
+all: forest-run sr-run pages compare
 
-report: out/report.html
+train: $(HISTORIES)
 
-report-split: out/report_split.html
+csv: $(CSV_FILES)
 
-forest-run: $(FOREST_RUN_STAMPS)
+split: $(SPLIT_FILES)
 
-.PRECIOUS: $(CSV_FILES)
-sr-run: $(SR_RUN_STAMPS)
+forest: $(FOREST_MODELS)
 
-.PRECIOUS: $(CSV_FILES) $(TRAIN_FILES)
+sr: $(SR_MODELS)
 
-out:
-	mkdir -p out
+sr-select: $(SR_PICKS)
 
-$(DATA_DIR):
-	mkdir -p $(DATA_DIR)
+distill: forest sr
 
-# Training runs feeding the distillation pipeline. ltc.run always writes its history
-# into the repo root under a name it builds itself, so move it into $(DATA_DIR) after.
-$(TRAIN_SAT): | $(DATA_DIR)
-	python -m ltc.run --traffic_type saturated \
-		--n $(TRAIN_N) --seed $(TRAIN_SAT_SEED) \
-		--n_epochs $(TRAIN_EPOCHS) --n_steps $(TRAIN_STEPS) --window_size $(TRAIN_WINDOW) \
-		$(TRAIN_FLAGS)
-	mv "$(notdir $@)" "$@"
+forest-run: $(FOREST_RUNS)
 
-$(TRAIN_NONSAT): | $(DATA_DIR)
-	python -m ltc.run --traffic_type $(TRAIN_NONSAT_TRAFFIC) \
-		--n $(TRAIN_N) --seed $(TRAIN_NONSAT_SEED) \
-		--n_epochs $(TRAIN_EPOCHS) --n_steps $(TRAIN_STEPS) --window_size $(TRAIN_WINDOW) \
-		$(TRAIN_FLAGS)
-	mv "$(notdir $@)" "$@"
+sr-run: $(SR_RUNS)
 
-out/%.csv: $(DATA_DIR)/%.pkl.lz4 | out
-	python -m ltc.symbolic.history2csv --file "$<" --output "$@"
+pages: $(PAGES)
 
-out/%.forest.pkl: out/%.csv
-	python -m ltc.symbolic.tree --file "$<" --output "$@"
+compare: $(COMPARES)
 
-out/%.sr.done: out/%.csv ltc/symbolic/sr.py
-	python -m ltc.symbolic.sr --file "$<" --output "out/$*" --pysr_output_dir out/output
-	touch "$@"
+report-split: $(OUT)/report_split.html
 
-out/report.html: $(SR_STAMPS) $(FOREST_FILES)
-	marimo export html ltc/symbolic/report.py -o "$@" -f
+$(OUT) $(DATA_DIR) $(RUN_DIR):
+	mkdir -p $@
 
-out/%.split.done: out/%.csv ltc/symbolic/sr_split.py
-	python -m ltc.symbolic.sr_split --file "$<" --output "out/$*" --pysr_output_dir out/output_split
-	touch "$@"
+# 1. Training run: one history per config file.
+$(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
+	$(call run_ltc,$*,train,)
 
-# Run the simulator with the distilled split forest as the agent policy.
-# The stem is history_<n>_<n_final>_<seed>_<commit>, so n and seed come back out of it.
-# ltc.run writes its own history_*.pkl.lz4 in the repo root, hence the stamp file.
-out/%.forestrun.done: out/%.split.done
-	python -m ltc.run --agent_type forester \
-		--forest_pkl "out/$*.split_forest.pkl" \
-		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
-		--n_epochs $(FOREST_RUN_EPOCHS) --n_steps $(FOREST_RUN_STEPS) $(FOREST_RUN_FLAGS) --save_plots
-	touch "$@"
+# 2. Flatten the history into the distillation dataset. The labels are the actions
+# the agent actually took: the argmax of its trained Q-network disagrees with them
+# on 72% of the steps, and distilling that argmax yields a policy that collides
+# permanently.
+CSV_LABELS ?= actions
+# Trailing epochs pooled into the dataset. 1 is the converged policy alone. Pooling
+# 10 measured no better once class_weight went (0.0727 against 0.0747 replayed) and
+# mixes in epochs the teacher had not converged in.
+CSV_EPOCHS ?= 1
 
-# Run the simulator with the distilled expression as the agent policy.
-# The stem is history_<n>_<n_final>_<seed>_<commit>, so n and seed come back out of it.
-# ltc.run writes its own history_*.pkl.lz4 in the repo root, hence the stamp file.
-out/%.srrun.done: out/%.split.done
-	python -m ltc.run --agent_type sr-jax \
-		--sr_pkl "out/$*.split_sr.pkl" --sr_eq $(SR_EQ) \
-		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
-		--n_epochs $(SR_RUN_EPOCHS) --n_steps $(SR_RUN_STEPS) --window_size $(SR_WINDOW) \
-		$(SR_RUN_FLAGS) --save_plots
-	touch "$@"
+$(OUT)/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | $(OUT)
+	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --labels $(CSV_LABELS) \
+		--epochs $(CSV_EPOCHS)
 
-# Replay the non-saturated history under the traffic it was trained on.
-$(patsubst $(DATA_DIR)/%.pkl.lz4,out/%.srrun.done,$(TRAIN_NONSAT)): SR_RUN_FLAGS += --traffic_type $(TRAIN_NONSAT_TRAFFIC)
+# 3. The half/half agent split, written once so both distillations train on the
+# same agents and hold out the same ones.
+$(OUT)/%.split.json: $(OUT)/%.csv ltc/symbolic/split.py | $(OUT)
+	python -m ltc.symbolic.split --file "$<" --output "$@"
 
-out/report_split.html: $(SR_SPLIT_STAMP)
+# 3a/3b. The two distillations. They share the split and nothing else, so either
+# can be refit without disturbing the other.
+$(OUT)/%.split_forest.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/forest_split.py
+	python -m ltc.symbolic.forest_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
+		--output "$(OUT)/$*" --n_estimators $(FOREST_ESTIMATORS) $(FOREST_BALANCED)
+
+$(OUT)/%.split_sr.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
+	python -m ltc.symbolic.sr_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
+		--output "$(OUT)/$*" --pysr_output_dir $(OUT)/output_split \
+		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) $(SR_BALANCED)
+
+# 4a. Replay the distilled forest as the station policy, under the experiment's own
+# traffic and topology flags.
+$(OUT)/%.forestrun.pkl.lz4: $(OUT)/%.split_forest.pkl | $(RUN_DIR)
+	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(abspath $(OUT))/$*.split_forest.pkl \
+		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
+
+# 3c. Pick the equation off the front by replaying all of them. PySR ranks the
+# front by fit, which says nothing about whether the decoded expression is a
+# working policy: see the table in ltc.symbolic.sr_select. Skipped when SR_EQ pins
+# an index, since then there is nothing to choose.
+$(OUT)/%.split_sr.eq.json: $(OUT)/%.split_sr.pkl cfg/%.txt ltc/symbolic/sr_select.py
+ifeq ($(strip $(SR_EQ)),)
+	python -m ltc.symbolic.sr_select --sr_pkl "$(OUT)/$*.split_sr.pkl" --cfg "cfg/$*.txt" \
+		--output "$@" --n_epochs $(SELECT_EPOCHS) --n_steps $(SELECT_STEPS) \
+		--replay_flags "$(REPLAY_FLAGS)" --work_dir "$(RUN_DIR)/sr_select.$*"
+else
+	@echo "SR_EQ=$(SR_EQ) pins the equation; skipping the front replay."
+	@printf '{"index": %s, "pinned": true}\n' "$(SR_EQ)" > "$@"
+endif
+
+# 4b. Same for the distilled symbolic expression. ltc.run reads the selected index
+# out of the .eq.json sidecar unless SR_EQ overrides it.
+$(OUT)/%.srrun.pkl.lz4: $(OUT)/%.split_sr.pkl $(OUT)/%.split_sr.eq.json | $(RUN_DIR)
+	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(abspath $(OUT))/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
+		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
+
+# 5. One page per rollout. Each stage keeps its own history path, hence one rule
+# per stage rather than a single $(OUT)/%.page.pdf pattern.
+$(OUT)/%.train.page.pdf: $(DATA_DIR)/%.pkl.lz4 ltc/utils/history_page.py | $(OUT)
+	$(render_page)
+
+$(OUT)/%.forestrun.page.pdf: $(OUT)/%.forestrun.pkl.lz4 ltc/utils/history_page.py | $(OUT)
+	$(render_page)
+
+$(OUT)/%.srrun.page.pdf: $(OUT)/%.srrun.pkl.lz4 ltc/utils/history_page.py | $(OUT)
+	$(render_page)
+
+# 6. Overlay the trained teacher against both distillates: aggregate throughput
+# and Jain's fairness over time, plus the steady-state values side by side.
+$(OUT)/compare_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.forestrun.pkl.lz4 $(OUT)/%.srrun.pkl.lz4 plots_compare_distilled.py | $(OUT)
+	python plots_compare_distilled.py \
+		--trained "$(DATA_DIR)/$*.pkl.lz4" \
+		--forester "$(OUT)/$*.forestrun.pkl.lz4" --sr "$(OUT)/$*.srrun.pkl.lz4" \
+		--output_dir "$(OUT)/compare_$*"
+
+$(OUT)/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
 
 clean:
-	rm -rf out
+	rm -rf $(OUT)
+
+cleansrrun:
+	rm -rf $(OUT)/*srrun*
+
+cleanforestrun:
+	rm -rf $(OUT)/*forestrun*
