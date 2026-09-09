@@ -50,14 +50,12 @@ RUN_FLAGS ?=
 # successes each station happened to get.
 REPLAY_EPOCHS ?= 1
 REPLAY_STEPS  ?= 3000
-# Length of each candidate replay inside ltc.symbolic.sr_select, kept apart from
-# REPLAY_EPOCHS because the two answer different questions. The final replay only
-# has to render a readable page; the selection has to *rank* equations, and its
-# metric averages the last 10% of the run. At one epoch of 2000 steps that is 200
-# steps, a dozen or so successful transmissions on the bursty run -- enough to tell
-# a deadlocked policy from a working one, nowhere near enough to order the working
-# ones, and it is that order which decides the equation that gets reported.
-SELECT_EPOCHS ?= 10
+# Candidate replays in ltc.symbolic.sr_select must match the production replay, or
+# the winner is picked on behaviour it never shows: a metastable bursty policy that
+# escapes mutual collision late scored 0.0689 over 30000 steps and 0.002 over 3000.
+# The price is a ranking decided by 1500 steps, which still separates working from
+# deadlocked -- the point of the selection -- but not near-ties.
+SELECT_EPOCHS ?= $(REPLAY_EPOCHS)
 SELECT_STEPS  ?= $(REPLAY_STEPS)
 # Empty lets ltc.symbolic.sr_select choose, by replaying the whole front; set an
 # index to pin one and skip that. PySR's own ranking is not an option worth
@@ -80,7 +78,7 @@ REPLAY_FLAGS  ?= --stochastic_policy --sr_scale 1
 # zooms into a stretch of that same rollout, shaded on every curve.
 PAGE_EPOCH      ?= -1
 PAGE_ZOOM_STEPS ?= 200
-PAGE_ZOOM_START ?= 0
+PAGE_ZOOM_START ?= 2000
 # Steps summarised by one point of every curve. Empty lets the page pick
 # n_steps // 100.
 PAGE_WINDOW     ?=
@@ -166,10 +164,10 @@ $(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
 # on 72% of the steps, and distilling that argmax yields a policy that collides
 # permanently.
 CSV_LABELS ?= actions
-# How many trailing epochs the dataset pools. The last epoch alone is the converged
-# policy but barely visits the congested states -- 207 buffer-full steps on the bursty
-# run, 26 of them after a collision -- which is too few to fit the teacher's backoff.
-CSV_EPOCHS ?= 10
+# Trailing epochs pooled into the dataset. 1 is the converged policy alone. Pooling
+# 10 measured no better once class_weight went (0.0727 against 0.0747 replayed) and
+# mixes in epochs the teacher had not converged in.
+CSV_EPOCHS ?= 1
 
 $(OUT)/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | $(OUT)
 	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --labels $(CSV_LABELS) \

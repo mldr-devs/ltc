@@ -8,4 +8,6 @@
 #SBATCH -e /home/rusek/ltc/log/%x.%a.err
 #SBATCH -o /home/rusek/ltc/log/%x.%a.out
 
+source /tmp/ltcenv/bin/activate
+
 cd /home/rusek/ltc
