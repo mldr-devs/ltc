@@ -94,7 +94,18 @@ def per_agent_success(history, tx_action: int = TX_ACTION):
     return success_mask(*_flat_arrays(history), tx_action=tx_action)
 
 
-def steady_state_metrics(history, last_percent: float = 0.1, tx_action: int = TX_ACTION):
+# Share of a rollout the metrics are measured over, the rest dropped as warm-up.
+# A replay starts from an empty network and takes a few hundred steps to settle --
+# the first quarter of a 2000-step bursty replay ran at 0.002 against 0.08 after --
+# so the whole run understates it. Ten percent went too far the other way: 200
+# steps spread a dozen successes over ten stations, and Jain's index came out at
+# 0.56 where the same policy measured over 1600 steps scores 0.93. That is bias,
+# not noise: short windows make any policy look unfair.
+DEFAULT_LAST_PERCENT = 0.5
+
+
+def steady_state_metrics(history, last_percent: float = DEFAULT_LAST_PERCENT,
+                         tx_action: int = TX_ACTION):
     """Aggregate throughput and Jain's fairness over the final ``last_percent``.
 
     Returns ``(throughput, fairness)``. Throughput is frames per step summed over

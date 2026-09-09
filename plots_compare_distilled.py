@@ -44,7 +44,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
-from ltc.utils.metrics import per_agent_success, steady_state_metrics
+from ltc.utils.metrics import DEFAULT_LAST_PERCENT, per_agent_success, steady_state_metrics
 
 # --- Mocks and Patches ---------------------------------------------------------
 # The histories pickle references classes from the training package. We stub the
@@ -289,7 +289,7 @@ def main():
     parser.add_argument('--distilled', help='Alias for --sr.')
     parser.add_argument('--output_dir', default='out/compare', help='Directory for the comparison plots.')
     parser.add_argument('--window_agg', type=int, default=500, help='Steps averaged per time-series point.')
-    parser.add_argument('--last_percent', type=float, default=0.1,
+    parser.add_argument('--last_percent', type=float, default=DEFAULT_LAST_PERCENT,
                         help='Fraction of the run used for the steady-state metrics.')
     args = parser.parse_args()
 

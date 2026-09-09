@@ -44,8 +44,12 @@ RUN_FLAGS ?=
 # and one epoch; the summary page bins that rollout into step windows rather than
 # drawing a point per epoch, so there is nothing left for extra epochs to add.
 # Lengthen REPLAY_STEPS, not REPLAY_EPOCHS, when a replay needs to run longer.
+# 3000 steps against ltc.utils.metrics.DEFAULT_LAST_PERCENT of 0.5: the first 1500
+# are dropped as warm-up, comfortably past the few hundred a replay needs to settle,
+# and the remaining 1500 are enough for Jain's index to stop being biased by how few
+# successes each station happened to get.
 REPLAY_EPOCHS ?= 1
-REPLAY_STEPS  ?= 2000
+REPLAY_STEPS  ?= 3000
 # Length of each candidate replay inside ltc.symbolic.sr_select, kept apart from
 # REPLAY_EPOCHS because the two answer different questions. The final replay only
 # has to render a readable page; the selection has to *rank* equations, and its
