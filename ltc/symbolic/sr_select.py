@@ -129,6 +129,12 @@ if __name__ == "__main__":
                         help="Extra ltc.run flags shared by every candidate. Must match the "
                              "flags the final replay uses, or the winner is chosen under "
                              "conditions it will not run in.")
+    parser.add_argument("--tolerance", type=float, default=0.1,
+                        help="Relative throughput window inside which equations count as "
+                             "tied and the simplest wins. The default is the measured "
+                             "run-to-run spread: over five seeds, complexity 3 and "
+                             "complexity 28 both averaged 0.0700 with a 10% standard "
+                             "deviation, so a single replay cannot rank them.")
     parser.add_argument("--work_dir", type=str, default=None,
                         help="Scratch directory for the candidate replays. Defaults to "
                              "out/runs/sr_select.<model>, and must stay inside the "
@@ -183,10 +189,13 @@ if __name__ == "__main__":
     if not candidates:
         raise RuntimeError("The model has no equations to choose from.")
 
-    # Highest throughput, then the simplest expression that reaches it: among
-    # equations that behave the same in the simulator, the shorter one is the
-    # better distillate.
-    best = min(candidates, key=lambda c: (-c["throughput"], c["complexity"]))
+    # Simplest equation whose throughput is within --tolerance of the best. Ranking
+    # on throughput alone picks the top of the noise: one replay has a ~10% spread,
+    # so it chose complexity 28 over complexity 3 for a 1.7% gap that vanished over
+    # five seeds.
+    top = max(c["throughput"] for c in candidates)
+    tied = [c for c in candidates if c["throughput"] >= top * (1 - args.tolerance)]
+    best = min(tied, key=lambda c: (c["complexity"], -c["throughput"]))
     pysr_pick = int(sr_model.get_best().name)
 
     output = args.output or f"{args.sr_pkl.removesuffix('.pkl')}.eq.json"
@@ -194,11 +203,15 @@ if __name__ == "__main__":
         json.dump({"index": best["index"], "throughput": best["throughput"],
                    "fairness": best["fairness"], "equation": best["equation"],
                    "complexity": best["complexity"], "pysr_pick": pysr_pick,
+                   "tolerance": args.tolerance, "tied": [c["index"] for c in tied],
                    "candidates": candidates}, f, indent=2)
 
     print(f"\nSelected eq {best['index']} (complexity {best['complexity']}, "
           f"loss {best['loss']:.6g}): {best['equation']}")
     print(f"  throughput {best['throughput']:.4f}, fairness {best['fairness']:.3f}")
+    if len(tied) > 1:
+        print(f"  simplest of {len(tied)} within {args.tolerance:.0%} of the best "
+              f"({top:.4f}): eq {[c['index'] for c in tied]}")
     if best["index"] != pysr_pick:
         chosen = next(c for c in candidates if c["index"] == pysr_pick)
         print(f"  PySR's own pick was eq {pysr_pick}, which replays at "
