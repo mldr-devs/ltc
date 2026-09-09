@@ -91,6 +91,11 @@ PAGE_FLAGS      ?=
 SR_ITERATIONS    ?= 100
 SR_POPULATIONS   ?= 10
 FOREST_ESTIMATORS ?= 50
+# Set to --balanced to class-balance the forest. Empty by default: balancing
+# deadlocked the replayed forest in every cell of a {50, 1500} trees x {pooled, last
+# epoch} grid, while every unweighted fit reached full throughput. See
+# ltc.symbolic.forest_split.fit_forest_split for the table.
+FOREST_BALANCED  ?=
 # Set to --balanced to class-balance the symbolic fit. Empty by default: the squared
 # loss on simplex-coded labels has E[y|x] = 2p(x)-1 as its minimizer, which is exactly
 # what the decoder turns back into a sampling probability, and balancing replaces it
@@ -179,7 +184,7 @@ $(OUT)/%.split.json: $(OUT)/%.csv ltc/symbolic/split.py | $(OUT)
 # can be refit without disturbing the other.
 $(OUT)/%.split_forest.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/forest_split.py
 	python -m ltc.symbolic.forest_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
-		--output "$(OUT)/$*" --n_estimators $(FOREST_ESTIMATORS)
+		--output "$(OUT)/$*" --n_estimators $(FOREST_ESTIMATORS) $(FOREST_BALANCED)
 
 $(OUT)/%.split_sr.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
 	python -m ltc.symbolic.sr_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
