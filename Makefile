@@ -37,8 +37,8 @@ FOREST_RUN_EPOCHS ?= 1
 FOREST_RUN_STEPS  ?= 2000
 FOREST_RUN_FLAGS  ?=
 
-.PHONY: all distill sr report split report-split forest-run clean
 SR_RUN_STAMPS  := $(addprefix out/, $(addsuffix .srrun.done, $(BASENAMES)))
+COMPARE_STAMPS := $(addprefix out/, $(addsuffix .compare.done, $(BASENAMES)))
 
 # Simulation replaying a distilled expression through SRJaxAgent.
 SR_EQ          ?= 2
@@ -49,9 +49,9 @@ SR_RUN_STEPS   ?= 2000
 SR_WINDOW      ?= 10
 SR_RUN_FLAGS   ?=
 
-.PHONY: all train distill sr report split report-split sr-run clean
+.PHONY: all train distill sr report split report-split forest-run sr-run compare clean
 
-all: train distill  split
+all: train distill  split compare
 
 train: $(TRAIN_FILES)
 
@@ -67,8 +67,9 @@ report-split: out/report_split.html
 
 forest-run: $(FOREST_RUN_STAMPS)
 
-.PRECIOUS: $(CSV_FILES)
 sr-run: $(SR_RUN_STAMPS)
+
+compare: $(COMPARE_STAMPS)
 
 .PRECIOUS: $(CSV_FILES) $(TRAIN_FILES)
 
@@ -113,27 +114,41 @@ out/%.split.done: out/%.csv ltc/symbolic/sr_split.py
 
 # Run the simulator with the distilled split forest as the agent policy.
 # The stem is history_<n>_<n_final>_<seed>_<commit>, so n and seed come back out of it.
-# ltc.run writes its own history_*.pkl.lz4 in the repo root, hence the stamp file.
+# ltc.run writes its own history_<n>_<n>_<seed>_<COMMIT>.pkl.lz4 in the repo root; move it
+# under a stable name so it does not collide with the sr-run history and `compare` can find it.
 out/%.forestrun.done: out/%.split.done
 	python -m ltc.run --agent_type forester \
 		--forest_pkl "out/$*.split_forest.pkl" \
 		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
 		--n_epochs $(FOREST_RUN_EPOCHS) --n_steps $(FOREST_RUN_STEPS) $(FOREST_RUN_FLAGS) --save_plots
+	mv "history_$(word 2,$(subst _, ,$*))_$(word 2,$(subst _, ,$*))_$(word 4,$(subst _, ,$*))_$(COMMIT).pkl.lz4" "out/$*.forestrun.pkl.lz4"
 	touch "$@"
 
 # Run the simulator with the distilled expression as the agent policy.
 # The stem is history_<n>_<n_final>_<seed>_<commit>, so n and seed come back out of it.
-# ltc.run writes its own history_*.pkl.lz4 in the repo root, hence the stamp file.
+# ltc.run writes its own history_<n>_<n>_<seed>_<COMMIT>.pkl.lz4 in the repo root; move it
+# under a stable name so it does not collide with the forest-run history and `compare` can find it.
 out/%.srrun.done: out/%.split.done
 	python -m ltc.run --agent_type sr-jax \
 		--sr_pkl "out/$*.split_sr.pkl" --sr_eq $(SR_EQ) \
 		--n $(word 2,$(subst _, ,$*)) --seed $(word 4,$(subst _, ,$*)) \
 		--n_epochs $(SR_RUN_EPOCHS) --n_steps $(SR_RUN_STEPS) --window_size $(SR_WINDOW) \
 		$(SR_RUN_FLAGS) --save_plots
+	mv "history_$(word 2,$(subst _, ,$*))_$(word 2,$(subst _, ,$*))_$(word 4,$(subst _, ,$*))_$(COMMIT).pkl.lz4" "out/$*.srrun.pkl.lz4"
 	touch "$@"
 
 # Replay the non-saturated history under the traffic it was trained on.
 $(patsubst $(DATA_DIR)/%.pkl.lz4,out/%.srrun.done,$(TRAIN_NONSAT)): SR_RUN_FLAGS += --traffic_type $(TRAIN_NONSAT_TRAFFIC)
+$(patsubst $(DATA_DIR)/%.pkl.lz4,out/%.forestrun.done,$(TRAIN_NONSAT)): FOREST_RUN_FLAGS += --traffic_type $(TRAIN_NONSAT_TRAFFIC)
+
+# Overlay the trained teacher against both distillates (random forest + symbolic
+# regression): throughput and fairness over time, plus steady-state values side by side.
+out/%.compare.done: out/%.forestrun.done out/%.srrun.done plots_compare_distilled.py
+	python plots_compare_distilled.py \
+		--trained "$(DATA_DIR)/$*.pkl.lz4" \
+		--forester "out/$*.forestrun.pkl.lz4" --sr "out/$*.srrun.pkl.lz4" \
+		--output_dir "out/compare_$*"
+	touch "$@"
 
 out/report_split.html: $(SR_SPLIT_STAMP)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f
