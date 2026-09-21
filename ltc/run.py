@@ -295,7 +295,7 @@ def setup_args():
     parser.add_argument('--idle_sense_inv_alpha', type=float, default=1.2, help='Idle Sense AIMD multiplicative factor, the paper\'s 1/alpha. CW is multiplied by it below the idle-slot target.')
     parser.add_argument('--idle_sense_update_interval', type=int, default=50, help='Transmissions Idle Sense averages before adjusting CW (the paper\'s maxtrans).')
     parser.add_argument('--sr_pkl', type=str, help='Path to the fitted symbolic regression model (required by --agent_type sr-jax).')
-    parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.sr_split or ltc.symbolic.tree (required by --agent_type forester).')
+    parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.forest_split (required by --agent_type forester).')
     parser.add_argument('--stochastic_policy', action='store_true', default=False, help='Sample the action from the distilled policy instead of taking its argmax (--agent_type sr-jax and forester). One shared deterministic policy puts every station in lockstep.')
     parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy. Below 1.0 sharpens towards the argmax, above 1.0 flattens towards uniform.')
     parser.add_argument('--sr_scale', type=float, help='Scale of the simplex probability decoder used by --stochastic_policy. Defaults to the value fitted by ltc.symbolic.sr_split into <sr_pkl without .pkl>.scale.json, or 1.0 when there is none. Affects sampling only, never the argmax.')
