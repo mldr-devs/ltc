@@ -110,6 +110,12 @@ define run_ltc
 	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
 endef
 
+# A distilled policy shared by every station can lock them into mutual collision;
+# ltc.utils.check_replay fails the build instead of shipping it quietly.
+define check_replay
+	python -m ltc.utils.check_replay --file "$@"
+endef
+
 define render_page
 	python -m ltc.utils.history_page --file "$<" --output "$@" \
 		--epoch $(PAGE_EPOCH) --zoom_steps $(PAGE_ZOOM_STEPS) --zoom_start $(PAGE_ZOOM_START) \
@@ -187,6 +193,7 @@ $(OUT)/%.split_sr.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/sr_split.py
 $(OUT)/%.forestrun.pkl.lz4: $(OUT)/%.split_forest.pkl | $(RUN_DIR)
 	$(call run_ltc,$*,forestrun,--agent_type forester --forest_pkl $(abspath $(OUT))/$*.split_forest.pkl \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
+	$(call check_replay)
 
 # 3c. Pick the equation off the front by replaying all of them. PySR ranks the
 # front by fit, which says nothing about whether the decoded expression is a
@@ -207,6 +214,7 @@ endif
 $(OUT)/%.srrun.pkl.lz4: $(OUT)/%.split_sr.pkl $(OUT)/%.split_sr.eq.json | $(RUN_DIR)
 	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(abspath $(OUT))/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
+	$(call check_replay)
 
 # 5. One page per rollout. Each stage keeps its own history path, hence one rule
 # per stage rather than a single $(OUT)/%.page.pdf pattern.
