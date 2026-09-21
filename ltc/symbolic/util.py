@@ -91,6 +91,33 @@ class SimplexCode:
         return jnp.argmax(codes @ self.codes, axis=1)
 
 
+@jax.tree_util.register_dataclass
+@dataclass
+class LogitCode:
+    """Multinomial logit: T-1 free logits, the last class pinned to 0.
+
+    Interface-compatible with SimplexCode, so the agent swaps one for the other.
+    Needs no clip and no scale -- softmax is a probability by construction.
+    """
+
+    T: int = field(metadata=dict(static=True), default=len(Actions))
+
+    def encode(self, labels: jax.Array) -> jax.Array:
+        """Dummy coding, shape (N, T-1). The reference class is all zeros."""
+        return (jnp.asarray(labels)[:, None] == jnp.arange(self.T - 1)).astype(jnp.float32)
+
+    def _with_reference(self, codes: jax.Array) -> jax.Array:
+        return jnp.concatenate([codes, jnp.zeros((codes.shape[0], 1), codes.dtype)], axis=1)
+
+    @jax.jit
+    def probs(self, codes: jax.Array) -> jax.Array:
+        return jax.nn.softmax(self._with_reference(codes), axis=1)
+
+    @jax.jit
+    def decode(self, codes: jax.Array) -> jax.Array:
+        return jnp.argmax(self._with_reference(codes), axis=1)
+
+
 @jax.jit
 def history_reshape(observations: jax.Array) -> jax.Array:
     """

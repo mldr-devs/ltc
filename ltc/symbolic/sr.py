@@ -2,13 +2,35 @@ import argparse
 import os
 import pickle
 
-from ltc.symbolic.util import SimplexCode
+from ltc.symbolic.util import LogitCode, SimplexCode
 
 # os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
 
 import numpy as np
 import pandas as pd
 from pysr import PySRRegressor
+
+
+LOGIT_LOSS = """
+function logit_nll(pred::T, target::T)::T where {T}
+    m = max(pred, zero(T))
+    lse = m + log(exp(pred - m) + exp(-m))
+    return lse - target * pred
+end
+"""
+
+
+def _logit_loss() -> str:
+    """Cross-entropy of softmax([pred, 0]) against a dummy-coded target.
+
+    The one-hot completion is implicit: with T=2 the reference logit is 0 and the
+    loss collapses to logsumexp([pred, 0]) - target * pred. PySR fits each output
+    independently, so a genuinely joint multiclass loss is not expressible here.
+    """
+    from pysr import jl
+
+    jl.seval(LOGIT_LOSS)
+    return "logit_nll"
 
 
 def fit_sr(
@@ -18,6 +40,7 @@ def fit_sr(
     n_populations: int = 10,
     output_directory: str | None = None,
     balanced: bool = False,
+    coding: str = "simplex",
 ) -> PySRRegressor:
     """Fit one symbolic expression against the simplex-coded action.
 
@@ -40,7 +63,12 @@ def fit_sr(
     # y = (2.0 * df_ag["action"].astype(np.float32) - 1.0).to_numpy()
     yi = df_ag["action"].astype(int).to_numpy()
     simplex_code = label_codes or SimplexCode(T=2) # Assuming binary actions; adjust T if more actions
-    y = simplex_code.encode(yi)
+    if coding == "logit":
+        y = np.asarray(LogitCode(T=simplex_code.T).encode(yi))
+        elementwise_loss = _logit_loss()
+    else:
+        y = simplex_code.encode(yi)
+        elementwise_loss = None
 
     if balanced:
         classes, counts = np.unique(yi, return_counts=True)
@@ -55,7 +83,7 @@ def fit_sr(
         binary_operators=["+", "*", "/", "-", "^"],
         unary_operators=["exp"],
         constraints={"^": (-1, 1), "exp": 3},
-        # elementwise_loss="LogitMarginLoss()",
+        elementwise_loss=elementwise_loss,
         temp_equation_file=output_directory is None,
         turbo=True,
         output_directory=output_directory,

@@ -99,6 +99,8 @@ FOREST_BALANCED  ?=
 # what the decoder turns back into a sampling probability, and balancing replaces it
 # with the decision boundary. See ltc.symbolic.sr.fit_sr.
 SR_BALANCED      ?=
+# simplex or logit: how the expression encodes the action. See ltc.symbolic.sr.fit_sr.
+SR_CODING        ?= simplex
 
 # The flags of one experiment, expanded by the shell at recipe time.
 # The '\#' is escaped because make would otherwise read it as a comment.
@@ -187,7 +189,8 @@ $(OUT)/%.split_forest.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/forest_
 $(OUT)/%.split_sr.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
 	python -m ltc.symbolic.sr_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
 		--output "$(OUT)/$*" --pysr_output_dir $(OUT)/output_split \
-		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) $(SR_BALANCED)
+		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) $(SR_BALANCED) \
+		--coding $(SR_CODING)
 
 # 4a. Replay the distilled forest as the station policy, under the experiment's own
 # traffic and topology flags.

@@ -55,7 +55,20 @@ def _sr_scale(args):
     import json
 
     with open(sidecar) as f:
-        return float(json.load(f)['scale'])
+        return float(json.load(f).get('scale', 1.0))
+
+
+def _sr_coding(args):
+    """'simplex' or 'logit', as ltc.symbolic.sr_split recorded it beside the model."""
+    sidecar = f"{args.sr_pkl.removesuffix('.pkl')}.scale.json"
+
+    if not os.path.exists(sidecar):
+        return 'simplex'
+
+    import json
+
+    with open(sidecar) as f:
+        return json.load(f).get('coding', 'simplex')
 
 
 def _sr_eq(args):
@@ -445,7 +458,7 @@ if __name__ == '__main__':
             sr_model, equation_index=_sr_eq(args), n_actions=num_actions,
             n_features=window_size * len(Features),
             stochastic=args.stochastic_policy, temperature=args.policy_temperature,
-            scale=_sr_scale(args),
+            scale=_sr_scale(args), coding=_sr_coding(args),
         )
     elif agent_type == 'forester':
         if args.forest_pkl is None:

@@ -8,7 +8,7 @@ from reinforced_lib.agents import BaseAgent, AgentState
 
 from ltc.sim.constants import Features
 from ltc.sim.features import select_features
-from ltc.symbolic.util import SimplexCode, history_reshape
+from ltc.symbolic.util import LogitCode, SimplexCode, history_reshape
 
 
 @dataclass
@@ -22,6 +22,7 @@ class SRJaxAgent(BaseAgent):
     def __init__(
         self, sr_model, equation_index: int | None = None, n_actions: int = 2, n_features: int | None = None,
         stochastic: bool = False, temperature: float = 1.0, scale: float = 1.0,
+        coding: str = 'simplex',
     ):
         feature_names = getattr(sr_model, 'feature_names_in_', None)
         expected = 0 if feature_names is None else len(feature_names)
@@ -49,16 +50,20 @@ class SRJaxAgent(BaseAgent):
         jaxeq = sr_model.jax(equation_index)
         callable_fn = jax.jit(jaxeq["callable"])
         parameters = jaxeq["parameters"]
-        # scale is the ScaleCalibrator constant fitted after the distillation; it
-        # only sharpens the sampling distribution, never the argmax.
-        simplex = SimplexCode(T=n_actions, scale=scale)
-        if stochastic and scale != 1.0:
-            print(f'SR probability decoder calibrated with scale a={scale:.4g}')
+        # 'logit' reads the expression as a logit against a zero reference class;
+        # 'simplex' as a simplex codeword, where scale is the ScaleCalibrator
+        # constant and only sharpens the sampling distribution, never the argmax.
+        if coding == 'logit':
+            codec = LogitCode(T=n_actions)
+        else:
+            codec = SimplexCode(T=n_actions, scale=scale)
+            if stochastic and scale != 1.0:
+                print(f'SR probability decoder calibrated with scale a={scale:.4g}')
 
         self.init = jax.jit(partial(self.init, parameters=parameters))
         self.update = jax.jit(self.update)
         self.sample = jax.jit(partial(
-            self.sample, callable_fn=callable_fn, simplex=simplex,
+            self.sample, callable_fn=callable_fn, codec=codec,
             stochastic=stochastic, temperature=temperature,
         ))
 
@@ -83,7 +88,7 @@ class SRJaxAgent(BaseAgent):
         key: PRNGKey,
         env_state: Array,
         callable_fn,
-        simplex: SimplexCode,
+        codec: SimplexCode | LogitCode,
         stochastic: bool,
         temperature: float,
     ) -> Array:
@@ -92,15 +97,15 @@ class SRJaxAgent(BaseAgent):
         # a single obs is a one-step, one-agent history: [1, 1, w, f] -> [1, w*f]
         x = history_reshape(env_state[jnp.newaxis, jnp.newaxis]).astype(jnp.float32)
         yhat = callable_fn(x, state.parameters)                     # [T-1] or [1*(T-1)]
-        codes = yhat.reshape(1, simplex.T - 1)                      # [1, T-1]
+        codes = yhat.reshape(1, codec.T - 1)                      # [1, T-1]
 
         if stochastic:
             # See Forester.sample: one shared deterministic policy puts every
-            # station in lockstep. simplex.probs already returns probabilities, so
+            # station in lockstep. codec.probs already returns probabilities, so
             # they go into categorical as logs -- a softmax on top of them would
             # squash every gap to a factor of at most e and flatten the policy
             # (0.988 -> 0.739 for CS on the nonsaturated run).
-            logits = jnp.log(jnp.clip(simplex.probs(codes)[0], 1e-12)) / temperature
+            logits = jnp.log(jnp.clip(codec.probs(codes)[0], 1e-12)) / temperature
             return jax.random.categorical(key, logits)
 
-        return simplex.decode(codes)[0]                             # scalar
+        return codec.decode(codes)[0]                             # scalar
