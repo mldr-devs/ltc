@@ -268,9 +268,9 @@ def setup_args():
     parser.add_argument('--n', type=int, default=10, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, help='Number of stations running the learning agent. Defaults to all of them.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
-    parser.add_argument('--n_epochs', type=int, default=50, help='Number of training epochs to run.')
-    parser.add_argument('--n_steps', type=int, default=2000, help='Number of steps per epoch.')
-    parser.add_argument('--window_size', type=int, default=5, help='Size of the observation window for each agent.')
+    parser.add_argument('--n_epochs', type=int, default=30, help='Number of training epochs to run.')
+    parser.add_argument('--n_steps', type=int, default=1000, help='Number of steps per epoch.')
+    parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
@@ -286,6 +286,8 @@ def setup_args():
     parser.add_argument('--n_slots', type=int, default=5, help='Frame length in slots (used by --agent_type stateless-q).')
     parser.add_argument('--tdma_slots', type=int, default=10, help='TDMA frame length in slots (used by --legacy_type tdma).')
     parser.add_argument('--tdma_assigned', type=int, default=5, help='Slots per TDMA station. The default pairs with --tdma_slots 10 for the DLMA benchmark; lower it when several TDMA stations share the channel.')
+    parser.add_argument('--eb_aloha_window_size', type=int, default=8, help='EB-ALOHA minimum contention window.')
+    parser.add_argument('--eb_aloha_max_backoff', type=int, default=4, help='EB-ALOHA maximum backoff exponent.')
     parser.add_argument('--idle_sense_eps', type=float, default=0.001, help='Idle Sense AIMD additive increase on the attempt probability.')
     parser.add_argument('--idle_sense_inv_alpha', type=float, default=1.2, help='Idle Sense AIMD multiplicative factor, the paper\'s 1/alpha. CW is multiplied by it below the idle-slot target.')
     parser.add_argument('--idle_sense_update_interval', type=int, default=50, help='Transmissions Idle Sense averages before adjusting CW (the paper\'s maxtrans).')
@@ -297,8 +299,8 @@ def setup_args():
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--replay_buffer_size', type=int, default=30000, help='Experience replay buffer of --agent_type ddqn, per agent. The buffer is allocated whole at init and vmapped over the stations, which makes it the largest single allocation of a training run: two [n, size, window_size, n_features] float32 arrays, 141 MiB at n=10 and 706 MiB at n=50 with the default. Lower it when the GPU runs out of memory at init -- it changes what the agent learns, so try the allocator first (export XLA_PYTHON_CLIENT_PREALLOCATE=true).')
     parser.add_argument('--weight_hist', action='store_true', default=False, help='Record the per-step network weight histogram. Costs ~2 GB of history at n=50 over 100k steps.')
-    parser.add_argument('--phy_error_prob', type=float, default=0.05, help='Probability of error in phy channel')
-    parser.add_argument('--noise_dims', type=int, default=0, help='Gaussian noise dimensions appended to the observation.')
+    parser.add_argument('--phy_error_prob', type=float, default=0.0, help='Probability of error in phy channel.')
+    parser.add_argument('--noise_dims', type=int, default=2, help='Gaussian noise dimensions appended to the observation.')
     parser.add_argument('--zero_obs', action='store_true', default=False, help='Replace real observations with pure noise (discard real obs).')
     parser.add_argument('--perfect_channel_obs', action='store_true', default=False, help='Let every station observe the true channel state, not only when it senses.')
     parser.add_argument('--stations_density', type=float, default=1.0, help='Probability that a station hears any given other station. 1.0 means every station is visible to every other.')
@@ -489,7 +491,7 @@ if __name__ == '__main__':
     elif legacy_type == 'q-aloha':
         legacy = QALOHA(q=0.5)
     elif legacy_type == 'eb-aloha':
-        legacy = EBALOHA(window_size=4, max_backoff=2)
+        legacy = EBALOHA(window_size=args.eb_aloha_window_size, max_backoff=args.eb_aloha_max_backoff)
     elif legacy_type == 'fw-aloha':
         legacy = FWALOHA(window_size=4)
     elif legacy_type == 'tdma':
