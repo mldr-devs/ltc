@@ -36,17 +36,10 @@ def simplex_code(T: int) -> jax.Array:
 @jax.tree_util.register_dataclass
 @dataclass
 class SimplexCode:
-    """Simplex codewords plus the scale of the probabilistic decoder.
-
-    ``scale`` is the calibration constant ``a`` of ltc.symbolic.calibration:
-    a poorly fitted or heavily regularized ``f`` is shrunk towards 0, which the
-    decoder reads as the uniform distribution, so ``a > 1`` re-sharpens it. It
-    multiplies the scores only, so it never changes the argmax.
-    """
+    """Simplex codewords and the probabilistic decoder that inverts them."""
 
     T: int = field(metadata=dict(static=True), default=len(Actions))
     codes: jax.Array | None = None
-    scale: jax.Array | float = 1.0
 
     def __post_init__(self):
         if self.codes is None:
@@ -73,12 +66,11 @@ class SimplexCode:
         """
         fT =  jnp.asarray(self.T, dtype=codes.dtype)
         one = jnp.ones_like(fT)
-        scale = jnp.asarray(self.scale, dtype=codes.dtype)
-        rho = (fT-one)/fT * scale * (codes @ self.codes) + one/fT
+        rho = (fT-one)/fT * (codes @ self.codes) + one/fT
 
         # Lower clip only: rho sums to 1 identically, so something is positive and
         # the renormalization keeps the rest below 1. An upper clip would flatten
-        # several classes onto 1 at large scales and move the argmax.
+        # several classes onto 1 and move the argmax.
         rho = jnp.clip(rho, a_min=0.0)
         rho = rho / jnp.sum(rho, axis=1, keepdims=True)
         return rho

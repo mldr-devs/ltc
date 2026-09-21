@@ -7,7 +7,6 @@
 #          -> $(OUT)/<exp>.split_forest.pkl    distilled random forest
 #               -> $(OUT)/<exp>.forestrun.pkl.lz4   forest agent replayed in the simulator
 #          -> $(OUT)/<exp>.split_sr.pkl        distilled symbolic model
-#             (+ $(OUT)/<exp>.split_sr.scale.json, the decoder scale ltc.run reads back)
 #            -> $(OUT)/<exp>.split_sr.eq.json    the Pareto-front equation that replays best
 #               -> $(OUT)/<exp>.srrun.pkl.lz4       SR agent replayed in the simulator
 #
@@ -65,13 +64,7 @@ SR_EQ         ?=
 # Extra flags for both replays. Sampling the distilled action is the default: one
 # shared deterministic policy puts every station in lockstep, and with argmax the
 # replays reach zero throughput however the models are labelled or fit.
-#
-# --sr_scale 1 disables the calibration: ltc.symbolic.sr_split still fits the scale
-# and writes the sidecar, but the replay ignores it. The calibrator maximizes the
-# likelihood of hard labels, so it sharpens an already-saturated decoder rather than
-# softening it -- on the nonsaturated run it returned a=4.12 with every row clipped
-# onto a vertex. Drop the flag to let ltc.run read the sidecar back.
-REPLAY_FLAGS  ?= --stochastic_policy --sr_scale 1
+REPLAY_FLAGS  ?= --stochastic_policy
 
 # Summary page. The whole page is one rollout: a replay has only the one, and a
 # training run defaults to its last epoch, i.e. the converged policy. The raster

@@ -21,7 +21,7 @@ class SRJaxAgent(BaseAgent):
 
     def __init__(
         self, sr_model, equation_index: int | None = None, n_actions: int = 2, n_features: int | None = None,
-        stochastic: bool = False, temperature: float = 1.0, scale: float = 1.0,
+        stochastic: bool = False, temperature: float = 1.0,
     ):
         feature_names = getattr(sr_model, 'feature_names_in_', None)
         expected = 0 if feature_names is None else len(feature_names)
@@ -49,11 +49,7 @@ class SRJaxAgent(BaseAgent):
         jaxeq = sr_model.jax(equation_index)
         callable_fn = jax.jit(jaxeq["callable"])
         parameters = jaxeq["parameters"]
-        # scale is the ScaleCalibrator constant fitted after the distillation; it
-        # only sharpens the sampling distribution, never the argmax.
-        simplex = SimplexCode(T=n_actions, scale=scale)
-        if stochastic and scale != 1.0:
-            print(f'SR probability decoder calibrated with scale a={scale:.4g}')
+        simplex = SimplexCode(T=n_actions)
 
         self.init = jax.jit(partial(self.init, parameters=parameters))
         self.update = jax.jit(self.update)

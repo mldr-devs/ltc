@@ -25,7 +25,7 @@ So rank them by what they are for. Every candidate is replayed through
 ``ltc.run`` under the experiment's own traffic and topology flags, and the one
 with the highest steady-state throughput wins, ties going to the simpler
 expression. The choice lands in ``<prefix>.split_sr.eq.json``, which ``ltc.run``
-reads back the way it reads the scale sidecar.
+reads back.
 
 This makes the selection on-policy: the symbolic model is chosen by how it
 behaves in the environment, not by how closely it fits the teacher. That is a
@@ -125,7 +125,7 @@ if __name__ == "__main__":
                              "longer run ranks more steadily but can score a candidate in a "
                              "regime the real replay never reaches.")
     parser.add_argument("--n_steps", type=int, default=3000, help="Steps per epoch.")
-    parser.add_argument("--replay_flags", type=str, default="--stochastic_policy --sr_scale 1",
+    parser.add_argument("--replay_flags", type=str, default="--stochastic_policy",
                         help="Extra ltc.run flags shared by every candidate. Must match the "
                              "flags the final replay uses, or the winner is chosen under "
                              "conditions it will not run in.")

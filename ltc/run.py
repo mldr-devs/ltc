@@ -42,22 +42,6 @@ from ltc.utils.plots import plot_all, plot_first
 
 
 
-def _sr_scale(args):
-    """--sr_scale, else the scale ltc.symbolic.sr_split fitted next to the model, else 1."""
-    if args.sr_scale is not None:
-        return args.sr_scale
-
-    sidecar = f"{args.sr_pkl.removesuffix('.pkl')}.scale.json"
-
-    if not os.path.exists(sidecar):
-        return 1.0
-
-    import json
-
-    with open(sidecar) as f:
-        return float(json.load(f)['scale'])
-
-
 def _sr_eq(args):
     """--sr_eq, else the index ltc.symbolic.sr_select replayed its way to, else None.
 
@@ -298,7 +282,6 @@ def setup_args():
     parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest, as saved by ltc.symbolic.forest_split (required by --agent_type forester).')
     parser.add_argument('--stochastic_policy', action='store_true', default=False, help='Sample the action from the distilled policy instead of taking its argmax (--agent_type sr-jax and forester). One shared deterministic policy puts every station in lockstep.')
     parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy. Below 1.0 sharpens towards the argmax, above 1.0 flattens towards uniform.')
-    parser.add_argument('--sr_scale', type=float, help='Scale of the simplex probability decoder used by --stochastic_policy. Defaults to the value fitted by ltc.symbolic.sr_split into <sr_pkl without .pkl>.scale.json, or 1.0 when there is none. Affects sampling only, never the argmax.')
     parser.add_argument('--sr_eq', type=int, help='Equation index to use from the PySR Pareto front. Defaults to the index ltc.symbolic.sr_select recorded in <sr_pkl without .pkl>.eq.json, and to the one PySR itself reports as best when there is no such file. PySR ranks the front by fit, which does not predict whether the decoded expression is a working policy.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     parser.add_argument('--replay_buffer_size', type=int, default=30000, help='Experience replay buffer of --agent_type ddqn, per agent. The buffer is allocated whole at init and vmapped over the stations, which makes it the largest single allocation of a training run: two [n, size, window_size, n_features] float32 arrays, 141 MiB at n=10 and 706 MiB at n=50 with the default. Lower it when the GPU runs out of memory at init -- it changes what the agent learns, so try the allocator first (export XLA_PYTHON_CLIENT_PREALLOCATE=true).')
@@ -313,12 +296,10 @@ def setup_args():
     parser.add_argument('--force_idle_on_empty_buffer', action='store_true', default=False, help='Hold a station idle, and freeze its agent, while its buffer is empty. Implied by --agent_type dlma, which is how its source simulator behaved.')
     args = parser.parse_args()
 
-    # Zero temperature divides by zero in both categorical samplers; a negative one
-    # favours the least likely action, and a nonpositive scale flips the decoder.
+    # Zero temperature divides by zero in both categorical samplers, and a negative
+    # one favours the least likely action.
     if args.policy_temperature <= 0:
         parser.error('--policy_temperature must be positive.')
-    if args.sr_scale is not None and args.sr_scale <= 0:
-        parser.error('--sr_scale must be positive.')
     return args
 
 
@@ -455,7 +436,6 @@ if __name__ == '__main__':
             sr_model, equation_index=args.sr_eq, n_actions=num_actions,
             n_features=window_size * len(Features),
             stochastic=args.stochastic_policy, temperature=args.policy_temperature,
-            scale=_sr_scale(args),
         )
     elif agent_type == 'forester':
         if args.forest_pkl is None:
