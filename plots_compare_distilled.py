@@ -191,8 +191,6 @@ def load_data(file_path):
             for item in data:
                 if hasattr(item, 'actions') or isinstance(item, MockOutput):
                     return item
-                if isinstance(item, dict) and 'actions' in item:
-                    return item
             return data[1]
         return data
 

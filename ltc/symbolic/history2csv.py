@@ -107,6 +107,10 @@ if __name__ == "__main__":
     recorded = np.concatenate(
         [np.asarray(history.actions[e, 1:]) for e in range(n_epochs - keep, n_epochs)]
     )  # [keep * (n_steps - 1), n_agents]
+    # The recorded arrays span every station; only the DRL ones are distilled, and
+    # ltc.run puts them first. Without this the agent ids are shorter than the frame.
+    observations = observations[:, :n_agents]
+    recorded = recorded[:, :n_agents]
     n_steps, _, window_size, _ = observations.shape
     print(f"Pooling {keep} of {n_epochs} epochs: {n_steps} steps per agent")
 

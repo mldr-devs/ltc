@@ -312,6 +312,13 @@ def setup_args():
     parser.add_argument('--force_cs_on_empty_buffer', action='store_true', default=False, help='Suppress transmissions from stations with an empty buffer.')
     parser.add_argument('--force_idle_on_empty_buffer', action='store_true', default=False, help='Hold a station idle, and freeze its agent, while its buffer is empty. Implied by --agent_type dlma, which is how its source simulator behaved.')
     args = parser.parse_args()
+
+    # Zero temperature divides by zero in both categorical samplers; a negative one
+    # favours the least likely action, and a nonpositive scale flips the decoder.
+    if args.policy_temperature <= 0:
+        parser.error('--policy_temperature must be positive.')
+    if args.sr_scale is not None and args.sr_scale <= 0:
+        parser.error('--sr_scale must be positive.')
     return args
 
 
@@ -441,8 +448,11 @@ if __name__ == '__main__':
             raise ValueError('--sr_pkl is required when --agent_type is sr-jax.')
         with open(args.sr_pkl, 'rb') as f:
             sr_model = pickle.load(f)
+        # Write the resolved index back, so the history records the equation that
+        # actually ran instead of the 'best' placeholder.
+        args.sr_eq = _sr_eq(args)
         drl = SRJaxAgent(
-            sr_model, equation_index=_sr_eq(args), n_actions=num_actions,
+            sr_model, equation_index=args.sr_eq, n_actions=num_actions,
             n_features=window_size * len(Features),
             stochastic=args.stochastic_policy, temperature=args.policy_temperature,
             scale=_sr_scale(args),

@@ -119,7 +119,20 @@ def steady_state_metrics(history, last_percent: float = DEFAULT_LAST_PERCENT,
     tail = success[start:]
     agg_throughput = tail.sum(axis=1).mean()
 
-    agent_throughput = tail.mean(axis=0)
-    denom = n_agents * (agent_throughput**2).sum()
+    # Jain only over stations present in the tail. A station that has not joined
+    # yet contributes nothing to the numerator but would stay in the denominator,
+    # capping the index below 1 however evenly the active ones share the channel.
+    present = _present_in_tail(history, start, n_agents)
+    agent_throughput = tail.mean(axis=0)[present]
+    denom = present.sum() * (agent_throughput**2).sum()
     fairness = 0.0 if denom == 0 else (agent_throughput.sum() ** 2) / denom
     return float(agg_throughput), float(fairness)
+
+
+def _present_in_tail(history, start, n_agents):
+    """Stations active at some point in the measured tail; all of them if unrecorded."""
+    active = getattr(history, 'active', None)
+    if active is None:
+        return np.ones(n_agents, dtype=bool)
+    active = np.asarray(active)
+    return active.reshape(-1, active.shape[-1])[start:].any(axis=0)

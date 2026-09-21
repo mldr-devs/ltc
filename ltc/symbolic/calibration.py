@@ -5,12 +5,13 @@ The decoder of ext/simplex-probabilistic-decoding-spec.md,
     rho_j(x) = (T-1)/T * <f(x), c_j> + 1/T,
 
 is exact only when ``f`` is the least-squares minimizer. A distilled expression is
-neither exact nor unbiased in norm: PySR trades accuracy for complexity, and the
-class-balanced weights of ``fit_sr`` pull the fit towards the weighted mean of the
-codewords, which is ~0. Since ``f -> 0`` decodes to the uniform distribution, the
-estimate comes out systematically too flat -- on the saturated run the distilled
-expression has ||f|| ~ 0.22 against codewords of norm 1, and the replayed agent
-transmits in ~48% of the steps where the teacher transmits in 8.6%.
+neither: PySR trades accuracy for complexity, so an under-fitted ``f`` is shrunk
+towards 0, which the decoder reads as the uniform distribution and the estimate
+comes out systematically too flat -- on the saturated run the distilled expression
+had ||f|| ~ 0.22 against codewords of norm 1, and the replayed agent transmitted in
+~48% of the steps where the teacher transmitted in 8.6%. ``fit_sr --balanced``
+shrinks it the same way, by pulling the fit towards the weighted mean of the
+codewords, but it is off by default.
 
 ``ScaleCalibrator`` is the multiclass counterpart of Platt scaling for this decoder:
 a single ``a > 0`` fitted on held-out data by minimizing the NLL of

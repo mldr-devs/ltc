@@ -139,7 +139,7 @@ def draw_header(ax, path, meta, n, n_drl, n_epochs, n_steps, epoch, window):
         ('binning', f"{window} steps per point"),
     ]
     if agent == 'sr-jax' and meta.get('sr_pkl'):
-        fields.append(('sr', f"{Path(meta['sr_pkl']).name} eq {meta.get('sr_eq') or 'best'}"))
+        fields.append(('sr', f"{Path(meta['sr_pkl']).name} eq {'best' if meta.get('sr_eq') is None else meta['sr_eq']}"))
     if agent == 'forester' and meta.get('forest_pkl'):
         fields.append(('forest', Path(meta['forest_pkl']).name))
 
