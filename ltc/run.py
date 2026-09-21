@@ -252,8 +252,19 @@ def rl_step(
     return rl_step_fn, pre_rl_fn, post_rl_fn
 
 
+class _ConfigParser(argparse.ArgumentParser):
+    """@file arguments, one flag per line with '#' comments.
+
+    argparse otherwise takes a whole line as a single argument, so '--n 10' would
+    arrive unsplit.
+    """
+
+    def convert_arg_line_to_args(self, line):
+        return line.split('#', 1)[0].split()
+
+
 def setup_args():
-    parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.",fromfile_prefix_chars='@')
+    parser = _ConfigParser(description="Run the RL network simulation with configurable parameters.", fromfile_prefix_chars='@')
     parser.add_argument('--n', type=int, default=10, help='Initial number of agents in the simulation.')
     parser.add_argument('--n_drl', type=int, help='Number of stations running the learning agent. Defaults to all of them.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')

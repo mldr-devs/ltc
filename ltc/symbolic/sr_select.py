@@ -100,15 +100,6 @@ def score_equation(history_path: str) -> tuple[float, float]:
     return steady_state_metrics(history)
 
 
-def read_cfg_flags(path: str) -> list[str]:
-    """The ltc.run flags of a cfg file: one per line, '#' starts a comment."""
-    flags = []
-    with open(path) as f:
-        for line in f:
-            flags.extend(line.split("#", 1)[0].split())
-    return flags
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Replay every equation on the PySR front and record the best one."
@@ -150,7 +141,8 @@ if __name__ == "__main__":
     if isinstance(equations, list):
         equations = equations[0]
 
-    cfg_flags = read_cfg_flags(args.cfg)
+    # ltc.run expands @file itself, so the cfg needs no parsing here.
+    cfg_flags = [f"@{os.path.abspath(args.cfg)}"]
     replay_flags = [
         *args.replay_flags.split(),
         "--n_epochs", str(args.n_epochs),

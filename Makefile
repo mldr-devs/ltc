@@ -93,10 +93,6 @@ FOREST_BALANCED  ?=
 # with the decision boundary. See ltc.symbolic.sr.fit_sr.
 SR_BALANCED      ?=
 
-# The flags of one experiment, expanded by the shell at recipe time.
-# The '\#' is escaped because make would otherwise read it as a comment.
-cfg_flags = $$(sed -e 's/\#.*//' $(CURDIR)/cfg/$(1).txt | tr '\n' ' ')
-
 # ltc.run names its history itself (history_<n>_<n_final>_<seed>_<commit>.pkl.lz4) and
 # writes it, plus any --save_plots figures, into the current directory. Every stage
 # therefore gets its own scratch directory -- $(RUN_DIR)/<exp>.<stage>, where the plots
@@ -106,7 +102,7 @@ define run_ltc
 	rm -rf $(RUN_DIR)/$(1).$(2)
 	mkdir -p $(RUN_DIR)/$(1).$(2)
 	cd $(RUN_DIR)/$(1).$(2) && PYTHONPATH=$(CURDIR) python -m ltc.run \
-		$(call cfg_flags,$(1)) $(3) $(RUN_FLAGS)
+		@$(CURDIR)/cfg/$(1).txt $(3) $(RUN_FLAGS)
 	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
 endef
 
