@@ -16,6 +16,39 @@ class SRJaxState(AgentState):
     parameters: Any
 
 
+def template_callable(sr_model, equation_index, n_features):
+    """JAX callable returning the T-1 logits of a TemplateExpressionSpec model.
+
+    PySR refuses .jax() and .sympy() on templates, but the equation is plain text
+    -- "f1 = #1 * 2.0; f2 = #2" over the sub-expression's own arguments -- so
+    sympy plus PySR's own sympy2jax covers it. Returns (callable, parameters) in
+    the shape .jax() would have.
+    """
+    import re
+    import sympy
+    from pysr.export_jax import sympy2jax
+
+    equation = sr_model.get_best(index=equation_index)['equation']
+    symbols = sympy.symbols(f'x0:{n_features}')
+    parts = [p.split('=', 1)[1].strip() for p in equation.split(';')]
+    converted = [
+        sympy2jax(sympy.sympify(re.sub(r'#(\d+)', lambda m: f'x{int(m.group(1)) - 1}', part)), symbols)
+        for part in parts
+    ]
+    callables, parameters = zip(*converted)
+
+    def stacked(x, params):
+        # A constant sub-expression evaluates to a scalar, so broadcast before
+        # stacking -- and constants are exactly what these fits keep selecting.
+        rows = jnp.shape(x)[0]
+        return jnp.stack(
+            [jnp.broadcast_to(jnp.asarray(c(x, p)), (rows,)) for c, p in zip(callables, params)],
+            axis=-1,
+        )
+
+    return stacked, list(parameters)
+
+
 class SRJaxAgent(BaseAgent):
     FEATURES = tuple(Features)
 
@@ -24,8 +57,13 @@ class SRJaxAgent(BaseAgent):
         stochastic: bool = False, temperature: float = 1.0, scale: float = 1.0,
         coding: str = 'simplex',
     ):
+        # A multiclass template carries the label's dummy columns d1..d_{T-1} in X
+        # alongside the real features; only the latter reach the sub-expressions.
+        templated = type(getattr(sr_model, 'expression_spec_', None)).__name__ == 'TemplateExpressionSpec'
         feature_names = getattr(sr_model, 'feature_names_in_', None)
         expected = 0 if feature_names is None else len(feature_names)
+        if templated:
+            expected -= n_actions - 1
         if n_features is not None and expected and n_features != expected:
             # PySR's jax callable indexes X by fit-time column, and JAX clamps out-of-range
             # indices instead of raising, so a mismatch silently evaluates the expression on
@@ -47,9 +85,12 @@ class SRJaxAgent(BaseAgent):
                 f'loss {selected["loss"]:.5g}): {selected["equation"]}'
             )
 
-        jaxeq = sr_model.jax(equation_index)
-        callable_fn = jax.jit(jaxeq["callable"])
-        parameters = jaxeq["parameters"]
+        if templated:
+            fn, parameters = template_callable(sr_model, equation_index, expected)
+        else:
+            jaxeq = sr_model.jax(equation_index)
+            fn, parameters = jaxeq["callable"], jaxeq["parameters"]
+        callable_fn = jax.jit(fn)
         # 'logit' reads the expression as a logit against a zero reference class;
         # 'simplex' as a simplex codeword, where scale is the ScaleCalibrator
         # constant and only sharpens the sampling distribution, never the argmax.

@@ -452,6 +452,9 @@ if __name__ == '__main__':
     elif agent_type == 'sr-jax':
         if args.sr_pkl is None:
             raise ValueError('--sr_pkl is required when --agent_type is sr-jax.')
+        # A multiclass model carries a Julia template; unpickling re-evaluates it.
+        from ltc.symbolic.sr import register_multiclass_loss
+        register_multiclass_loss()
         with open(args.sr_pkl, 'rb') as f:
             sr_model = pickle.load(f)
         drl = SRJaxAgent(

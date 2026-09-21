@@ -20,17 +20,77 @@ end
 """
 
 
-def _logit_loss() -> str:
-    """Cross-entropy of softmax([pred, 0]) against a dummy-coded target.
+# Joint softmax NLL over T-1 sub-expressions and a reference class pinned to 0.
+# exp(-m) is that class's hard 1 in the denominator: T classes, T-1 free logits.
+MULTICLASS_LOSS = """
+using SymbolicRegression: ValidVector
 
-    The one-hot completion is implicit: with T=2 the reference logit is 0 and the
-    loss collapses to logsumexp([pred, 0]) - target * pred. PySR fits each output
-    independently, so a genuinely joint multiclass loss is not expressible here.
-    """
+function nll_ref(fs::Tuple, ds::Tuple)
+    if !all(v -> v.valid, fs) || !all(v -> v.valid, ds)
+        return ValidVector(similar(fs[1].x), false)
+    end
+    F = map(v -> v.x, fs)
+    D = map(v -> v.x, ds)
+
+    m = max.(F[1], 0.0)
+    for k in 2:length(F)
+        m = max.(m, F[k])
+    end
+
+    e = exp.(.-m)
+    for k in eachindex(F)
+        e = e .+ exp.(F[k] .- m)
+    end
+
+    sel = zero(m)
+    for k in eachindex(F)
+        sel = sel .+ F[k] .* D[k]
+    end
+
+    return ValidVector(m .+ log.(e) .- sel, true)
+end
+"""
+
+
+def _logit_loss() -> str:
+    """Binary case: logsumexp([pred, 0]) - target * pred, the one-hot implicit."""
     from pysr import jl
 
     jl.seval(LOGIT_LOSS)
     return "logit_nll"
+
+
+def register_multiclass_loss() -> None:
+    """Define nll_ref in Julia. Idempotent.
+
+    Unpickling a template model rebuilds its TemplateExpressionSpec, which
+    re-evaluates the combine string -- so the function has to exist before the
+    load, not just before the fit.
+    """
+    from pysr import jl
+
+    jl.seval(MULTICLASS_LOSS)
+
+
+def multiclass_spec(feat_cols: list[str], T: int):
+    """TemplateExpressionSpec evolving f1..f_{T-1} under one shared softmax NLL.
+
+    PySR fits a multi-column y independently per column, so the softmax denominator
+    -- which couples the logits -- cannot be expressed that way. A template evolves
+    them together instead. The label rides along as dummy columns d1..d_{T-1} in X;
+    the sub-expressions cannot see them, since `f(x...)` fixes their arguments.
+    """
+    from pysr import TemplateExpressionSpec
+
+    register_multiclass_loss()
+    fs = [f"f{k}" for k in range(1, T)]
+    ds = [f"d{k}" for k in range(1, T)]
+    args = ", ".join(feat_cols)
+    return TemplateExpressionSpec(
+        expressions=fs,
+        variable_names=feat_cols + ds,
+        combine=f"nll_ref(({', '.join(f'{f}({args})' for f in fs)},), ({', '.join(ds)},))",
+    )
 
 
 def fit_sr(
@@ -63,8 +123,19 @@ def fit_sr(
     # y = (2.0 * df_ag["action"].astype(np.float32) - 1.0).to_numpy()
     yi = df_ag["action"].astype(int).to_numpy()
     simplex_code = label_codes or SimplexCode(T=2) # Assuming binary actions; adjust T if more actions
-    if coding == "logit":
-        y = np.asarray(LogitCode(T=simplex_code.T).encode(yi))
+    T = simplex_code.T
+    expression_spec = None
+    if coding == "logit" and T > 2:
+        # Prediction *is* the loss, so y is a placeholder and the label enters X.
+        X = pd.concat([X, pd.DataFrame(
+            np.asarray(LogitCode(T=T).encode(yi)),
+            columns=[f"d{k}" for k in range(1, T)], index=X.index)], axis=1)
+        y = np.zeros(len(yi), dtype=np.float32)
+        elementwise_loss = "loss(pred, target) = pred"
+        expression_spec = multiclass_spec(feat_cols, T)
+    elif coding == "logit":
+        # T=2 needs no template: one output, and .jax() exports it for the agent.
+        y = np.asarray(LogitCode(T=T).encode(yi))
         elementwise_loss = _logit_loss()
     else:
         y = simplex_code.encode(yi)
@@ -84,6 +155,7 @@ def fit_sr(
         unary_operators=["exp"],
         constraints={"^": (-1, 1), "exp": 3},
         elementwise_loss=elementwise_loss,
+        expression_spec=expression_spec,
         temp_equation_file=output_directory is None,
         turbo=True,
         output_directory=output_directory,
