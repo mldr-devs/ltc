@@ -14,7 +14,7 @@ from ltc.symbolic.split import train_frame
 
 
 def fit_forest_split(
-    df_train: pd.DataFrame, n_estimators: int = 1500, balanced: bool = False
+    df_train: pd.DataFrame, n_estimators: int = 50, balanced: bool = False, max_depth: int | None = 8,
 ) -> RandomForestClassifier:
     """Random forest on the same feature set as SR (agent id excluded).
 
@@ -56,6 +56,7 @@ def fit_forest_split(
     forest = RandomForestClassifier(
         n_estimators=n_estimators, oob_score=True, n_jobs=-1,
         class_weight="balanced" if balanced else None,
+        max_depth=max_depth,
     )
     forest.fit(X, y)
     return forest
@@ -78,7 +79,8 @@ if __name__ == "__main__":
         default=None,
         help="Output path prefix; the forest is saved as <prefix>.split_forest.pkl",
     )
-    parser.add_argument("--n_estimators", type=int, default=1500, help="RF trees")
+    parser.add_argument("--n_estimators", type=int, default=50, help="RF trees")
+    parser.add_argument("--max_depth", type=int, default=8, help="RF max depth")
     parser.add_argument(
         "--balanced",
         action="store_true",
@@ -92,7 +94,7 @@ if __name__ == "__main__":
     df_train = train_frame(pd.read_csv(args.file), args.split or f"{out_prefix}.split.json")
 
     print("Fitting random forest on the train half...")
-    forest = fit_forest_split(df_train, n_estimators=args.n_estimators, balanced=args.balanced)
+    forest = fit_forest_split(df_train, n_estimators=args.n_estimators, balanced=args.balanced, max_depth=args.max_depth or None)
     print(f"RF OOB score: {forest.oob_score_:.4f}")
 
     forest_path = f"{out_prefix}.split_forest.pkl"
