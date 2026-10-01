@@ -118,7 +118,7 @@ define render_page
 		--smooth $(PAGE_SMOOTH) $(if $(PAGE_WINDOW),--window $(PAGE_WINDOW),) $(PAGE_FLAGS)
 endef
 
-.PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare report-split clean cleanforestrun cleansrrun
+.PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare importance report-split clean cleanforestrun cleansrrun
 .PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS) $(SR_PICKS)
 
 all: forest-run sr-run pages compare
@@ -144,6 +144,8 @@ sr-run: $(SR_RUNS)
 pages: $(PAGES)
 
 compare: $(COMPARES)
+
+importance: $(OUT)/forest_importance.pdf $(OUT)/forest_importance.tex
 
 report-split: $(OUT)/report_split.html
 
@@ -211,6 +213,20 @@ $(OUT)/%.srrun.pkl.lz4: $(OUT)/%.split_sr.pkl $(OUT)/%.split_sr.eq.json | $(RUN_
 	$(call run_ltc,$*,srrun,--agent_type sr-jax --sr_pkl $(abspath $(OUT))/$*.split_sr.pkl $(if $(SR_EQ),--sr_eq $(SR_EQ),) \
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) --save_plots $(REPLAY_FLAGS))
 	$(call check_replay)
+
+# 4c. Where the distilled forest looks, as a heatmap over the observation window.
+# Two targets because the paper needs both forms: a PDF to look at and pgfplots
+# source to typeset. One script run writes both, and this make predates grouped
+# targets, so the .tex rule just waits on the .pdf.
+IMPORTANCE_LABELS ?= $(EXPS)
+
+$(OUT)/forest_importance.pdf: $(FOREST_MODELS) ltc/utils/forest_importance.py | $(OUT)
+	python -m ltc.utils.forest_importance \
+		--forest $(FOREST_MODELS) --label $(IMPORTANCE_LABELS) \
+		--pdf "$@" --tex "$(OUT)/forest_importance.tex"
+
+$(OUT)/forest_importance.tex: $(OUT)/forest_importance.pdf
+	@test -f "$@"
 
 # 5. One page per rollout. Each stage keeps its own history path, hence one rule
 # per stage rather than a single $(OUT)/%.page.pdf pattern.
