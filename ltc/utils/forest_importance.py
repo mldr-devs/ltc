@@ -8,10 +8,10 @@ Two choices worth stating. The colour scale is logarithmic and shared by both
 panels: on the bursty run a single cell holds 91% of the importance while the
 saturated one spreads it from 0 to 0.07, so a shared linear scale would render the
 saturated panel blank, and a scale per panel would invite a comparison it does not
-support. And the ramp is greyscale, not merely greyscale-safe -- the printed figure
-is then identical to the screen one rather than a lossy version of it, and ``Greys``
-also has the widest luminance range of the sequential maps (1.00 against 0.81 for
-``Blues``, 0.76 for ``cividis``).
+support. And ``viridis`` is monotone in luminance, so greyscale print keeps the
+ordering of the cells -- readable, though not identical to the colour version the
+way an achromatic ramp would be: the luminance range drops from 1.00 to 0.79, so
+adjacent steps separate about a fifth less once the colour is gone.
 
 Writes a PDF and a pgfplots ``.tex`` carrying the same data.
 """
@@ -36,7 +36,7 @@ FEATURE_LABELS = {
     'action_tx': 'Own action: TX',
     'action_cs': 'Own action: CS',
 }
-CMAP = 'Greys'
+CMAP = 'viridis'
 # Decades of colour scale below the largest importance. A log scale anchored on the
 # smallest positive value is at the mercy of one noise cell -- the bursty forest has
 # an importance of 5e-9, which would stretch the ramp over 8 decades and spend most
@@ -93,7 +93,6 @@ def draw_pdf(grids, labels, window_size, norm, output):
         mesh = ax.pcolormesh(
             np.arange(window_size + 1) - 0.5, np.arange(len(FEATURE_NAMES) + 1) - 0.5,
             np.clip(grid, norm.vmin, None), cmap=CMAP, norm=norm,
-            edgecolors='0.85', linewidth=0.3,
         )
         # At most ~11 ticks: every slot is unreadable once the window is long.
         ax.set_xticks(range(0, window_size, max(1, -(-window_size // 11))))
