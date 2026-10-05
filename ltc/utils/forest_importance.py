@@ -32,7 +32,7 @@ FEATURE_LABELS = {
     'buffer': 'Buffer',
     'channel': 'Channel',
     'ret_c': 'Retransmissions',
-    'no_tx': 'Steps since TX',
+    'no_tx': r'Steps since TX:$n_{\mathrm{idle}}$',
     'action_tx': 'Own action: TX',
     'action_cs': 'Own action: CS',
 }
@@ -167,7 +167,7 @@ def draw_tex(grids, labels, window_size, norm, output, pdf_name):
 % Requires: \\usepackage{{pgfplots}} \\usepgfplotslibrary{{groupplots}}
 %           \\pgfplotsset{{compat=1.18}}
 % A rendered copy of this figure is in {pdf_name}.
-\\begin{{figure}}
+\\begin{{figure*}}
   \\centering
   \\begin{{tikzpicture}}
     \\pgfplotsset{{
@@ -191,7 +191,7 @@ def draw_tex(grids, labels, window_size, norm, output, pdf_name):
     panel blank. It spans {DYNAMIC_RANGE_DECADES:.0f} decades below the largest
     value; cells at or under that floor, zeros included, are blank.}}
   \\label{{fig:forest-importance}}
-\\end{{figure}}
+\\end{{figure*}}
 """
     Path(output).parent.mkdir(parents=True, exist_ok=True)
     Path(output).write_text(tex)
