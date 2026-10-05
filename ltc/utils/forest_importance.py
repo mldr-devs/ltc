@@ -55,14 +55,20 @@ PLOT_PARAMS = {
 }
 
 
-def importance_grid(forest_path):
-    """``([n_features, window_size] importances, window_size)``, newest slot last."""
-    forest = joblib.load(forest_path)
+def importance_grid(forest_paths):
+    """``([n_features, window_size] importances, window_size)``, newest slot last.
+
+    Several paths are repeats of the same experiment under different seeds and are
+    averaged. The per-seed maximum is not a stable statistic once importance is
+    spread -- on the testbed forests the top cell differs between seeds while the
+    vectors correlate at 0.85 to 0.96 -- so the mean is what there is to plot.
+    """
     n_features = len(FEATURE_NAMES)
-    window_size = len(forest.feature_importances_) // n_features
+    importances = np.stack([joblib.load(p).feature_importances_ for p in forest_paths])
+    window_size = importances.shape[1] // n_features
     # Columns run slot-major (see history2csv.build_column_names), so the reshape
     # gives [slot, feature] and the transpose puts features on the y axis.
-    return forest.feature_importances_.reshape(window_size, n_features).T, window_size
+    return importances.mean(axis=0).reshape(window_size, n_features).T, window_size
 
 
 def shared_scale(grids):
@@ -74,8 +80,12 @@ def shared_scale(grids):
 
 def draw_pdf(grids, labels, window_size, norm, output):
     plt.rcParams.update(PLOT_PARAMS)
+    # Width follows the window: 20 slots in the space 10 need collides the titles
+    # and runs the tick labels together.
+    panel_width = 2.4 + 0.07 * window_size
     fig, axes = plt.subplots(
-        1, len(grids), figsize=(3.2 * len(grids), 2.3), constrained_layout=True, sharey=True,
+        1, len(grids), figsize=(panel_width * len(grids), 2.3),
+        constrained_layout=True, sharey=True,
     )
     axes = np.atleast_1d(axes)
 
@@ -85,7 +95,8 @@ def draw_pdf(grids, labels, window_size, norm, output):
             np.clip(grid, norm.vmin, None), cmap=CMAP, norm=norm,
             edgecolors='0.85', linewidth=0.3,
         )
-        ax.set_xticks(range(window_size))
+        # At most ~11 ticks: every slot is unreadable once the window is long.
+        ax.set_xticks(range(0, window_size, max(1, -(-window_size // 11))))
         ax.set_xlabel('Window slot (newest last)')
         ax.set_title(f'({tag}) {label}')
         ax.set_aspect('auto')
@@ -141,7 +152,7 @@ def draw_tex(grids, labels, window_size, norm, output, pdf_name):
             + f'    title={{({tag}) {label}}},\n'
             '    xlabel={Window slot (newest last)},\n'
             + ('    ylabel={Observation feature},\n' if first else '')
-            + f'    xtick={{0,...,{window_size - 1}}},\n'
+            + f'    xtick={{{",".join(str(t) for t in range(0, window_size, max(1, -(-window_size // 11))))}}},\n'
             f'    ytick={{0,...,{len(FEATURE_NAMES) - 1}}},\n'
             + ('    yticklabels={' + ','.join(f'{{{FEATURE_LABELS[f]}}}' for f in FEATURE_NAMES) + '},\n'
                if first else '    yticklabels={},\n')
@@ -191,7 +202,8 @@ def draw_tex(grids, labels, window_size, norm, output, pdf_name):
 if __name__ == '__main__':
     parser = ArgumentParser(description='Heatmap of a distilled forest\'s feature importance.')
     parser.add_argument('--forest', type=str, nargs='+', required=True,
-                        help='Fitted forests from ltc.symbolic.forest_split, one per subplot.')
+                        help='One subplot per argument. Comma-separate several forests to '
+                             'average them, which is what the seeds of one experiment are.')
     parser.add_argument('--label', type=str, nargs='+', required=True,
                         help='Subplot title per forest, in the same order.')
     parser.add_argument('--pdf', type=str, required=True, help='Output PDF.')
@@ -202,10 +214,13 @@ if __name__ == '__main__':
         parser.error('--forest and --label must have the same length.')
 
     mpl.use('Agg')
-    grids, windows = zip(*(importance_grid(p) for p in args.forest))
+    groups = [arg.split(',') for arg in args.forest]
+    grids, windows = zip(*(importance_grid(g) for g in groups))
+    labels = [f'{l} ({len(g)} seeds)' if len(g) > 1 else l
+              for l, g in zip(args.label, groups)]
     if len(set(windows)) != 1:
         parser.error(f'Forests disagree on the window size: {windows}.')
 
     norm = shared_scale(grids)
-    print(f'Saved: {draw_pdf(grids, args.label, windows[0], norm, args.pdf)}')
-    print(f'Saved: {draw_tex(grids, args.label, windows[0], norm, args.tex, Path(args.pdf).name)}')
+    print(f'Saved: {draw_pdf(grids, labels, windows[0], norm, args.pdf)}')
+    print(f'Saved: {draw_tex(grids, labels, windows[0], norm, args.tex, Path(args.pdf).name)}')

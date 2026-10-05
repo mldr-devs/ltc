@@ -27,12 +27,26 @@ class TestImportanceGrid(unittest.TestCase):
             importances = np.zeros(len(columns))
             importances[columns.index(name)] = 1.0
             with tempfile.TemporaryDirectory() as d:
-                grid, got_window = importance_grid(fake_forest(importances, Path(d) / 'f.pkl'))
+                grid, got_window = importance_grid([fake_forest(importances, Path(d) / 'f.pkl')])
             feature, slot = name.rsplit('_', 1)
             self.assertEqual(got_window, window)
             self.assertEqual(grid.shape, (len(FEATURE_NAMES), window))
             self.assertEqual(grid[FEATURE_NAMES.index(feature), int(slot)], 1.0)
             self.assertEqual(grid.sum(), 1.0)
+
+
+    def test_seeds_are_averaged(self):
+        window = 2
+        columns = build_column_names(window)
+        a, b = np.zeros(len(columns)), np.zeros(len(columns))
+        a[columns.index('buffer_0')] = 1.0
+        b[columns.index('buffer_1')] = 1.0
+        with tempfile.TemporaryDirectory() as d:
+            paths = [fake_forest(a, Path(d) / 's1.pkl'), fake_forest(b, Path(d) / 's2.pkl')]
+            grid, _ = importance_grid(paths)
+        row = FEATURE_NAMES.index('buffer')
+        np.testing.assert_allclose(grid[row], [0.5, 0.5])
+        self.assertAlmostEqual(grid.sum(), 1.0)
 
 
 class TestSharedScale(unittest.TestCase):
