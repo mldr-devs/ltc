@@ -24,7 +24,7 @@ def _():
     import matplotlib.pyplot as plt
     import seaborn as sns
 
-    os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
+    # os.environ.setdefault("PYTHON_JULIAPKG_EXE", "/opt/homebrew/bin/julia")
 
     from ltc.symbolic.util import SimplexCode
 

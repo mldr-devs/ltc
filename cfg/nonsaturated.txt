@@ -1,0 +1,8 @@
+# ltc.run flags for the bursty (non-saturated) traffic experiment.
+# One flag per line; everything after a '#' is ignored.
+--traffic_type bursty
+--n 10
+--seed 43
+--n_epochs 50
+--n_steps 2000
+--window_size 10

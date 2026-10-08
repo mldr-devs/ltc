@@ -49,6 +49,19 @@ class PlotType(Enum):
     FIRST = 'first'
 
 
+def series_xlim(name, n_epochs, n_steps):
+    """X range of a series plot, or nothing when there is only one point to draw.
+
+    PlotType.ALL puts one point per epoch, so a single-epoch rollout gives
+    ``xlim(1, 1)`` -- matplotlib warns that the transformation is singular and the
+    axis is meaningless anyway. Replays are one epoch by design, so leaving the
+    limits to matplotlib is the right answer rather than an edge case.
+    """
+    hi = n_epochs if name == PlotType.ALL else n_epochs * n_steps
+    if hi > 1:
+        plt.xlim(1, hi)
+
+
 def plot_powers(power_states, n, n_drl, seed, name):
     plt.rcParams.update(PLOT_PARAMS)
 
@@ -71,7 +84,7 @@ def plot_powers(power_states, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Consumed power')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(-0.05, 1.05)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
@@ -108,7 +121,7 @@ def plot_power_per_tx(actions, channel_states, power_states, n, n_drl, seed, nam
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Consumed power per succ. TX')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -139,7 +152,7 @@ def plot_rewards(rewards, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Reward')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -170,7 +183,7 @@ def plot_cumulative_rewards(rewards, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Cumulative reward')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -202,7 +215,7 @@ def plot_successful_transmissions(actions, channel_states, n, n_drl, seed, name)
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Successful transmissions')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -236,7 +249,7 @@ def plot_cum_successful_transmissions(actions, channel_states, n, n_drl, seed, n
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Successful transmissions')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -285,7 +298,7 @@ def plot_actions(actions, terminals, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Action')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(0, 1)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend(ncol=2)
@@ -318,7 +331,7 @@ def plot_buffer_states(buffer_states, terminals, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Mean buffer fill')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(-0.05, 1.05)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
@@ -352,7 +365,7 @@ def plot_channel_states(channel_states, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Channel state')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(0, 1)
     plt.legend()
     plt.grid()
@@ -390,7 +403,7 @@ def plot_channel_states_fill(channel_states, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Channel state')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(0, 1)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
@@ -423,7 +436,7 @@ def plot_throughput(actions, channel_states, terminals, n, n_drl, seed, name):
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Throughput')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -456,7 +469,7 @@ def plot_throughput_fill(actions, channel_states, terminals, n, n_drl, seed, nam
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Throughput')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(0, 1)
     plt.yticks(np.linspace(0, 1, 6), [rf'{100 * i:.0f}\%' for i in np.linspace(0, 1, 6)])
     plt.legend()
@@ -489,7 +502,7 @@ def plot_throughput_fill_nn(actions, channel_states, terminals, n, n_drl, seed, 
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Throughput')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -521,7 +534,7 @@ def plot_channel_access_delay(buffer_states, new_frames, terminals, n, n_drl, se
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('Channel access delay')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -560,7 +573,7 @@ def plot_xnor(actions, channel_states, buffer_states, terminals, n, n_drl, seed,
 
     plt.xlabel('Epoch' if name == PlotType.ALL else 'Step')
     plt.ylabel('XNOR')
-    plt.xlim(1, n_epochs if name == PlotType.ALL else n_epochs * n_steps)
+    series_xlim(name, n_epochs, n_steps)
     plt.ylim(bottom=0)
     plt.legend()
     plt.grid()
@@ -604,9 +617,19 @@ def plot_weights(histogram, bin_edges, n, n_drl, seed, name):
         plt.clf()
 
 
-def plot_all(filename):
+def plot_all(filename, points=100):
     with lz4.frame.open(filename, 'rb') as f:
         _, history, _ = unpack_history(cloudpickle.load(f))
+
+    n_epochs, n_steps = np.asarray(history.actions).shape[:2]
+    if n_epochs < 2:
+        # Every all_* plot is a series over epochs, so one epoch draws one point.
+        # A replay is one epoch by design, and the useful view of it is the same
+        # series over steps -- which is exactly what plot_first renders.
+        aggregation = max(1, n_steps // points)
+        print(f'Single-epoch rollout: plotting first_* over steps '
+              f'({aggregation} steps per point) instead of all_* over epochs.')
+        return plot_first(filename, n_epochs=1, aggregation=aggregation)
 
     n, n_drl, seed, _ = parse_history_filename(filename)
 
@@ -630,11 +653,28 @@ def plot_all(filename):
         plot_weights(history.weights_histogram, history.weights_bin_edges, n, n_drl, seed, PlotType.ALL)
 
 
+def rebin(x, aggregation):
+    """Regroup the step axis: ``[epochs, steps, ...] -> [total // agg, agg, ...]``.
+
+    Two leaves in a history do not survive the naive reshape. One is any zero-sized
+    array -- with every station learning, the legacy agent state carries a station
+    axis of length 0, and reshaping through it divides by zero. The other is a
+    rollout whose total length is not a multiple of ``aggregation``; the trailing
+    partial group is dropped, the same convention ltc.utils.history_page uses, so
+    the last point is not an average over fewer steps than the rest.
+    """
+    if x.ndim < 2 or x.size == 0:
+        return x
+    n_groups = x.shape[0] * x.shape[1] // aggregation
+    trailing = x.shape[2:]
+    return x.reshape(-1, *trailing)[:n_groups * aggregation].reshape(n_groups, aggregation, *trailing)
+
+
 def plot_first(filename, n_epochs=10, aggregation=1000):
     with lz4.frame.open(filename, 'rb') as f:
         _, history, _ = unpack_history(cloudpickle.load(f))
         history = jax.tree.map(lambda x: x[:n_epochs], asdict(history))
-        history = jax.tree.map(lambda x: x.reshape(-1, aggregation, *x.shape[2:]), history)
+        history = jax.tree.map(lambda x: rebin(x, aggregation), history)
         history = Output(**history)
 
     n, n_drl, seed, _ = parse_history_filename(filename)
