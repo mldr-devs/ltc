@@ -37,7 +37,7 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
         defaults = dict(
             k_tx=jnp.array(0.0), k_tx_planned=jnp.array(0.0),
             k_coll_ltc=jnp.array(0.0), k_coll_coex=jnp.array(0.0),
-            tx_started_empty=jnp.array(False), initial_ret_c=jnp.array(0),
+            tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
         )
@@ -54,13 +54,12 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
         r = self._macro_reward(k_coll_coex=jnp.array(1.0), k_tx_planned=jnp.array(1.0))
         self.assertAlmostEqual(float(r), TX_COEX_COLLISION_PENALTY * 1.0, places=6)
 
-        # LTC collision + max retransmission: collision penalty + max-retry penalty (additive)
+        # LTC collision with the retry budget exhausted: max-retry penalty replaces the collision one
         r = self._macro_reward(
             k_coll_ltc=jnp.array(1.0), k_tx_planned=jnp.array(1.0),
-            initial_ret_c=jnp.array(MAX_RETRANSMISSION),
+            retry_exhausted=jnp.array(True),
         )
-        expected = TX_LTC_COLLISION_PENALTY * 1.0 + TX_MAX_RETRANSMISSION_PENALTY
-        self.assertAlmostEqual(float(r), expected, places=6)
+        self.assertAlmostEqual(float(r), TX_MAX_RETRANSMISSION_PENALTY, places=6)
 
         # empty buffer, no collision: penalty scales with planned duration
         r = self._macro_reward(tx_started_empty=jnp.array(True), k_tx_planned=jnp.array(2.0))

@@ -403,7 +403,8 @@ if __name__ == '__main__':
     parser.add_argument('--inspect_steps', type=int, default=20, help='Slots to print in inspect mode')
     args = parser.parse_args()
 
-    n, n_drl, seed, _ = parse_history_filename(args.filename)
+    n, _n_final, seed, _, n_drl = parse_history_filename(args.filename)
+    n_drl = n if n_drl is None else n_drl
 
     with lz4.frame.open(args.filename, 'rb') as f:
         _, history, metadata = unpack_history(cloudpickle.load(f))

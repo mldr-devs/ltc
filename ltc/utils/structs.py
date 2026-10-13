@@ -9,6 +9,7 @@ from reinforced_lib.agents import AgentState
 class MacroActionState:
     remaining: jax.Array
     action_types: jax.Array
+    durations: jax.Array               # chosen macro duration, unscaled (subframes for TX)
     tx_success_accum: jax.Array          # k_tx: successful subframes
     tx_planned_accum: jax.Array          # k_tx_planned: planned subframes (= TX macro duration)
     k_coll_ltc: jax.Array                # collided subframes vs LTC
@@ -18,7 +19,7 @@ class MacroActionState:
     header_collision: jax.Array          # True if first mini-slot of macro TX collided
     header_collision_other: jax.Array    # True if the header collision was with a non-LTC station
     initial_ret_c: jax.Array             # ret_c captured at macro TX start
-    tx_started_empty: jax.Array          # True if buffer was empty when macro TX began
+    tx_start_occupancy: jax.Array        # queued packets when macro TX began
 
 
 @jax.tree_util.register_dataclass

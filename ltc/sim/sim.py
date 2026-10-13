@@ -77,22 +77,28 @@ def add_new_frames(buffer_states, buffer_birth_steps, new_frames, packet_seqs, c
 
 
 def simulate(buffer_states, buffer_birth_steps, new_frames, actions, packet_seqs, current_step,
-             tx_packet_mask, tx_success_mask, active=None):
+             tx_packet_mask, dequeue_count, drop_count=None, active=None):
     if active is None:
         active = jnp.ones_like(actions, dtype=bool)
+    if drop_count is None:
+        drop_count = jnp.zeros_like(actions, dtype=jnp.int32)
 
     active = jnp.asarray(active, dtype=bool)
     actions = jnp.where(active, actions, Actions.IDLE.value)
     new_frames = jnp.where(active, new_frames, 0)
 
     channel_state = channel_state_selector(actions)
-    pre_nonempty = jnp.any(buffer_states != EMPTY_PACKET_ID, axis=1)
-    packet_tx = tx_success_mask & pre_nonempty & active
     planned_packets = (tx_packet_mask & active).astype(jnp.int32)
-    successful_packets = packet_tx.astype(jnp.int32)
+
+    # The whole macro TX is settled at once: dequeue_count subframes got through, drop_count
+    # head packets exhausted their retransmission budget. Both leave the queue from the head.
+    occupancy = jnp.sum((buffer_states != EMPTY_PACKET_ID).astype(jnp.int32), axis=1, dtype=jnp.int32)
+    delivered = jnp.clip(jnp.where(active, dequeue_count, 0).astype(jnp.int32), 0, occupancy)
+    dropped = jnp.clip(jnp.where(active, drop_count, 0).astype(jnp.int32), 0, occupancy - delivered)
+    successful_packets = delivered
+
     queue_size = buffer_states.shape[1]
-    head_mask = jnp.arange(queue_size) == 0
-    tx_masks = packet_tx[:, None] & head_mask[None, :]
+    tx_masks = jnp.arange(queue_size)[None, :] < (delivered + dropped)[:, None]
 
     buffer_states = remove_transmitted_packets(buffer_states, tx_masks)
     buffer_birth_steps = remove_transmitted_packets(buffer_birth_steps, tx_masks)

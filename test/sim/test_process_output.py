@@ -18,7 +18,7 @@ class ProcessOutputTestCase(unittest.TestCase):
         self.assertEqual(reward, 0.0)
         self.assertEqual(r, 5)
 
-    def _make_tx_process_output(self, ret_c_init, channel_state, tx_packet_mask, tx_success_mask):
+    def _make_tx_process_output(self, ret_c_init, channel_state, tx_macro_success, tx_macro_failed):
         """Helper: one TX agent, one step, returns obs ret_c."""
         buf = jnp.array([[5, EMPTY, EMPTY]])
         obs = jnp.zeros((1, 3, OBS_SIZE), dtype=jnp.float32)
@@ -38,29 +38,31 @@ class ProcessOutputTestCase(unittest.TestCase):
             power_states=jnp.array([100]), channel_state=channel_state,
             obs=obs, actions=jnp.array([Actions.TX.value]), terminals=jnp.array([False]),
             key=KEY, current_step=0, obs_features=obs_features, obs_config=obs_config,
-            tx_packet_mask=jnp.array([tx_packet_mask]),
-            tx_success_mask=jnp.array([tx_success_mask]),
+            initial_ret_c=jnp.array([ret_c_init], dtype=jnp.int32),
+            tx_macro_success=jnp.array([tx_macro_success]),
+            tx_macro_failed=jnp.array([tx_macro_failed]),
+            retry_exhausted=jnp.array([tx_macro_failed and ret_c_init >= MAX_RETRANSMISSION]),
         )
         return int(result_obs[0, -1, ObsIdx.STATUS_RETRY_COUNTER])
 
-    def test_tx_sub_window_collision_increments_ret_c(self):
-        r = self._make_tx_process_output(ret_c_init=2, channel_state=-1, tx_packet_mask=True, tx_success_mask=False)
+    def test_tx_macro_failure_increments_ret_c(self):
+        r = self._make_tx_process_output(ret_c_init=2, channel_state=-1, tx_macro_success=False, tx_macro_failed=True)
         self.assertEqual(r, 3)
 
-    def test_tx_sub_window_collision_at_max_resets_ret_c(self):
-        r = self._make_tx_process_output(ret_c_init=MAX_RETRANSMISSION, channel_state=-1, tx_packet_mask=True, tx_success_mask=False)
+    def test_tx_macro_failure_at_max_resets_ret_c(self):
+        r = self._make_tx_process_output(ret_c_init=MAX_RETRANSMISSION, channel_state=-1, tx_macro_success=False, tx_macro_failed=True)
         self.assertEqual(r, 0)
 
-    def test_tx_sub_window_collision_below_max(self):
-        r = self._make_tx_process_output(ret_c_init=7, channel_state=-1, tx_packet_mask=True, tx_success_mask=False)
+    def test_tx_macro_failure_below_max(self):
+        r = self._make_tx_process_output(ret_c_init=7, channel_state=-1, tx_macro_success=False, tx_macro_failed=True)
         self.assertEqual(r, 8)
 
-    def test_tx_sub_window_success_resets_ret_c(self):
-        r = self._make_tx_process_output(ret_c_init=3, channel_state=1, tx_packet_mask=True, tx_success_mask=True)
+    def test_tx_macro_success_resets_ret_c(self):
+        r = self._make_tx_process_output(ret_c_init=3, channel_state=1, tx_macro_success=True, tx_macro_failed=False)
         self.assertEqual(r, 0)
 
     def test_tx_mid_macro_ret_c_unchanged(self):
-        r = self._make_tx_process_output(ret_c_init=5, channel_state=-1, tx_packet_mask=False, tx_success_mask=False)
+        r = self._make_tx_process_output(ret_c_init=5, channel_state=-1, tx_macro_success=False, tx_macro_failed=False)
         self.assertEqual(r, 5)
 
     def test_process_rl_output(self):
@@ -88,7 +90,7 @@ class ProcessOutputTestCase(unittest.TestCase):
         channel_state = -1
         obs = jnp.zeros((4, 3, OBS_SIZE), dtype=jnp.float32)
         obs = obs.at[:, -1, ObsIdx.STATUS_RETRY_COUNTER].set(8)
-        expected_R_0 = TX_COEX_COLLISION_PENALTY * 1.0 + TX_MAX_RETRANSMISSION_PENALTY  # -5.0 + -1.0
+        expected_R_0 = TX_MAX_RETRANSMISSION_PENALTY  # retry budget exhausted replaces the coex penalty
         expected_power = power_states + jnp.array([-TX_CONSUMPTION, -CS_CONSUMPTION, -TX_CONSUMPTION, -TX_CONSUMPTION])
 
         obs_features = ObsFeatureInputs(
@@ -140,13 +142,15 @@ class ProcessOutputTestCase(unittest.TestCase):
             ack_collision_other=ack_collision_other,
             initial_ret_c=initial_ret_c,
             tx_started_empty=tx_started_empty,
+            tx_macro_failed=jnp.array([True, False, False, True], dtype=bool),
+            retry_exhausted=jnp.array([True, False, False, True], dtype=bool),
         )
 
         self.assertEqual(result_obs.shape[-1], OBS_SIZE)
         self.assertEqual(result_obs[1, -1, ObsIdx.CHANNEL_LAST_CS_BUSY], 1.0)
         self.assertEqual(result_obs[1, -1, ObsIdx.CHANNEL_LAST_CS_TX_SAME_TYPE], -1.0)
         self.assertEqual(result_obs[0, -1, ObsIdx.CHANNEL_LAST_TX_COLLISION_OTHER], 1.0)
-        self.assertEqual(result_obs[2, -1, ObsIdx.BUFFER_PACKET_COUNT], 1.0)
+        self.assertEqual(result_obs[2, -1, ObsIdx.BUFFER_OCCUPANCY_PCT], 1.0 / 3)
         self.assertEqual(result_obs[2, -1, ObsIdx.ACTION_BACK_PCT], 1.0)
         self.assertEqual(result_R[0], expected_R_0)
         self.assertTrue(jnp.array_equal(power, expected_power))

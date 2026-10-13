@@ -612,7 +612,8 @@ def plot_all(filename):
     with lz4.frame.open(filename, 'rb') as f:
         _, history, _ = unpack_history(cloudpickle.load(f))
 
-    n, n_drl, seed, _ = parse_history_filename(filename)
+    n, _n_final, seed, _, n_drl = parse_history_filename(filename)
+    n_drl = n if n_drl is None else n_drl
 
     plot_powers(history.power_states, n, n_drl, seed, PlotType.ALL)
     plot_power_per_tx(history.actions, history.channel_state, history.power_states, n, n_drl, seed, PlotType.ALL)
@@ -641,7 +642,8 @@ def plot_first(filename, n_epochs=10, aggregation=1000):
         history = jax.tree.map(lambda x: x.reshape(-1, aggregation, *x.shape[2:]), history)
         history = Output(**history)
 
-    n, n_drl, seed, _ = parse_history_filename(filename)
+    n, _n_final, seed, _, n_drl = parse_history_filename(filename)
+    n_drl = n if n_drl is None else n_drl
 
     plot_powers(history.power_states, n, n_drl, seed, PlotType.FIRST)
     plot_power_per_tx(history.actions, history.channel_state, history.power_states, n, n_drl, seed, PlotType.FIRST)

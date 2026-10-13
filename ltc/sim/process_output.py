@@ -48,7 +48,7 @@ def reset_counters(_):
 
 
 def tx_macro_reward(
-    k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, initial_ret_c,
+    k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, retry_exhausted,
     header_collision, ack_collision, header_collision_other, ack_collision_other,
 ):
     hdr_ack = header_collision | ack_collision
@@ -69,18 +69,22 @@ def tx_macro_reward(
         0.0,
     )
 
+    # Gated on a non-empty buffer (the note's `b > 0`): a TX on an empty buffer already pays
+    # P_empty for every planned subframe and must not be charged for its length on top.
     size_penalty = jnp.where(
-        k_tx_planned >= TX_SIZE_THRESHOLD,
+        ~tx_started_empty & (k_tx_planned >= TX_SIZE_THRESHOLD),
         TX_SIZE_PENALTY * jnp.minimum(1.0, (k_tx_planned - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW),
         0.0,
     )
 
-    # Collision penalty scales with absolute count; max-retry penalty is additive
+    # Exhausting the retransmission budget replaces the per-collision penalty, it does not add to it
     collision_reward = jnp.where(
         any_collision,
-        TX_LTC_COLLISION_PENALTY * k_coll_ltc_eff
-        + TX_COEX_COLLISION_PENALTY * k_coll_coex_eff
-        + jnp.where(initial_ret_c >= MAX_RETRANSMISSION, TX_MAX_RETRANSMISSION_PENALTY, 0.0),
+        jnp.where(
+            retry_exhausted,
+            TX_MAX_RETRANSMISSION_PENALTY,
+            TX_LTC_COLLISION_PENALTY * k_coll_ltc_eff + TX_COEX_COLLISION_PENALTY * k_coll_coex_eff,
+        ),
         0.0,
     )
 
@@ -102,7 +106,7 @@ def oldest_packet_age_norm(buffer_state, buffer_birth_state, current_step):
 
 
 def build_observation_entry(
-    buffer_state, new_buffer_state, new_buffer_birth_state, action, channel_state,
+    buffer_state, new_buffer_state, new_buffer_birth_state, action, action_duration, channel_state,
     current_step, obs_features, obs_config, ret_c, no_tx
 ):
     buffer_count = jnp.sum((new_buffer_state != EMPTY_PACKET_ID).astype(jnp.int32))
@@ -127,7 +131,6 @@ def build_observation_entry(
 
     return jnp.array([
         buffer_occupancy_pct,
-        buffer_count.astype(jnp.float32),
         packet_age_norm,
         obs_features.traffic_mean_arrival_rate,
         cs_busy,
@@ -138,6 +141,7 @@ def build_observation_entry(
         action_tx,
         action_cs,
         action_idle,
+        action_duration.astype(jnp.float32),
         obs_features.back_pct,
         ret_c.astype(jnp.float32),
         no_tx.astype(jnp.float32),
@@ -146,12 +150,12 @@ def build_observation_entry(
 
 
 def normalize_obs(obs, queue_size):
-    obs = obs.at[..., ObsIdx.BUFFER_PACKET_COUNT].divide(queue_size)
     raw_age = obs[..., ObsIdx.BUFFER_OLDEST_AGE_NORM]
     obs = obs.at[..., ObsIdx.BUFFER_OLDEST_AGE_NORM].set(
         jnp.where(raw_age >= 0, jnp.minimum(raw_age / SAFE_IDLE_PERIOD, 1.0), raw_age)
     )
     obs = obs.at[..., ObsIdx.TRAFFIC_MEAN_ARRIVAL_RATE].divide(OBS_TRAFFIC_ARRIVAL_NORM)
+    obs = obs.at[..., ObsIdx.ACTION_DURATION].divide(OBS_DURATION_NORM)
     obs = obs.at[..., ObsIdx.STATUS_RETRY_COUNTER].divide(MAX_RETRANSMISSION)
     obs = obs.at[..., ObsIdx.STATUS_NO_TX_COUNTER].divide(SAFE_IDLE_PERIOD + PENALIZED_IDLE_PERIOD)
     obs = obs.at[..., ObsIdx.STATUS_UNIQUE_LTC_TX_WINDOW].divide(OBS_UNIQUE_LTC_TX_NORM)
@@ -166,6 +170,7 @@ def process_output_i(
     channel_state,
     obs,
     action,
+    action_duration,
     terminal,
     key,
     current_step,
@@ -183,8 +188,9 @@ def process_output_i(
     ack_collision_other,
     initial_ret_c,
     tx_started_empty,
-    tx_packet_mask,
-    tx_success_mask,
+    tx_macro_success,
+    tx_macro_failed,
+    retry_exhausted,
 ):
     old_ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int64)
     no_tx     = obs[-1, ObsIdx.STATUS_NO_TX_COUNTER].astype(jnp.int64)
@@ -199,26 +205,16 @@ def process_output_i(
     no_tx       = jnp.where(is_tx, jnp.zeros_like(no_tx), cs_no_tx)
     slot_reward = jnp.where(is_tx, 0.0, cs_reward)
 
-    # ret_c for TX: update once per sub-window completion (tx_packet_mask), not every slot
-    tx_sub_success    = is_tx & tx_packet_mask & tx_success_mask
-    tx_sub_coll_retry = is_tx & tx_packet_mask & ~tx_success_mask & (old_ret_c < MAX_RETRANSMISSION)
-    tx_sub_coll_reset = is_tx & tx_packet_mask & ~tx_success_mask & (old_ret_c >= MAX_RETRANSMISSION)
-
+    # ret_c settles once per macro TX: a subframe success cannot count if the ACK later fails
     ret_c = jnp.where(is_tx, old_ret_c, cs_ret_c)          # CS uses cs logic; TX holds by default
-    ret_c = jnp.where(tx_sub_success,    0,                ret_c)
-    ret_c = jnp.where(tx_sub_coll_retry, old_ret_c + 1,    ret_c)
-    ret_c = jnp.where(tx_sub_coll_reset, 0,                ret_c)
+    ret_c = jnp.where(tx_macro_success, 0, ret_c)
+    ret_c = jnp.where(tx_macro_failed & ~retry_exhausted, initial_ret_c + 1, ret_c)
+    ret_c = jnp.where(retry_exhausted, 0, ret_c)
 
-    if obs_config.enable_tx_collision_other:
-        k_coll_ltc_r, k_coll_coex_r = k_coll_ltc, k_coll_coex
-        hdr_other_r, ack_other_r    = header_collision_other, ack_collision_other
-    else:
-        k_coll_ltc_r, k_coll_coex_r = k_coll_ltc + k_coll_coex, jnp.zeros_like(k_coll_coex)
-        hdr_other_r, ack_other_r    = jnp.zeros_like(header_collision_other), jnp.zeros_like(ack_collision_other)
-
+    # The reward always uses the true collision type; obs_config only decides what the agent sees.
     macro_reward = tx_macro_reward(
-        k_tx, k_tx_planned, k_coll_ltc_r, k_coll_coex_r, tx_started_empty, initial_ret_c,
-        header_collision, ack_collision, hdr_other_r, ack_other_r,
+        k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, retry_exhausted,
+        header_collision, ack_collision, header_collision_other, ack_collision_other,
     )
     reward = jnp.where(
         action == Actions.TX.value,
@@ -227,7 +223,6 @@ def process_output_i(
     )
     reward = jnp.where(terminal, 0., reward)
 
-    channel_state = jnp.where(action == Actions.CS.value, channel_state, -1)
     power = jnp.where(
         action == Actions.TX.value, power_state - TX_CONSUMPTION,
         jnp.where(
@@ -240,7 +235,7 @@ def process_output_i(
     )
 
     obs_t = build_observation_entry(
-        buffer_state, new_buffer_state, new_buffer_birth_state, action, channel_state,
+        buffer_state, new_buffer_state, new_buffer_birth_state, action, action_duration, channel_state,
         current_step, obs_features, obs_config, ret_c, no_tx
     )
     obs = jax.lax.cond(
@@ -266,6 +261,7 @@ def process_output(
     current_step,
     obs_features,
     obs_config,
+    action_durations=None,
     roll_obs=True,
     done_now=False,
     k_tx=None,
@@ -278,27 +274,38 @@ def process_output(
     ack_collision_other=None,
     initial_ret_c=None,
     tx_started_empty=None,
-    tx_packet_mask=None,
-    tx_success_mask=None,
+    tx_macro_success=None,
+    tx_macro_failed=None,
+    retry_exhausted=None,
 ):
     n = actions.shape[0]
     keys = jax.random.split(key, n)
-    roll_obs = jnp.broadcast_to(jnp.asarray(roll_obs), actions.shape)
-    done_now = jnp.broadcast_to(jnp.asarray(done_now), actions.shape)
-    k_tx = jnp.broadcast_to(jnp.asarray(k_tx if k_tx is not None else 0.0, dtype=jnp.float32), (n,))
-    k_tx_planned = jnp.broadcast_to(jnp.asarray(k_tx_planned if k_tx_planned is not None else 0.0, dtype=jnp.float32), (n,))
-    k_coll_ltc = jnp.broadcast_to(jnp.asarray(k_coll_ltc if k_coll_ltc is not None else 0.0, dtype=jnp.float32), (n,))
-    k_coll_coex = jnp.broadcast_to(jnp.asarray(k_coll_coex if k_coll_coex is not None else 0.0, dtype=jnp.float32), (n,))
-    header_collision = jnp.broadcast_to(jnp.asarray(header_collision if header_collision is not None else False), (n,))
-    header_collision_other = jnp.broadcast_to(jnp.asarray(header_collision_other if header_collision_other is not None else False), (n,))
-    ack_collision = jnp.broadcast_to(jnp.asarray(ack_collision if ack_collision is not None else False), (n,))
-    ack_collision_other = jnp.broadcast_to(jnp.asarray(ack_collision_other if ack_collision_other is not None else False), (n,))
-    initial_ret_c = jnp.broadcast_to(jnp.asarray(initial_ret_c if initial_ret_c is not None else 0, dtype=jnp.int32), (n,))
-    tx_started_empty = jnp.broadcast_to(jnp.asarray(tx_started_empty if tx_started_empty is not None else False), (n,))
-    tx_packet_mask = jnp.broadcast_to(jnp.asarray(tx_packet_mask if tx_packet_mask is not None else False), (n,))
-    tx_success_mask = jnp.broadcast_to(jnp.asarray(tx_success_mask if tx_success_mask is not None else False), (n,))
 
-    return jax.vmap(process_output_i, in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0))(
+    def bcast(x, default, dtype=None):
+        x = default if x is None else x
+        return jnp.broadcast_to(jnp.asarray(x, dtype=dtype) if dtype else jnp.asarray(x), (n,))
+
+    action_durations = bcast(action_durations, 0, jnp.int32)
+    roll_obs = bcast(roll_obs, False)
+    done_now = bcast(done_now, False)
+    k_tx = bcast(k_tx, 0.0, jnp.float32)
+    k_tx_planned = bcast(k_tx_planned, 0.0, jnp.float32)
+    k_coll_ltc = bcast(k_coll_ltc, 0.0, jnp.float32)
+    k_coll_coex = bcast(k_coll_coex, 0.0, jnp.float32)
+    header_collision = bcast(header_collision, False)
+    header_collision_other = bcast(header_collision_other, False)
+    ack_collision = bcast(ack_collision, False)
+    ack_collision_other = bcast(ack_collision_other, False)
+    initial_ret_c = bcast(initial_ret_c, 0, jnp.int32)
+    tx_started_empty = bcast(tx_started_empty, False)
+    tx_macro_success = bcast(tx_macro_success, False)
+    tx_macro_failed = bcast(tx_macro_failed, False)
+    retry_exhausted = bcast(retry_exhausted, False)
+
+    return jax.vmap(
+        process_output_i,
+        in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    )(
         buffer_states,
         new_buffer_states,
         new_buffer_birth_states,
@@ -306,6 +313,7 @@ def process_output(
         channel_state,
         obs,
         actions,
+        action_durations,
         terminals,
         keys,
         current_step,
@@ -323,6 +331,7 @@ def process_output(
         ack_collision_other,
         initial_ret_c,
         tx_started_empty,
-        tx_packet_mask,
-        tx_success_mask,
+        tx_macro_success,
+        tx_macro_failed,
+        retry_exhausted,
     )

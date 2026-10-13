@@ -44,7 +44,7 @@ class DCF(BaseAgent):
             backoff = jax.random.randint(key, (), 0, state.cw)
             return DCFState(cw=cw, backoff=backoff)
 
-        buffer_count = env_state[-1][ObsIdx.BUFFER_PACKET_COUNT]
+        buffer_occupancy = env_state[-1][ObsIdx.BUFFER_OCCUPANCY_PCT]
         channel_busy = env_state[-1][ObsIdx.CHANNEL_LAST_CS_BUSY]
         ret_c = env_state[-1][ObsIdx.STATUS_RETRY_COUNTER]
 
@@ -53,7 +53,7 @@ class DCF(BaseAgent):
         is_failure = jax.lax.bitwise_and(is_tx, reward < 0)
 
         return jax.lax.cond(
-            buffer_count == 0,
+            buffer_occupancy == 0,
             reset,
             lambda: jax.lax.cond(
                 jax.lax.bitwise_and(state.backoff > 0, channel_busy == 0),
@@ -76,11 +76,11 @@ class DCF(BaseAgent):
 
     @staticmethod
     def sample(state, key, env_state):
-        buffer_count = env_state[-1][ObsIdx.BUFFER_PACKET_COUNT]
+        buffer_occupancy = env_state[-1][ObsIdx.BUFFER_OCCUPANCY_PCT]
         channel_busy = env_state[-1][ObsIdx.CHANNEL_LAST_CS_BUSY]
 
         return jnp.where(
-            buffer_count == 0,
+            buffer_occupancy == 0,
             Actions.IDLE.value,
             jnp.where(
                 jax.lax.bitwise_and(state.backoff == 0, channel_busy == 0),

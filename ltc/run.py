@@ -197,8 +197,10 @@ def update_packet_tracking(
     ack_collision_other_now = ack_collision_now & collision_with_other
 
     initial_ret_c = jnp.where(is_first_tx_slot, ret_c, macro.initial_ret_c)
-    tx_started_empty = jnp.where(
-        is_first_tx_slot, jnp.all(buffer_states == EMPTY_PACKET_ID, axis=1), macro.tx_started_empty,
+    tx_start_occupancy = jnp.where(
+        is_first_tx_slot,
+        jnp.sum((buffer_states != EMPTY_PACKET_ID).astype(jnp.int32), axis=1, dtype=jnp.int32),
+        macro.tx_start_occupancy,
     )
 
     return (
@@ -206,7 +208,7 @@ def update_packet_tracking(
         tx_packet_mask, tx_success_mask,
         header_collision, header_collision_other,
         done_now, ack_collision_now, ack_collision_other_now,
-        initial_ret_c, tx_started_empty,
+        initial_ret_c, tx_start_occupancy,
     )
 
 
@@ -263,6 +265,7 @@ def update_macro_state_from_ready_agents(
 ):
     macro_action_types = macro_state.action_types
     macro_remaining = macro_state.remaining
+    macro_durations = macro_state.durations
     staged_tx = obs_tracker.staged_tx
 
     macro_action_types = macro_action_types.at[:n_drl].set(
@@ -271,6 +274,9 @@ def update_macro_state_from_ready_agents(
     drl_scaled_durations = scale_tx_durations(decoded_actions.drl_action_types, decoded_actions.drl_durations)
     macro_remaining = macro_remaining.at[:n_drl].set(
         jnp.where(ready_drl, drl_scaled_durations, macro_state.remaining[:n_drl])
+    )
+    macro_durations = macro_durations.at[:n_drl].set(
+        jnp.where(ready_drl, decoded_actions.drl_durations, macro_state.durations[:n_drl])
     )
     staged_tx = staged_tx.at[:n_drl].set(
         jnp.where(ready_drl, decoded_actions.drl_staged_next, obs_tracker.staged_tx[:n_drl])
@@ -285,8 +291,11 @@ def update_macro_state_from_ready_agents(
     macro_remaining = macro_remaining.at[n_drl:].set(
         jnp.where(ready_legacy, legacy_scaled_durations, macro_state.remaining[n_drl:])
     )
+    macro_durations = macro_durations.at[n_drl:].set(
+        jnp.where(ready_legacy, decoded_actions.legacy_durations, macro_state.durations[n_drl:])
+    )
 
-    return macro_action_types, macro_remaining, staged_tx
+    return macro_action_types, macro_remaining, macro_durations, staged_tx
 
 
 def build_traffic(traffic_type, f3dB, loc, scale):
@@ -345,7 +354,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             legacy_durations=legacy_durations,
         )
 
-        macro_action_types, macro_remaining, staged_tx = update_macro_state_from_ready_agents(
+        macro_action_types, macro_remaining, macro_durations, staged_tx = update_macro_state_from_ready_agents(
             c.macro, c.obs_tracker, drl_ready, legacy_ready,
             decoded_actions, n_drl
         )
@@ -367,11 +376,24 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             tx_packet_mask, tx_success_mask,
             header_collision, header_collision_other,
             done_now, ack_collision_now, ack_collision_other_now,
-            initial_ret_c, tx_started_empty,
+            initial_ret_c, tx_start_occupancy,
         ) = update_packet_tracking(
             c.macro, slot_executing, slot_actions, macro_remaining,
             tx_collision_other_now, agent_ready_now, ret_c, c.buffer_states,
         )
+
+        # A macro TX settles as a whole: a header or ACK collision voids every subframe, so the
+        # queue is only touched when the macro ends, with the same count the reward is built from.
+        k_tx_accum = c.macro.tx_success_accum + tx_success_mask.astype(jnp.float32)
+        k_tx_planned = c.macro.tx_planned_accum + tx_packet_mask.astype(jnp.float32)
+        hdr_ack = header_collision | ack_collision_now
+        tx_done = done_now & (slot_actions == Actions.TX.value)
+        delivered = jnp.minimum(
+            jnp.where(tx_done & ~hdr_ack, k_tx_accum, 0.0).astype(jnp.int32), tx_start_occupancy
+        )
+        tx_macro_success = tx_done & (delivered > 0)
+        tx_macro_failed = tx_done & (delivered == 0) & (tx_start_occupancy > 0)
+        retry_exhausted = tx_macro_failed & (initial_ret_c >= MAX_RETRANSMISSION)
 
         traffic_states, new_frames = traffic_step(c.traffic_states, traffic_keys)
         (
@@ -382,7 +404,8 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             planned_packets,
             successful_packets,
         ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step,
-                     tx_packet_mask=tx_packet_mask, tx_success_mask=tx_success_mask, active=active)
+                     tx_packet_mask=tx_packet_mask, dequeue_count=delivered,
+                     drop_count=retry_exhausted.astype(jnp.int32), active=active)
 
         (arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist), obs_features = \
             compute_obs_features(
@@ -392,8 +415,6 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             )
 
         packet_collided = tx_packet_mask & sub_collision_flag
-        k_tx_accum = c.macro.tx_success_accum + successful_packets.astype(jnp.float32)
-        k_tx_planned = c.macro.tx_planned_accum + tx_packet_mask.astype(jnp.float32)
         k_coll_ltc = c.macro.k_coll_ltc + jnp.where(packet_collided & ~sub_collision_other_flag, 1.0, 0.0)
         k_coll_coex = c.macro.k_coll_coex + jnp.where(packet_collided & sub_collision_other_flag, 1.0, 0.0)
 
@@ -404,9 +425,10 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
             c.terminals, reward_key, step, obs_features, obs_config,
-            roll_obs=done_now,
+            action_durations=jnp.where(slot_executing, macro_durations, 0),
+            roll_obs=agent_ready_now,
             done_now=done_now,
-            k_tx=k_tx_accum,
+            k_tx=successful_packets.astype(jnp.float32),
             k_tx_planned=k_tx_planned,
             k_coll_ltc=k_coll_ltc,
             k_coll_coex=k_coll_coex,
@@ -415,9 +437,10 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             ack_collision=ack_collision_now,
             ack_collision_other=ack_collision_other_now,
             initial_ret_c=initial_ret_c,
-            tx_started_empty=tx_started_empty,
-            tx_packet_mask=tx_packet_mask,
-            tx_success_mask=tx_success_mask,
+            tx_started_empty=tx_start_occupancy == 0,
+            tx_macro_success=tx_macro_success,
+            tx_macro_failed=tx_macro_failed,
+            retry_exhausted=retry_exhausted,
         )
 
         # Reset per-macro accumulators when action completes
@@ -440,6 +463,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
         macro_state = MacroActionState(
             remaining=macro_remaining,
             action_types=macro_action_types,
+            durations=macro_durations,
             tx_success_accum=k_tx_accum,
             tx_planned_accum=k_tx_planned,
             k_coll_ltc=k_coll_ltc,
@@ -449,7 +473,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             header_collision=header_collision,
             header_collision_other=header_collision_other,
             initial_ret_c=initial_ret_c,
-            tx_started_empty=tx_started_empty,
+            tx_start_occupancy=tx_start_occupancy,
         )
         obs_tracker_state = ObsTrackerState(
             buffer_birth_steps=buffer_birth_steps,
@@ -477,6 +501,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run the RL network simulation with configurable parameters.")
     parser.add_argument('--n', type=int, default=5, help='Initial number of agents in the simulation.')
+    parser.add_argument('--n_drl', type=int, help='Number of stations running the learning agent. Defaults to all of them.')
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
     parser.add_argument('--n_epochs', type=int, default=100, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=3000, help='Number of steps per epoch.')
@@ -496,7 +521,7 @@ if __name__ == '__main__':
     parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
-    parser.add_argument('--legacy_type', type=str, default='tdma', choices=['q-aloha', 'eb-aloha', 'fw-aloha', 'tdma'], help="Legacy agent type to use: 'q-aloha', 'eb-aloha', 'fw-aloha', or 'tdma'.")
+    parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf'], help='Agent run by the stations not covered by --n_drl.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
 
@@ -508,6 +533,10 @@ if __name__ == '__main__':
     n_final = args.n_final if args.n_final is not None else n_init
     n = max(n_init, n_final)
     total_steps = args.n_epochs * args.n_steps
+
+    n_drl = args.n_drl if args.n_drl is not None else n
+    if not 0 <= n_drl <= n:
+        raise ValueError(f'--n_drl must be between 0 and {n}.')
 
     if args.queue_size <= 0:
         raise ValueError('--queue_size must be positive.')
@@ -557,12 +586,15 @@ if __name__ == '__main__':
         tau=0.05
     )
     key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n)
+    drl_states, drl_step = init_agents(drl, init_key, n_drl)
     drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(jnp.float32))
 
-    dcf = DCF()
+    if args.legacy_type == 'dcf':
+        legacy = DCF()
+    else:
+        raise ValueError(f'Unknown legacy type: {args.legacy_type}')
     key, init_key = jax.random.split(key)
-    legacy_states, legacy_step = init_agents(dcf, init_key, 0)
+    legacy_states, legacy_step = init_agents(legacy, init_key, n - n_drl)
 
     key, init_key = jax.random.split(key)
 
@@ -585,7 +617,7 @@ if __name__ == '__main__':
         max_duration=MAX_MACRO_DURATION,
         legacy_tx_duration=LEGACY_TX_DURATION,
     )
-    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n, config=step_config))
+    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=step_config))
 
     carry = Carry(
         drl_states=drl_states,
@@ -605,6 +637,7 @@ if __name__ == '__main__':
         macro=MacroActionState(
             remaining=jnp.zeros(n, dtype=jnp.int32),
             action_types=jnp.full(n, Actions.IDLE.value, dtype=jnp.int32),
+            durations=jnp.zeros(n, dtype=jnp.int32),
             tx_success_accum=jnp.zeros(n, dtype=jnp.float32),
             tx_planned_accum=jnp.zeros(n, dtype=jnp.float32),
             k_coll_ltc=jnp.zeros(n, dtype=jnp.float32),
@@ -614,7 +647,7 @@ if __name__ == '__main__':
             header_collision=jnp.zeros(n, dtype=bool),
             header_collision_other=jnp.zeros(n, dtype=bool),
             initial_ret_c=jnp.zeros(n, dtype=jnp.int32),
-            tx_started_empty=jnp.zeros(n, dtype=bool),
+            tx_start_occupancy=jnp.zeros(n, dtype=jnp.int32),
         ),
         obs_tracker=ObsTrackerState(
             buffer_birth_steps=jnp.full((n, args.queue_size), -1, dtype=jnp.int32),
@@ -635,7 +668,7 @@ if __name__ == '__main__':
         all_outputs.append(output)
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
-    filename = build_history_filename(n_init, n_final, args.seed, commit_hash)
+    filename = build_history_filename(n_init, n_final, args.seed, commit_hash, n_drl=n_drl)
 
     with lz4.frame.open(filename, 'wb') as f:
         cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)
