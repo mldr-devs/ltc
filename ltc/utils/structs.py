@@ -29,8 +29,7 @@ class ObsTrackerState:
     arrival_hist: jax.Array
     planned_tx_hist: jax.Array
     success_tx_hist: jax.Array
-    channel_busy_hist: jax.Array
-    collision_hist: jax.Array
+    sensed_busy_hist: jax.Array
     staged_tx: jax.Array
 
 
@@ -38,8 +37,7 @@ class ObsTrackerState:
 @dataclass
 class ObsFeatureInputs:
     traffic_mean_arrival_rate: jax.Array
-    channel_occupancy_pct_window: jax.Array
-    channel_collisions_pct_window: jax.Array
+    sensed_busy_pct_window: jax.Array
     back_pct: jax.Array
     unique_ltc_tx_window: jax.Array
     cs_tx_same_type_now: jax.Array

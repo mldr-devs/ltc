@@ -40,6 +40,7 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
             tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
+            tx_slots=TX_SLOTS,
         )
         defaults.update(kwargs)
         return tx_macro_reward(**defaults)
@@ -47,7 +48,7 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
     def test_tx_macro_reward_branches(self):
         # success: 1 sub-window, no collision
         r = self._macro_reward(k_tx=jnp.array(1.0), k_tx_planned=jnp.array(1.0))
-        expected = TX_REWARD * (1.0 * TX_SLOTS - 2.0) / TX_SLOTS
+        expected = TX_REWARD * max(1.0 * TX_SLOTS - 2.0, 1.0) / TX_SLOTS
         self.assertAlmostEqual(float(r), expected, places=6)
 
         # coex collision, ret_c < MAX: 1 collided sub-window → full coex penalty

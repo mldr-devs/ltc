@@ -14,7 +14,7 @@ EMPTY = EMPTY_PACKET_ID
 class ProcessOutputTestCase(unittest.TestCase):
     def test_no_transmission(self):
         args = (Actions.IDLE.value, jnp.array([1, EMPTY, EMPTY]), jnp.array(5, dtype=jnp.int64), 0, jnp.array(1, dtype=jnp.int64), KEY)
-        reward, r, no_tx = no_transmission(args)
+        reward, r, no_tx = no_transmission(args, TX_SLOTS)
         self.assertEqual(reward, 0.0)
         self.assertEqual(r, 5)
 
@@ -25,8 +25,7 @@ class ProcessOutputTestCase(unittest.TestCase):
         obs = obs.at[0, -1, ObsIdx.STATUS_RETRY_COUNTER].set(ret_c_init)
         obs_features = ObsFeatureInputs(
             traffic_mean_arrival_rate=jnp.array([1.0]),
-            channel_occupancy_pct_window=jnp.array([0.0]),
-            channel_collisions_pct_window=jnp.array([0.0]),
+            sensed_busy_pct_window=jnp.array([0.0]),
             back_pct=jnp.array([0.0]),
             unique_ltc_tx_window=jnp.array([0.0]),
             cs_tx_same_type_now=jnp.array([0.0]),
@@ -95,8 +94,7 @@ class ProcessOutputTestCase(unittest.TestCase):
 
         obs_features = ObsFeatureInputs(
             traffic_mean_arrival_rate=jnp.array([1.0, 2.0, 3.0, 4.0], dtype=jnp.float32),
-            channel_occupancy_pct_window=jnp.full((4,), 0.25, dtype=jnp.float32),
-            channel_collisions_pct_window=jnp.full((4,), 0.5, dtype=jnp.float32),
+            sensed_busy_pct_window=jnp.full((4,), 0.25, dtype=jnp.float32),
             back_pct=jnp.array([0.0, 0.6, 1.0, 0.0], dtype=jnp.float32),
             unique_ltc_tx_window=jnp.full((4,), 2.0, dtype=jnp.float32),
             cs_tx_same_type_now=jnp.array([0.0, 1.0, 0.0, 0.0], dtype=jnp.float32),

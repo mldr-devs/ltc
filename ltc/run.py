@@ -10,11 +10,13 @@ from functools import partial
 import cloudpickle
 import jax
 import jax.numpy as jnp
+import numpy as np
 import lz4.frame
 import optax
+from reinforced_lib.agents.deep.ddqn import DDQN
 from tqdm import trange
 
-from ltc.agents import BayesianDDQN, DCF, QNetwork, StochasticVariationalNetwork
+from ltc.agents import DCF, QNetwork
 from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
@@ -42,6 +44,7 @@ class RLStepConfig:
     action_space_variant: str = 'txcs_duration_set'
     max_duration: int = 5
     legacy_tx_duration: int = 5
+    tx_slots: int = TX_SLOTS
 
 
 def init_agents(agent, key, n):
@@ -168,12 +171,12 @@ def roll_append(arr, val):
 
 def update_packet_tracking(
     macro, slot_executing, slot_actions, macro_remaining,
-    tx_collision_other_now, agent_ready_now, ret_c, buffer_states,
+    tx_collision_other_now, agent_ready_now, ret_c, buffer_states, tx_slots,
 ):
     tx_executing_pre = slot_actions == Actions.TX.value
     channel_state_prelim = channel_state_selector(slot_actions)
 
-    sub_window_start = (macro_remaining % TX_SLOTS == 0) & slot_executing & tx_executing_pre
+    sub_window_start = (macro_remaining % tx_slots == 0) & slot_executing & tx_executing_pre
     sub_collision_flag = jnp.where(sub_window_start, False, macro.sub_collision_flag)
     sub_collision_flag = jnp.where(
         tx_executing_pre & (channel_state_prelim == -1), True, sub_collision_flag,
@@ -183,7 +186,7 @@ def update_packet_tracking(
         tx_executing_pre & (channel_state_prelim == -1) & (tx_collision_other_now > 0.5),
         True, sub_collision_other_flag,
     )
-    tx_packet_mask = ((macro_remaining - 1) % TX_SLOTS == 0) & slot_executing & tx_executing_pre
+    tx_packet_mask = ((macro_remaining - 1) % tx_slots == 0) & slot_executing & tx_executing_pre
     tx_success_mask = tx_packet_mask & ~sub_collision_flag
 
     collision_with_other = tx_collision_other_now > 0.5
@@ -212,17 +215,17 @@ def update_packet_tracking(
     )
 
 
-def scale_tx_durations(action_types, durations):
+def scale_tx_durations(action_types, durations, tx_slots):
     return jnp.where(
         action_types == Actions.TX.value,
-        durations * TX_SLOTS,
+        durations * tx_slots,
         durations,
     )
 
 
 def compute_obs_features(
     obs_tracker, tx_hist, n_drl,
-    new_frames, planned_packets, successful_packets, channel_state, tx_mask,
+    new_frames, planned_packets, successful_packets, channel_state, slot_actions,
     cs_tx_same_type_now, tx_collision_other_now,
 ):
     n = obs_tracker.arrival_hist.shape[0]
@@ -230,9 +233,11 @@ def compute_obs_features(
     arrival_hist = roll_append(obs_tracker.arrival_hist, new_frames.astype(jnp.float32))
     planned_tx_hist = roll_append(obs_tracker.planned_tx_hist, planned_packets.astype(jnp.float32))
     success_tx_hist = roll_append(obs_tracker.success_tx_hist, successful_packets.astype(jnp.float32))
-    channel_busy_hist = roll_append(obs_tracker.channel_busy_hist, (channel_state != 0).astype(jnp.float32))
-    collision_hist = roll_append(obs_tracker.collision_hist, (channel_state == -1).astype(jnp.float32))
-    tx_hist = jnp.roll(tx_hist, -1, axis=0).at[-1].set(tx_mask.astype(jnp.int32))
+    sensed_busy_hist = roll_append(
+        obs_tracker.sensed_busy_hist,
+        jnp.where(slot_actions == Actions.CS.value, (channel_state != 0).astype(jnp.float32), -1.0),
+    )
+    tx_hist = jnp.roll(tx_hist, -1, axis=0).at[-1].set((successful_packets > 0).astype(jnp.int32))
 
     planned_valid = planned_tx_hist >= 0.0
     planned_sum = jnp.sum(jnp.where(planned_valid, planned_tx_hist, 0.0), axis=1)
@@ -248,20 +253,19 @@ def compute_obs_features(
 
     features = ObsFeatureInputs(
         traffic_mean_arrival_rate=window_mean(arrival_hist, axis=1),
-        channel_occupancy_pct_window=jnp.broadcast_to(window_mean(channel_busy_hist), (n,)),
-        channel_collisions_pct_window=jnp.broadcast_to(window_mean(collision_hist), (n,)),
+        sensed_busy_pct_window=window_mean(sensed_busy_hist, axis=1),
         back_pct=back_pct,
         unique_ltc_tx_window=jnp.broadcast_to(unique_ltc_tx_window, (n,)),
         cs_tx_same_type_now=cs_tx_same_type_now,
         tx_collision_other_now=tx_collision_other_now,
     )
 
-    return (arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist), features
+    return (arrival_hist, planned_tx_hist, success_tx_hist, sensed_busy_hist, tx_hist), features
 
 
 def update_macro_state_from_ready_agents(
     macro_state, obs_tracker, ready_drl, ready_legacy,
-    decoded_actions, n_drl
+    decoded_actions, n_drl, tx_slots
 ):
     macro_action_types = macro_state.action_types
     macro_remaining = macro_state.remaining
@@ -271,7 +275,7 @@ def update_macro_state_from_ready_agents(
     macro_action_types = macro_action_types.at[:n_drl].set(
         jnp.where(ready_drl, decoded_actions.drl_action_types, macro_state.action_types[:n_drl])
     )
-    drl_scaled_durations = scale_tx_durations(decoded_actions.drl_action_types, decoded_actions.drl_durations)
+    drl_scaled_durations = scale_tx_durations(decoded_actions.drl_action_types, decoded_actions.drl_durations, tx_slots)
     macro_remaining = macro_remaining.at[:n_drl].set(
         jnp.where(ready_drl, drl_scaled_durations, macro_state.remaining[:n_drl])
     )
@@ -286,7 +290,7 @@ def update_macro_state_from_ready_agents(
         jnp.where(ready_legacy, decoded_actions.legacy_action_types, macro_state.action_types[n_drl:])
     )
     legacy_scaled_durations = scale_tx_durations(
-        decoded_actions.legacy_action_types, decoded_actions.legacy_durations
+        decoded_actions.legacy_action_types, decoded_actions.legacy_durations, tx_slots
     )
     macro_remaining = macro_remaining.at[n_drl:].set(
         jnp.where(ready_legacy, legacy_scaled_durations, macro_state.remaining[n_drl:])
@@ -327,7 +331,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
         drl_ready = jnp.logical_and(active[:n_drl], ready[:n_drl])
         legacy_ready = jnp.logical_and(active[n_drl:], ready[n_drl:])
 
-        obs_norm = normalize_obs(c.obs, queue_size=c.buffer_states.shape[1])
+        obs_norm = normalize_obs(c.obs, queue_size=c.buffer_states.shape[1], tx_slots=config.tx_slots)
         drl_states, drl_actions_raw = drl_step(
             c.drl_states, drl_keys, obs_norm[:n_drl], c.actions[:n_drl], c.rewards[:n_drl], c.terminals[:n_drl], drl_ready
         )
@@ -356,7 +360,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
 
         macro_action_types, macro_remaining, macro_durations, staged_tx = update_macro_state_from_ready_agents(
             c.macro, c.obs_tracker, drl_ready, legacy_ready,
-            decoded_actions, n_drl
+            decoded_actions, n_drl, config.tx_slots
         )
 
         slot_executing = jnp.logical_and(active, macro_remaining > 0)
@@ -379,7 +383,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             initial_ret_c, tx_start_occupancy,
         ) = update_packet_tracking(
             c.macro, slot_executing, slot_actions, macro_remaining,
-            tx_collision_other_now, agent_ready_now, ret_c, c.buffer_states,
+            tx_collision_other_now, agent_ready_now, ret_c, c.buffer_states, config.tx_slots,
         )
 
         # A macro TX settles as a whole: a header or ACK collision voids every subframe, so the
@@ -407,10 +411,10 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
                      tx_packet_mask=tx_packet_mask, dequeue_count=delivered,
                      drop_count=retry_exhausted.astype(jnp.int32), active=active)
 
-        (arrival_hist, planned_tx_hist, success_tx_hist, channel_busy_hist, collision_hist, tx_hist), obs_features = \
+        (arrival_hist, planned_tx_hist, success_tx_hist, sensed_busy_hist, tx_hist), obs_features = \
             compute_obs_features(
                 c.obs_tracker, c.tx_hist, n_drl,
-                new_frames, planned_packets, successful_packets, channel_state, tx_mask,
+                new_frames, planned_packets, successful_packets, channel_state, slot_actions,
                 cs_tx_same_type_now, tx_collision_other_now,
             )
 
@@ -441,6 +445,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             tx_macro_success=tx_macro_success,
             tx_macro_failed=tx_macro_failed,
             retry_exhausted=retry_exhausted,
+            tx_slots=config.tx_slots,
         )
 
         # Reset per-macro accumulators when action completes
@@ -480,8 +485,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             arrival_hist=arrival_hist,
             planned_tx_hist=planned_tx_hist,
             success_tx_hist=success_tx_hist,
-            channel_busy_hist=channel_busy_hist,
-            collision_hist=collision_hist,
+            sensed_busy_hist=sensed_busy_hist,
             staged_tx=staged_tx,
         )
         c = Carry(
@@ -505,7 +509,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_final', type=int, help='Final number of agents in the simulation.')
     parser.add_argument('--n_epochs', type=int, default=100, help='Number of training epochs to run.')
     parser.add_argument('--n_steps', type=int, default=3000, help='Number of steps per epoch.')
-    parser.add_argument('--window_size', type=int, default=1, help='Size of the observation window for each agent.')
+    parser.add_argument('--window_size', type=int, default=20, help='Size of the observation window for each agent.')
+    parser.add_argument('--tx_slots', type=int, default=TX_SLOTS, help='Mini-slots occupied by one TX subframe.')
     parser.add_argument('--queue_size', type=int, default=16, help='Fixed packet-queue length for each station.')
     parser.add_argument('--obs_stats_window', type=int, default=1000, help='Window length for rolling observation statistics.')
     parser.add_argument('--obs_enable_cs_tx_same_type', action='store_true', default=False, help='Enable CS me-vs-other transmitter feature.')
@@ -565,14 +570,16 @@ if __name__ == '__main__':
     key = jax.random.key(args.seed)
     num_actions = action_space_size(args.action_space_variant, MAX_MACRO_DURATION)
 
-    lr_schedule = optax.cosine_decay_schedule(init_value=1e-4, decay_steps=total_steps, alpha=0.01)
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0),
-        optax.adam(lr_schedule, b1=0.95, b2=0.95)
-    )
+    warmup_steps, decay_end_steps, peak_lr = int(0.02 * total_steps), int(0.75 * total_steps), 5e-5
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(0.0, peak_lr, warmup_steps),
+        optax.cosine_decay_schedule(peak_lr, decay_steps=decay_end_steps - warmup_steps, alpha=0.01),
+        optax.constant_schedule(peak_lr * 0.01),
+    ], boundaries=[warmup_steps, decay_end_steps])
+    optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(lr_schedule))
 
-    drl = BayesianDDQN(
-        q_network=StochasticVariationalNetwork(QNetwork(num_actions, num_layers=1, dim=64, num_heads=4)),
+    drl = DDQN(
+        q_network=QNetwork(num_actions, dim=64, num_layers=2),
         obs_space_shape=(args.window_size, OBS_SIZE),
         act_space_size=num_actions,
         optimizer=optimizer,
@@ -581,9 +588,9 @@ if __name__ == '__main__':
         experience_replay_steps=5,
         discount=0.95,
         epsilon=1.0,
-        epsilon_decay=0.999,
+        epsilon_decay=0.9997,
         epsilon_min=0.05,
-        tau=0.05
+        tau=0.01
     )
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(drl, init_key, n_drl)
@@ -616,6 +623,7 @@ if __name__ == '__main__':
         action_space_variant=args.action_space_variant,
         max_duration=MAX_MACRO_DURATION,
         legacy_tx_duration=LEGACY_TX_DURATION,
+        tx_slots=args.tx_slots,
     )
     rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=step_config))
 
@@ -654,8 +662,7 @@ if __name__ == '__main__':
             arrival_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
             planned_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
             success_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
-            channel_busy_hist=jnp.full(args.obs_stats_window, -1.0, dtype=jnp.float32),
-            collision_hist=jnp.full(args.obs_stats_window, -1.0, dtype=jnp.float32),
+            sensed_busy_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
             staged_tx=jnp.zeros(n, dtype=jnp.int32),
         ),
     )
@@ -665,9 +672,9 @@ if __name__ == '__main__':
     for epoch in trange(args.n_epochs):
         global_steps = jnp.arange(epoch * args.n_steps, (epoch + 1) * args.n_steps, dtype=jnp.int32)
         carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
-        all_outputs.append(output)
+        all_outputs.append(jax.device_get(output))
 
-    all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
+    all_outputs = jax.tree.map(lambda *x: np.stack(x), *all_outputs)
     filename = build_history_filename(n_init, n_final, args.seed, commit_hash, n_drl=n_drl)
 
     with lz4.frame.open(filename, 'wb') as f:

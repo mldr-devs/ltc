@@ -62,7 +62,7 @@ class MacroTxSettlementTestCase(unittest.TestCase):
                 macro2, jnp.array([True, True]), actions,
                 jnp.array([remaining, remaining], dtype=jnp.int32),
                 jnp.zeros(2), jnp.array([i == 0, i == 0]), jnp.zeros(2, dtype=jnp.int32),
-                jnp.concatenate([buffers, jnp.full((1, self.QUEUE), EMPTY)]),
+                jnp.concatenate([buffers, jnp.full((1, self.QUEUE), EMPTY)]), TX_SLOTS,
             )
             take = lambda x: x[:1]
             macro = _macro_state(
@@ -106,7 +106,7 @@ class MacroTxSettlementTestCase(unittest.TestCase):
         self.assertEqual(left, 4)
 
     def test_middle_subframe_collision_loses_only_that_subframe(self):
-        delivered, left, hdr, ack = self._run_macro(collide_slots={TX_SLOTS + 3})
+        delivered, left, hdr, ack = self._run_macro(collide_slots={TX_SLOTS})
         self.assertFalse(hdr or ack)
         self.assertEqual(delivered, self.DURATION - 1)
         self.assertEqual(left, 4 - (self.DURATION - 1))
@@ -131,7 +131,7 @@ class RetryExhaustionTestCase(unittest.TestCase):
             k_coll_ltc=jnp.array(1.0), k_coll_coex=jnp.array(0.0),
             tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(True),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
-            header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
+            header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False), tx_slots=TX_SLOTS,
         )
         self.assertAlmostEqual(float(r), TX_MAX_RETRANSMISSION_PENALTY, places=6)
 
@@ -156,7 +156,7 @@ class ObservationWindowTestCase(unittest.TestCase):
                     power_states=jnp.array([100]), channel_state=0, obs=obs,
                     actions=jnp.array([Actions.CS.value]), terminals=jnp.array([False]),
                     key=jax.random.PRNGKey(0), current_step=tick,
-                    obs_features=ObsFeatureInputs(*[jnp.array([0.0])] * 7),
+                    obs_features=ObsFeatureInputs(*[jnp.array([0.0])] * 6),
                     obs_config=ObsFeatureConfig(enable_cs_tx_same_type=False,
                                                 enable_tx_collision_other=False),
                     action_durations=jnp.array([tick], dtype=jnp.int32),   # stands in for the tick
@@ -178,7 +178,7 @@ class EmptyBufferTxTestCase(unittest.TestCase):
             k_coll_ltc=jnp.array(0.0), k_coll_coex=jnp.array(0.0),
             tx_started_empty=jnp.array(True), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
-            header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
+            header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False), tx_slots=TX_SLOTS,
         )
         self.assertAlmostEqual(float(r), TX_EMPTY_BUFFER_PENALTY * 5.0, places=6)  # -2.5, no size penalty
 
@@ -188,7 +188,7 @@ class EmptyBufferTxTestCase(unittest.TestCase):
             k_coll_ltc=jnp.array(0.0), k_coll_coex=jnp.array(0.0),
             tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
-            header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
+            header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False), tx_slots=TX_SLOTS,
         )
         self.assertAlmostEqual(float(r), TX_SIZE_PENALTY, places=6)
 
@@ -204,7 +204,7 @@ class CoexCollisionTestCase(unittest.TestCase):
                 channel_state=-1, obs=jnp.zeros((1, 1, OBS_SIZE), dtype=jnp.float32),
                 actions=jnp.array([Actions.TX.value]), terminals=jnp.array([False]),
                 key=jax.random.PRNGKey(0), current_step=0,
-                obs_features=ObsFeatureInputs(*[jnp.array([0.0])] * 7),
+                obs_features=ObsFeatureInputs(*[jnp.array([0.0])] * 6),
                 obs_config=ObsFeatureConfig(enable_cs_tx_same_type=False, enable_tx_collision_other=flag),
                 done_now=jnp.array([True]), k_tx_planned=jnp.array([1.0]),
                 k_coll_coex=jnp.array([1.0]),
@@ -220,8 +220,7 @@ class TxCollisionOtherFeatureTestCase(unittest.TestCase):
     def _feature(self, channel_state, collision_with_other):
         features = ObsFeatureInputs(
             traffic_mean_arrival_rate=jnp.array(0.0),
-            channel_occupancy_pct_window=jnp.array(0.0),
-            channel_collisions_pct_window=jnp.array(0.0),
+            sensed_busy_pct_window=jnp.array(0.0),
             back_pct=jnp.array(0.0),
             unique_ltc_tx_window=jnp.array(0.0),
             cs_tx_same_type_now=jnp.array(0.0),
@@ -247,7 +246,7 @@ class TxCollisionOtherFeatureTestCase(unittest.TestCase):
 
 class DurationObservationTestCase(unittest.TestCase):
     def test_chosen_duration_is_observed_and_normalized(self):
-        features = ObsFeatureInputs(*[jnp.array(0.0)] * 7)
+        features = ObsFeatureInputs(*[jnp.array(0.0)] * 6)
         entry = build_observation_entry(
             jnp.array([EMPTY, EMPTY]), jnp.array([EMPTY, EMPTY]), jnp.array([-1, -1]),
             jnp.array(Actions.TX.value), jnp.array(3, dtype=jnp.int32), jnp.array(1),
@@ -255,7 +254,7 @@ class DurationObservationTestCase(unittest.TestCase):
             jnp.array(0, dtype=jnp.int32), jnp.array(0, dtype=jnp.int32),
         )
         self.assertEqual(float(entry[ObsIdx.ACTION_DURATION]), 3.0)
-        normalized = normalize_obs(entry[None, None, :], queue_size=2)
+        normalized = normalize_obs(entry[None, None, :], queue_size=2, tx_slots=TX_SLOTS)
         self.assertAlmostEqual(
             float(normalized[0, 0, ObsIdx.ACTION_DURATION]), 3.0 / OBS_DURATION_NORM, places=6
         )

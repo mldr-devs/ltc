@@ -65,7 +65,7 @@ class Target:
         self.randomize = randomize
         self.shuffle_agents = shuffle_agents
 
-        self.model = QNetwork(num_actions=2, num_layers=1, dim=64, num_heads=4)
+        self.model = QNetwork(num_actions=2, num_layers=2, dim=64)
 
         def pred(params, state, obs, root_key):
             #obs [b,t,f]

@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 
@@ -5,9 +7,11 @@ from ltc.sim.constants import *
 from ltc.sim.sim import is_buffer_empty
 
 
-def no_transmission(args):
+def no_transmission(args, tx_slots):
     _, buffer_state, _, _, _, _ = args
-    return jax.lax.cond(is_buffer_empty(buffer_state), idle_empty_buffer, idle_full_buffer, args)
+    return jax.lax.cond(
+        is_buffer_empty(buffer_state), idle_empty_buffer, partial(idle_full_buffer, tx_slots=tx_slots), args
+    )
 
 
 def idle_empty_buffer(_):
@@ -17,13 +21,15 @@ def idle_empty_buffer(_):
     return reward, ret_c, no_tx
 
 
-def idle_full_buffer(args):
+def idle_full_buffer(args, tx_slots):
     _, _, _, _, no_tx, key = args
     rnd_factor = jax.random.normal(key) * SAFE_IDLE_PERIOD_STD
     rnd_factor = jnp.round(rnd_factor).astype(jnp.int32)
-    safe_period = SAFE_IDLE_PERIOD + rnd_factor
+    safe_period = SAFE_IDLE_FRAMES * tx_slots + rnd_factor
     args += (safe_period,)
-    return jax.lax.cond(no_tx < safe_period, no_transmission_short, no_transmission_long, args)
+    return jax.lax.cond(
+        no_tx < safe_period, no_transmission_short, partial(no_transmission_long, tx_slots=tx_slots), args
+    )
 
 
 def no_transmission_short(args):
@@ -33,9 +39,9 @@ def no_transmission_short(args):
     return reward, ret_c, no_tx
 
 
-def no_transmission_long(args):
+def no_transmission_long(args, tx_slots):
     _, _, ret_c, _, no_tx, _, safe_period = args
-    scale = jax.lax.min(1., (no_tx - safe_period + 1) / PENALIZED_IDLE_PERIOD)
+    scale = jax.lax.min(1., (no_tx - safe_period + 1) / (PENALIZED_IDLE_FRAMES * tx_slots))
     reward = scale * NO_TX_PENALTY
     no_tx = no_tx + 1
     return reward, ret_c, no_tx
@@ -49,7 +55,7 @@ def reset_counters(_):
 
 def tx_macro_reward(
     k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, retry_exhausted,
-    header_collision, ack_collision, header_collision_other, ack_collision_other,
+    header_collision, ack_collision, header_collision_other, ack_collision_other, tx_slots,
 ):
     hdr_ack = header_collision | ack_collision
     k_tx_eff = jnp.where(hdr_ack, 0.0, k_tx)
@@ -62,10 +68,10 @@ def tx_macro_reward(
     k_coll = k_coll_ltc_eff + k_coll_coex_eff
     any_collision = k_coll > 0
 
-    net_data_slots = jnp.maximum(k_tx_eff * TX_SLOTS - 2.0, k_tx_eff)
+    net_data_slots = jnp.maximum(k_tx_eff * tx_slots - 2.0, k_tx_eff)
     success_reward = jnp.where(
         k_tx_eff > 0,
-        TX_REWARD * net_data_slots / TX_SLOTS,
+        TX_REWARD * net_data_slots / tx_slots,
         0.0,
     )
 
@@ -136,8 +142,7 @@ def build_observation_entry(
         cs_busy,
         cs_tx_same_type.astype(jnp.float32),
         tx_collision_other.astype(jnp.float32),
-        obs_features.channel_occupancy_pct_window,
-        obs_features.channel_collisions_pct_window,
+        obs_features.sensed_busy_pct_window,
         action_tx,
         action_cs,
         action_idle,
@@ -149,15 +154,19 @@ def build_observation_entry(
     ], dtype=jnp.float32)
 
 
-def normalize_obs(obs, queue_size):
+def normalize_obs(obs, queue_size, tx_slots):
     raw_age = obs[..., ObsIdx.BUFFER_OLDEST_AGE_NORM]
     obs = obs.at[..., ObsIdx.BUFFER_OLDEST_AGE_NORM].set(
-        jnp.where(raw_age >= 0, jnp.minimum(raw_age / SAFE_IDLE_PERIOD, 1.0), raw_age)
+        jnp.where(raw_age >= 0, jnp.minimum(raw_age / (SAFE_IDLE_FRAMES * tx_slots), 1.0), raw_age)
     )
-    obs = obs.at[..., ObsIdx.TRAFFIC_MEAN_ARRIVAL_RATE].divide(OBS_TRAFFIC_ARRIVAL_NORM)
+    raw_rate = obs[..., ObsIdx.TRAFFIC_MEAN_ARRIVAL_RATE]
+    obs = obs.at[..., ObsIdx.TRAFFIC_MEAN_ARRIVAL_RATE].set(jnp.where(
+        raw_rate < 0, raw_rate,
+        jnp.clip((jnp.log(jnp.maximum(raw_rate, 1e-6)) + OBS_TRAFFIC_LOG_RANGE) / (2 * OBS_TRAFFIC_LOG_RANGE), 0.0, 1.0),
+    ))
     obs = obs.at[..., ObsIdx.ACTION_DURATION].divide(OBS_DURATION_NORM)
     obs = obs.at[..., ObsIdx.STATUS_RETRY_COUNTER].divide(MAX_RETRANSMISSION)
-    obs = obs.at[..., ObsIdx.STATUS_NO_TX_COUNTER].divide(SAFE_IDLE_PERIOD + PENALIZED_IDLE_PERIOD)
+    obs = obs.at[..., ObsIdx.STATUS_NO_TX_COUNTER].divide((SAFE_IDLE_FRAMES + PENALIZED_IDLE_FRAMES) * tx_slots)
     obs = obs.at[..., ObsIdx.STATUS_UNIQUE_LTC_TX_WINDOW].divide(OBS_UNIQUE_LTC_TX_NORM)
     return obs
 
@@ -191,6 +200,7 @@ def process_output_i(
     tx_macro_success,
     tx_macro_failed,
     retry_exhausted,
+    tx_slots,
 ):
     old_ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int64)
     no_tx     = obs[-1, ObsIdx.STATUS_NO_TX_COUNTER].astype(jnp.int64)
@@ -199,7 +209,7 @@ def process_output_i(
 
     # CS/IDLE: get slot reward, no_tx update, and ret_c (resets if buffer empty)
     cs_args = (action, buffer_state, old_ret_c, channel_state, no_tx, key)
-    cs_reward, cs_ret_c, cs_no_tx = no_transmission(cs_args)
+    cs_reward, cs_ret_c, cs_no_tx = no_transmission(cs_args, tx_slots)
 
     # TX: no_tx always resets (agent is transmitting); slot reward is 0 (macro reward below)
     no_tx       = jnp.where(is_tx, jnp.zeros_like(no_tx), cs_no_tx)
@@ -214,7 +224,7 @@ def process_output_i(
     # The reward always uses the true collision type; obs_config only decides what the agent sees.
     macro_reward = tx_macro_reward(
         k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, retry_exhausted,
-        header_collision, ack_collision, header_collision_other, ack_collision_other,
+        header_collision, ack_collision, header_collision_other, ack_collision_other, tx_slots,
     )
     reward = jnp.where(
         action == Actions.TX.value,
@@ -277,6 +287,7 @@ def process_output(
     tx_macro_success=None,
     tx_macro_failed=None,
     retry_exhausted=None,
+    tx_slots=TX_SLOTS,
 ):
     n = actions.shape[0]
     keys = jax.random.split(key, n)
@@ -304,7 +315,7 @@ def process_output(
 
     return jax.vmap(
         process_output_i,
-        in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None),
     )(
         buffer_states,
         new_buffer_states,
@@ -334,4 +345,5 @@ def process_output(
         tx_macro_success,
         tx_macro_failed,
         retry_exhausted,
+        tx_slots,
     )
