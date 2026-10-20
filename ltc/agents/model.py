@@ -9,8 +9,7 @@ class QNetwork(nn.Module):
 
     @nn.compact
     def __call__(self, s, training=True):
-        x = s[None, ...] if s.ndim == 2 else s
-        x = x.reshape(x.shape[0], -1).astype(jnp.float32)
+        x = s.reshape(*s.shape[:-2], -1).astype(jnp.float32)
 
         for _ in range(self.num_layers):
             x = nn.Dense(self.dim)(x)

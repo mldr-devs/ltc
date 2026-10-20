@@ -13,10 +13,9 @@ import jax.numpy as jnp
 import numpy as np
 import lz4.frame
 import optax
-from reinforced_lib.agents.deep.ddqn import DDQN
 from tqdm import trange
 
-from ltc.agents import DCF, QNetwork
+from ltc.agents import AsymmetricExplorationDDQN, DCF, QNetwork, time_uniform_prior
 from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
@@ -578,8 +577,9 @@ if __name__ == '__main__':
     ], boundaries=[warmup_steps, decay_end_steps])
     optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(lr_schedule))
 
-    drl = DDQN(
+    drl = AsymmetricExplorationDDQN(
         q_network=QNetwork(num_actions, dim=64, num_layers=2),
+        exploration_prior=time_uniform_prior(MAX_MACRO_DURATION, args.tx_slots),
         obs_space_shape=(args.window_size, OBS_SIZE),
         act_space_size=num_actions,
         optimizer=optimizer,
