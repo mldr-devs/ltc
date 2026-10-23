@@ -49,6 +49,30 @@ class InitialStateConf(Enum):
     NORMAL = 1
 
 
+def aggregate_loc(
+    rho: float, n_stations: int, tx_slots: int,
+    scale: float = 0.0, f3dB: float = 1.0, order: int = 1,
+) -> float:
+    """`loc` giving an aggregate offered load of `rho` packets per frame-time.
+
+    One TX subframe delivers one packet and occupies `tx_slots` mini-slots, so the
+    channel serves one packet per frame-time and the offered load is
+
+        rho = n_stations * E[frames per station per mini-slot] * tx_slots
+
+    Counts are Poisson with a log-normal rate, E[n] = exp(loc + var_y / 2), and the
+    Butterworth filter has unit DC gain, which gives the inversion below. Note this
+    is a rate, unlike the v1 fit, which matched a binarised arrival probability
+    because v1's buffer held a single frame.
+    """
+    fs = 1 / TAU
+    normalized_cutoff = f3dB / (fs / 2)
+    b, a = signal.butter(order, normalized_cutoff, btype="low", analog=False)
+    _, (h,) = signal.dimpulse(system=(b, a, 1), n=int(fs / normalized_cutoff))
+    var_y = scale ** 2 * float(np.sum(np.square(h)))
+    return float(np.log(rho / (n_stations * tx_slots)) - 0.5 * var_y)
+
+
 def cox_traffic(
     f3dB: float,
     order: int = 1,

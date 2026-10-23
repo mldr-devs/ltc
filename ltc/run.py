@@ -16,7 +16,7 @@ import optax
 from tqdm import trange
 
 from ltc.agents import AsymmetricExplorationDDQN, DCF, QNetwork, time_uniform_prior
-from ltc.sim import InitialStateConf, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector
+from ltc.sim import InitialStateConf, aggregate_loc, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.structs import *
@@ -301,19 +301,18 @@ def update_macro_state_from_ready_agents(
     return macro_action_types, macro_remaining, macro_durations, staged_tx
 
 
-def build_traffic(traffic_type, f3dB, loc, scale):
+def build_traffic(traffic_type, f3dB, loc, scale, n_stations, tx_slots):
     if traffic_type == 'custom':
         params = {'f3dB': f3dB, 'loc': loc, 'scale': scale}
+    elif traffic_type == 'saturated':
+        params = {'f3dB': 1.0, 'loc': SATURATED_LOC, 'scale': 0.0}
     else:
-        presets = {
-            'constant': {'f3dB': 1.0, 'loc': -1.0, 'scale': 0.0},
-            'saturated': {'f3dB': 1.0, 'loc': 5.0, 'scale': 0.0},
-            'bursty': {'f3dB': 0.1, 'loc': -5.0, 'scale': 5.0},
+        level = TRAFFIC_LEVELS[traffic_type]
+        params = {
+            'f3dB': level['f3dB'],
+            'scale': level['scale'],
+            'loc': aggregate_loc(level['rho'], n_stations, tx_slots, level['scale'], level['f3dB']),
         }
-        params = presets.get(traffic_type)
-        if params is None:
-            raise ValueError(f'Unknown traffic type: {traffic_type}')
-
     return cox_traffic(initial_state=InitialStateConf.ZERO, **params)
 
 
@@ -524,7 +523,7 @@ if __name__ == '__main__':
     parser.add_argument('--station_change_delta', type=int, default=0, help='Stations to add/remove per interval tick. Negative values remove stations.')
     parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
-    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
+    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['custom', 'saturated'] + sorted(TRAFFIC_LEVELS), help="Traffic model.")
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf'], help='Agent run by the stations not covered by --n_drl.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
@@ -605,7 +604,7 @@ if __name__ == '__main__':
 
     key, init_key = jax.random.split(key)
 
-    traffic = build_traffic(args.traffic_type, args.f3dB, args.loc, args.scale)
+    traffic = build_traffic(args.traffic_type, args.f3dB, args.loc, args.scale, n, args.tx_slots)
     traffic_states, traffic_step = init_traffic(traffic, init_key, n)
 
     step_config = RLStepConfig(

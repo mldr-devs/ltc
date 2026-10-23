@@ -24,6 +24,13 @@ SAFE_IDLE_FRAMES = 5
 SAFE_IDLE_PERIOD_STD = 0
 PENALIZED_IDLE_FRAMES = 25
 
+TRAFFIC_LEVELS = {
+    'low':    {'rho': 0.25, 'scale': 0.0, 'f3dB': 1.0},
+    'mid':    {'rho': 0.50, 'scale': 0.0, 'f3dB': 1.0},
+    'bursty': {'rho': 0.50, 'scale': 5.0, 'f3dB': 0.1},
+}
+SATURATED_LOC = 5.0
+
 """
 Rewards and penalties
 """
