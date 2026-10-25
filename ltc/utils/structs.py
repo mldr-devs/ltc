@@ -20,6 +20,8 @@ class MacroActionState:
     header_collision_other: jax.Array    # True if the header collision was with a non-LTC station
     initial_ret_c: jax.Array             # ret_c captured at macro TX start
     tx_start_occupancy: jax.Array        # queued packets when macro TX began
+    tx_run: jax.Array                    # subframes of the TX macros of the current channel occupation
+    idle_run: jax.Array                  # mini-slots of own silence since the last TX macro
 
 
 @jax.tree_util.register_dataclass

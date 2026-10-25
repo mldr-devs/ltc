@@ -55,7 +55,7 @@ def reset_counters(_):
 
 def tx_macro_reward(
     k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, retry_exhausted,
-    header_collision, ack_collision, header_collision_other, ack_collision_other, tx_slots,
+    header_collision, ack_collision, header_collision_other, ack_collision_other, tx_slots, own_rate, k_tx_run,
 ):
     hdr_ack = header_collision | ack_collision
     k_tx_eff = jnp.where(hdr_ack, 0.0, k_tx)
@@ -71,15 +71,15 @@ def tx_macro_reward(
     net_data_slots = jnp.maximum(k_tx_eff * tx_slots - 2.0, k_tx_eff)
     success_reward = jnp.where(
         k_tx_eff > 0,
-        TX_REWARD * net_data_slots / tx_slots,
+        TX_REWARD * net_data_slots / tx_slots / (1.0 + own_rate / PF_RATE_REF),
         0.0,
     )
 
     # Gated on a non-empty buffer (the note's `b > 0`): a TX on an empty buffer already pays
     # P_empty for every planned subframe and must not be charged for its length on top.
     size_penalty = jnp.where(
-        ~tx_started_empty & (k_tx_planned >= TX_SIZE_THRESHOLD),
-        TX_SIZE_PENALTY * jnp.minimum(1.0, (k_tx_planned - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW),
+        ~tx_started_empty & (k_tx_run >= TX_SIZE_THRESHOLD),
+        TX_SIZE_PENALTY * jnp.minimum(1.0, (k_tx_run - TX_SIZE_THRESHOLD + 1.0) / TX_SIZE_PENALTY_WINDOW),
         0.0,
     )
 
@@ -200,6 +200,8 @@ def process_output_i(
     tx_macro_success,
     tx_macro_failed,
     retry_exhausted,
+    own_rate,
+    k_tx_run,
     tx_slots,
 ):
     old_ret_c = obs[-1, ObsIdx.STATUS_RETRY_COUNTER].astype(jnp.int64)
@@ -224,7 +226,7 @@ def process_output_i(
     # The reward always uses the true collision type; obs_config only decides what the agent sees.
     macro_reward = tx_macro_reward(
         k_tx, k_tx_planned, k_coll_ltc, k_coll_coex, tx_started_empty, retry_exhausted,
-        header_collision, ack_collision, header_collision_other, ack_collision_other, tx_slots,
+        header_collision, ack_collision, header_collision_other, ack_collision_other, tx_slots, own_rate, k_tx_run,
     )
     reward = jnp.where(
         action == Actions.TX.value,
@@ -287,6 +289,8 @@ def process_output(
     tx_macro_success=None,
     tx_macro_failed=None,
     retry_exhausted=None,
+    own_rate=None,
+    k_tx_run=None,
     tx_slots=TX_SLOTS,
 ):
     n = actions.shape[0]
@@ -312,10 +316,12 @@ def process_output(
     tx_macro_success = bcast(tx_macro_success, False)
     tx_macro_failed = bcast(tx_macro_failed, False)
     retry_exhausted = bcast(retry_exhausted, False)
+    own_rate = bcast(own_rate, 0.0, jnp.float32)
+    k_tx_run = bcast(k_tx_run, k_tx_planned, jnp.float32)
 
     return jax.vmap(
         process_output_i,
-        in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None),
+        in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None),
     )(
         buffer_states,
         new_buffer_states,
@@ -345,5 +351,7 @@ def process_output(
         tx_macro_success,
         tx_macro_failed,
         retry_exhausted,
+        own_rate,
+        k_tx_run,
         tx_slots,
     )

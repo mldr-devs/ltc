@@ -4,7 +4,7 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 os.environ['JAX_ENABLE_X64'] = 'true'
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 
 import cloudpickle
@@ -20,7 +20,6 @@ from ltc.sim import InitialStateConf, aggregate_loc, cox_traffic, normalize_obs,
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.structs import *
-from ltc.utils.plots import plot_all, plot_first
 
 
 @dataclass(frozen=True)
@@ -424,6 +423,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             enable_cs_tx_same_type=config.obs_enable_cs_tx_same_type,
             enable_tx_collision_other=config.obs_enable_tx_collision_other,
         )
+        tx_run = jnp.where(c.macro.idle_run >= TX_RUN_GAP, 0.0, c.macro.tx_run)
         obs, rewards, powers = process_output(
             c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
             c.terminals, reward_key, step, obs_features, obs_config,
@@ -443,8 +443,13 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             tx_macro_success=tx_macro_success,
             tx_macro_failed=tx_macro_failed,
             retry_exhausted=retry_exhausted,
+            own_rate=jnp.sum(jnp.maximum(c.obs_tracker.success_tx_hist, 0.0), axis=1)
+                     * config.tx_slots / c.obs_tracker.success_tx_hist.shape[1],
+            k_tx_run=tx_run + k_tx_planned,
             tx_slots=config.tx_slots,
         )
+        tx_run = jnp.where(tx_done, tx_run + k_tx_planned, tx_run)
+        idle_run = jnp.where(done_now, jnp.where(tx_done, 0, c.macro.idle_run + macro_durations), c.macro.idle_run)
 
         # Reset per-macro accumulators when action completes
         k_tx_accum = jnp.where(done_now, 0.0, k_tx_accum)
@@ -477,6 +482,8 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             header_collision_other=header_collision_other,
             initial_ret_c=initial_ret_c,
             tx_start_occupancy=tx_start_occupancy,
+            tx_run=tx_run,
+            idle_run=idle_run,
         )
         obs_tracker_state = ObsTrackerState(
             buffer_birth_steps=buffer_birth_steps,
@@ -515,7 +522,6 @@ if __name__ == '__main__':
     parser.add_argument('--obs_enable_tx_collision_other', action='store_true', default=False, help='Enable TX collision-involves-other feature.')
     parser.add_argument('--action_space_variant', type=str, default='txcs_duration_set', choices=['txcs_duration_set', 'tx_stage_commit'], help='Macro action-space variant.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
-    parser.add_argument('--save_plots', action='store_true', default=False, help='Whether to save the generated plots.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
     parser.add_argument('--scale', type=float, default=0.0, help='scale traffic generator parameter')
     parser.add_argument('--f3dB', type=float, default=1.0, help='f3dB traffic generator parameter')
@@ -525,6 +531,7 @@ if __name__ == '__main__':
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['custom', 'saturated'] + sorted(TRAFFIC_LEVELS), help="Traffic model.")
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf'], help='Agent run by the stations not covered by --n_drl.')
+    parser.add_argument('--full_history', action='store_true', default=False, help='Store buffer contents, observations, weight histograms and replay buffers in the history.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
 
@@ -571,8 +578,8 @@ if __name__ == '__main__':
     warmup_steps, decay_end_steps, peak_lr = int(0.02 * total_steps), int(0.75 * total_steps), 5e-5
     lr_schedule = optax.join_schedules([
         optax.linear_schedule(0.0, peak_lr, warmup_steps),
-        optax.cosine_decay_schedule(peak_lr, decay_steps=decay_end_steps - warmup_steps, alpha=0.01),
-        optax.constant_schedule(peak_lr * 0.01),
+        optax.cosine_decay_schedule(peak_lr, decay_steps=decay_end_steps - warmup_steps, alpha=0.1),
+        optax.constant_schedule(peak_lr * 0.1),
     ], boundaries=[warmup_steps, decay_end_steps])
     optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adam(lr_schedule))
 
@@ -588,12 +595,18 @@ if __name__ == '__main__':
         discount=0.95,
         epsilon=1.0,
         epsilon_decay=0.9997,
-        epsilon_min=0.05,
+        epsilon_min=0.001,
         tau=0.01
     )
     key, init_key = jax.random.split(key)
     drl_states, drl_step = init_agents(drl, init_key, n_drl)
-    drl_states = drl_states.replace(prev_env_state=drl_states.prev_env_state.astype(jnp.float32))
+    drl_states = drl_states.replace(
+        prev_env_state=drl_states.prev_env_state.astype(jnp.float32),
+        replay_buffer=drl_states.replay_buffer.replace(
+            states=drl_states.replay_buffer.states.astype(jnp.float32),
+            next_states=drl_states.replay_buffer.next_states.astype(jnp.float32),
+        ),
+    )
 
     if args.legacy_type == 'dcf':
         legacy = DCF()
@@ -655,6 +668,8 @@ if __name__ == '__main__':
             header_collision_other=jnp.zeros(n, dtype=bool),
             initial_ret_c=jnp.zeros(n, dtype=jnp.int32),
             tx_start_occupancy=jnp.zeros(n, dtype=jnp.int32),
+            tx_run=jnp.zeros(n, dtype=jnp.float32),
+            idle_run=jnp.zeros(n, dtype=jnp.int32),
         ),
         obs_tracker=ObsTrackerState(
             buffer_birth_steps=jnp.full((n, args.queue_size), -1, dtype=jnp.int32),
@@ -671,13 +686,22 @@ if __name__ == '__main__':
     for epoch in trange(args.n_epochs):
         global_steps = jnp.arange(epoch * args.n_steps, (epoch + 1) * args.n_steps, dtype=jnp.int32)
         carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
+        
+        if not args.full_history:
+            output = replace(
+                output, observations=None, weights_histogram=None, weights_bin_edges=None,
+                buffer_states=jnp.sum(output.buffer_states != EMPTY_PACKET_ID, axis=-1, dtype=jnp.int32),
+            )
+        
         all_outputs.append(jax.device_get(output))
 
     all_outputs = jax.tree.map(lambda *x: np.stack(x), *all_outputs)
     filename = build_history_filename(n_init, n_final, args.seed, commit_hash, n_drl=n_drl)
 
-    with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)
+    if args.full_history:
+        drl_states = carry.drl_states
+    else:
+        drl_states = carry.drl_states.replace(replay_buffer=None)
 
-    if args.save_plots:
-        plot_all(filename)
+    with lz4.frame.open(filename, 'wb') as f:
+        cloudpickle.dump((drl_states, all_outputs, vars(args)), f)
