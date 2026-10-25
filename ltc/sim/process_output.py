@@ -318,10 +318,11 @@ def process_output(
     retry_exhausted = bcast(retry_exhausted, False)
     own_rate = bcast(own_rate, 0.0, jnp.float32)
     k_tx_run = bcast(k_tx_run, k_tx_planned, jnp.float32)
+    channel_state = bcast(channel_state, 0)
 
     return jax.vmap(
         process_output_i,
-        in_axes=(0, 0, 0, 0, None, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None),
+        in_axes=(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None, 0, None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None),
     )(
         buffer_states,
         new_buffer_states,

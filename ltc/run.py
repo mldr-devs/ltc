@@ -16,7 +16,7 @@ import optax
 from tqdm import trange
 
 from ltc.agents import AsymmetricExplorationDDQN, DCF, QNetwork, time_uniform_prior
-from ltc.sim import InitialStateConf, aggregate_loc, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector
+from ltc.sim import InitialStateConf, aggregate_loc, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector, hidden_station_observation
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.structs import *
@@ -43,6 +43,7 @@ class RLStepConfig:
     max_duration: int = 5
     legacy_tx_duration: int = 5
     tx_slots: int = TX_SLOTS
+    phy_error_prob: float = 0.0
 
 
 def init_agents(agent, key, n):
@@ -315,7 +316,7 @@ def build_traffic(traffic_type, f3dB, loc, scale, n_stations, tx_slots):
     return cox_traffic(initial_state=InitialStateConf.ZERO, **params)
 
 
-def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()):
+def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, config=RLStepConfig()):
     def rl_step_fn(c, step):
         active = schedule_active_stations(c.active, step, config.schedule)
 
@@ -382,6 +383,9 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
             c.macro, slot_executing, slot_actions, macro_remaining,
             tx_collision_other_now, agent_ready_now, ret_c, c.buffer_states, config.tx_slots,
         )
+        phy_error = jax.random.bernoulli(jax.random.fold_in(traffic_key, 1), config.phy_error_prob, (n,))
+        sub_collision_flag = sub_collision_flag | (tx_packet_mask & phy_error)
+        tx_success_mask = tx_packet_mask & ~sub_collision_flag
 
         # A macro TX settles as a whole: a header or ACK collision voids every subframe, so the
         # queue is only touched when the macro ends, with the same count the reward is built from.
@@ -407,11 +411,12 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
         ) = simulate(c.buffer_states, c.obs_tracker.buffer_birth_steps, new_frames, slot_actions, c.packet_seqs, step,
                      tx_packet_mask=tx_packet_mask, dequeue_count=delivered,
                      drop_count=retry_exhausted.astype(jnp.int32), active=active)
+        sensed_state = hidden_station_observation(visibility_matrix, channel_state, slot_actions)
 
         (arrival_hist, planned_tx_hist, success_tx_hist, sensed_busy_hist, tx_hist), obs_features = \
             compute_obs_features(
                 c.obs_tracker, c.tx_hist, n_drl,
-                new_frames, planned_packets, successful_packets, channel_state, slot_actions,
+                new_frames, planned_packets, successful_packets, sensed_state, slot_actions,
                 cs_tx_same_type_now, tx_collision_other_now,
             )
 
@@ -425,7 +430,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=RLStepConfig()
         )
         tx_run = jnp.where(c.macro.idle_run >= TX_RUN_GAP, 0.0, c.macro.tx_run)
         obs, rewards, powers = process_output(
-            c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, channel_state, c.obs, slot_actions,
+            c.buffer_states, buffer_states, buffer_birth_steps, c.power_states, sensed_state, c.obs, slot_actions,
             c.terminals, reward_key, step, obs_features, obs_config,
             action_durations=jnp.where(slot_executing, macro_durations, 0),
             roll_obs=agent_ready_now,
@@ -531,6 +536,8 @@ if __name__ == '__main__':
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
     parser.add_argument('--traffic_type', type=str, default='saturated', choices=['custom', 'saturated'] + sorted(TRAFFIC_LEVELS), help="Traffic model.")
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf'], help='Agent run by the stations not covered by --n_drl.')
+    parser.add_argument('--stations_density', type=float, default=1.0, help='Probability that two stations hear each other (hidden stations below 1).')
+    parser.add_argument('--phy_error_prob', type=float, default=0.0, help='Probability that a transmitted subframe is lost to a channel error.')
     parser.add_argument('--full_history', action='store_true', default=False, help='Store buffer contents, observations, weight histograms and replay buffers in the history.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
@@ -636,8 +643,12 @@ if __name__ == '__main__':
         max_duration=MAX_MACRO_DURATION,
         legacy_tx_duration=LEGACY_TX_DURATION,
         tx_slots=args.tx_slots,
+        phy_error_prob=args.phy_error_prob,
     )
-    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl, config=step_config))
+    visibility = jax.random.bernoulli(jax.random.key(args.seed + 1_000_003), args.stations_density, (n, n))
+    visibility_matrix = jnp.triu(visibility.astype(jnp.int32), 1)
+    visibility_matrix = (visibility_matrix + visibility_matrix.T).at[jnp.diag_indices(n)].set(1)
+    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, config=step_config))
 
     carry = Carry(
         drl_states=drl_states,

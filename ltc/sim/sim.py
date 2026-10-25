@@ -12,6 +12,13 @@ def channel_state_selector(actions):
     )
 
 
+def hidden_station_observation(visibility_matrix, channel_state, actions):
+    tx = (actions == Actions.TX.value).astype(jnp.int32)
+    counts = (visibility_matrix * tx).sum(axis=1)
+    idle_state = jnp.where(tx.sum() == 0, channel_state, 0)
+    return jnp.where(counts > 1, -1, jnp.where(counts == 1, channel_state, idle_state))
+
+
 def cantor_pairing(a, b):
     s = a + b
     return (s * (s + 1)) // 2 + b
