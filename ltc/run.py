@@ -46,11 +46,9 @@ class RLStepConfig:
     phy_error_prob: float = 0.0
 
 
-def init_agents(agent, key, n, step, post_init=lambda state: state):
+def init_agents(agent, key, n, post_init=lambda state: state):
     keys = jax.random.split(key, n)
-    states = jax.jit(jax.vmap(lambda k: post_init(agent.init(k))))(keys)
-    step_fn = jax.vmap(partial(step, agent))
-    return states, step_fn
+    return jax.jit(jax.vmap(lambda k: post_init(agent.init(k))))(keys)
 
 
 def float32_buffers(state):
@@ -107,9 +105,7 @@ def ddqn_step(agent, state, key, obs, action, reward, terminal, active):
 
 def init_traffic(traffic, key, n):
     keys = jax.random.split(key, n)
-    states = jax.vmap(traffic.init)(keys)
-    step_fn = jax.vmap(traffic.sample)
-    return states, step_fn
+    return jax.vmap(traffic.init)(keys)
 
 
 def schedule_active_stations(active, step, schedule):
@@ -562,6 +558,7 @@ if __name__ == '__main__':
     parser.add_argument('--obs_enable_tx_collision_other', action='store_true', default=False, help='Enable TX collision-involves-other feature.')
     parser.add_argument('--action_space_variant', type=str, default='txcs_duration_set', choices=['txcs_duration_set', 'tx_stage_commit'], help='Macro action-space variant.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
+    parser.add_argument('--n_seeds', type=int, default=1, help='Run seeds seed, ..., seed + n_seeds - 1 in parallel, one history file each.')
     parser.add_argument('--loc', type=float, default=5.0, help='loc traffic generator parameter.')
     parser.add_argument('--scale', type=float, default=0.0, help='scale traffic generator parameter')
     parser.add_argument('--f3dB', type=float, default=1.0, help='f3dB traffic generator parameter')
@@ -614,7 +611,6 @@ if __name__ == '__main__':
         one_shot_step = total_steps // 2
         one_shot_target = n_final
 
-    key = jax.random.key(args.seed)
     num_actions = action_space_size(args.action_space_variant, MAX_MACRO_DURATION)
 
     warmup_steps, decay_end_steps, peak_lr = int(0.02 * total_steps), int(0.75 * total_steps), 5e-5
@@ -640,20 +636,15 @@ if __name__ == '__main__':
         epsilon_min=0.001,
         tau=0.01
     )
-    key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n_drl, ddqn_step, float32_buffers)
+    drl_step = jax.vmap(partial(ddqn_step, drl))
 
     if args.legacy_type == 'dcf':
         legacy = DCF()
     else:
         raise ValueError(f'Unknown legacy type: {args.legacy_type}')
-    key, init_key = jax.random.split(key)
-    legacy_states, legacy_step = init_agents(legacy, init_key, n - n_drl, agent_step)
-
-    key, init_key = jax.random.split(key)
-
+    legacy_step = jax.vmap(partial(agent_step, legacy))
     traffic = build_traffic(args.traffic_type, args.f3dB, args.loc, args.scale, n, args.tx_slots)
-    traffic_states, traffic_step = init_traffic(traffic, init_key, n)
+    traffic_step = jax.vmap(traffic.sample)
 
     step_config = RLStepConfig(
         schedule=StationScheduleConfig(
@@ -673,59 +664,69 @@ if __name__ == '__main__':
         tx_slots=args.tx_slots,
         phy_error_prob=args.phy_error_prob,
     )
-    visibility = jax.random.bernoulli(jax.random.key(args.seed + 1_000_003), args.stations_density, (n, n))
-    visibility_matrix = jnp.triu(visibility.astype(jnp.int32), 1)
-    visibility_matrix = (visibility_matrix + visibility_matrix.T).at[jnp.diag_indices(n)].set(1)
-    rl_step_fn = jax.jit(rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, config=step_config))
 
-    carry = Carry(
-        drl_states=drl_states,
-        legacy_states=legacy_states,
-        traffic_states=traffic_states,
-        packet_seqs=jnp.zeros(n, dtype=jnp.int64),
-        buffer_states=jnp.full((n, args.queue_size), EMPTY_PACKET_ID, dtype=jnp.int64),
-        tx_hist=jnp.full((args.obs_stats_window, n), -1, dtype=jnp.int32),
-        power_states=jnp.full(n, INITIAL_CAPACITY, dtype=jnp.int32),
-        channel_state=0,
-        key=key,
-        obs=jnp.zeros((n, args.window_size, OBS_SIZE), dtype=jnp.float32),
-        actions=jnp.zeros(n, dtype=jnp.int32),
-        rewards=jnp.zeros(n),
-        terminals=jnp.full(n, False, dtype=bool),
-        active=jnp.ones(n, dtype=bool).at[n_init:].set(False),
-        macro=MacroActionState(
-            remaining=jnp.zeros(n, dtype=jnp.int32),
-            action_types=jnp.full(n, Actions.IDLE.value, dtype=jnp.int32),
-            durations=jnp.zeros(n, dtype=jnp.int32),
-            tx_success_accum=jnp.zeros(n, dtype=jnp.float32),
-            tx_planned_accum=jnp.zeros(n, dtype=jnp.float32),
-            k_coll_ltc=jnp.zeros(n, dtype=jnp.float32),
-            k_coll_coex=jnp.zeros(n, dtype=jnp.float32),
-            sub_collision_flag=jnp.zeros(n, dtype=bool),
-            sub_collision_other_flag=jnp.zeros(n, dtype=bool),
-            header_collision=jnp.zeros(n, dtype=bool),
-            header_collision_other=jnp.zeros(n, dtype=bool),
-            initial_ret_c=jnp.zeros(n, dtype=jnp.int32),
-            tx_start_occupancy=jnp.zeros(n, dtype=jnp.int32),
-            tx_run=jnp.zeros(n, dtype=jnp.float32),
-            idle_run=jnp.zeros(n, dtype=jnp.int32),
-        ),
-        obs_tracker=ObsTrackerState(
-            buffer_birth_steps=jnp.full((n, args.queue_size), -1, dtype=jnp.int32),
-            arrival_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
-            planned_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
-            success_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
-            sensed_busy_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
-            staged_tx=jnp.zeros(n, dtype=jnp.int32),
-        ),
-    )
+    def init_visibility(seed):
+        visibility = jax.random.bernoulli(jax.random.key(seed + 1_000_003), args.stations_density, (n, n))
+        visibility_matrix = jnp.triu(visibility.astype(jnp.int32), 1)
+        return (visibility_matrix + visibility_matrix.T).at[jnp.diag_indices(n)].set(1)
+
+    def run_epoch(carry, visibility_matrix, global_steps):
+        rl_step_fn = rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, config=step_config)
+        return jax.lax.scan(rl_step_fn, carry, global_steps)
+
+    def init_carry(seed):
+        key, drl_key, legacy_key, traffic_key = jax.random.split(jax.random.key(seed), 4)
+        return Carry(
+            drl_states=init_agents(drl, drl_key, n_drl, float32_buffers),
+            legacy_states=init_agents(legacy, legacy_key, n - n_drl),
+            traffic_states=init_traffic(traffic, traffic_key, n),
+            packet_seqs=jnp.zeros(n, dtype=jnp.int64),
+            buffer_states=jnp.full((n, args.queue_size), EMPTY_PACKET_ID, dtype=jnp.int64),
+            tx_hist=jnp.full((args.obs_stats_window, n), -1, dtype=jnp.int32),
+            power_states=jnp.full(n, INITIAL_CAPACITY, dtype=jnp.int32),
+            channel_state=0,
+            key=key,
+            obs=jnp.zeros((n, args.window_size, OBS_SIZE), dtype=jnp.float32),
+            actions=jnp.zeros(n, dtype=jnp.int32),
+            rewards=jnp.zeros(n),
+            terminals=jnp.full(n, False, dtype=bool),
+            active=jnp.ones(n, dtype=bool).at[n_init:].set(False),
+            macro=MacroActionState(
+                remaining=jnp.zeros(n, dtype=jnp.int32),
+                action_types=jnp.full(n, Actions.IDLE.value, dtype=jnp.int32),
+                durations=jnp.zeros(n, dtype=jnp.int32),
+                tx_success_accum=jnp.zeros(n, dtype=jnp.float32),
+                tx_planned_accum=jnp.zeros(n, dtype=jnp.float32),
+                k_coll_ltc=jnp.zeros(n, dtype=jnp.float32),
+                k_coll_coex=jnp.zeros(n, dtype=jnp.float32),
+                sub_collision_flag=jnp.zeros(n, dtype=bool),
+                sub_collision_other_flag=jnp.zeros(n, dtype=bool),
+                header_collision=jnp.zeros(n, dtype=bool),
+                header_collision_other=jnp.zeros(n, dtype=bool),
+                initial_ret_c=jnp.zeros(n, dtype=jnp.int32),
+                tx_start_occupancy=jnp.zeros(n, dtype=jnp.int32),
+                tx_run=jnp.zeros(n, dtype=jnp.float32),
+                idle_run=jnp.zeros(n, dtype=jnp.int32),
+            ),
+            obs_tracker=ObsTrackerState(
+                buffer_birth_steps=jnp.full((n, args.queue_size), -1, dtype=jnp.int32),
+                arrival_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+                planned_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+                success_tx_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+                sensed_busy_hist=jnp.full((n, args.obs_stats_window), -1.0, dtype=jnp.float32),
+                staged_tx=jnp.zeros(n, dtype=jnp.int32),
+            ),
+        )
+
+    seeds = jnp.arange(args.seed, args.seed + args.n_seeds)
+    carry, visibility_matrix = jax.vmap(init_carry)(seeds), jax.vmap(init_visibility)(seeds)
+    run_epoch = jax.jit(jax.vmap(run_epoch, in_axes=(0, 0, None)), donate_argnums=0)
 
     all_outputs = []
-    run_epoch = jax.jit(partial(jax.lax.scan, rl_step_fn), donate_argnums=0)
 
     for epoch in trange(args.n_epochs):
         global_steps = jnp.arange(epoch * args.n_steps, (epoch + 1) * args.n_steps, dtype=jnp.int32)
-        carry, output = run_epoch(carry, global_steps)
+        carry, output = run_epoch(carry, visibility_matrix, global_steps)
         
         if not args.full_history:
             output = replace(
@@ -736,12 +737,16 @@ if __name__ == '__main__':
         all_outputs.append(jax.device_get(output))
 
     all_outputs = jax.tree.map(lambda *x: np.stack(x), *all_outputs)
-    filename = build_history_filename(n_init, n_final, args.seed, commit_hash, n_drl=n_drl)
 
     if args.full_history:
         drl_states = carry.drl_states
     else:
         drl_states = carry.drl_states.replace(replay_buffer=None)
 
-    with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((drl_states, all_outputs, vars(args)), f)
+    for i, seed in enumerate(seeds.tolist()):
+        filename = build_history_filename(n_init, n_final, seed, commit_hash, n_drl=n_drl)
+        outputs = jax.tree.map(lambda x: x[:, i], all_outputs)
+        states = jax.tree.map(lambda x: x[i], drl_states)
+
+        with lz4.frame.open(filename, 'wb') as f:
+            cloudpickle.dump((states, outputs, {**vars(args), 'seed': seed}), f)
