@@ -46,11 +46,21 @@ class RLStepConfig:
     phy_error_prob: float = 0.0
 
 
-def init_agents(agent, key, n):
+def init_agents(agent, key, n, step, post_init=lambda state: state):
     keys = jax.random.split(key, n)
-    states = jax.vmap(agent.init)(keys)
-    step_fn = jax.vmap(partial(agent_step, agent))
+    states = jax.jit(jax.vmap(lambda k: post_init(agent.init(k))))(keys)
+    step_fn = jax.vmap(partial(step, agent))
     return states, step_fn
+
+
+def float32_buffers(state):
+    return state.replace(
+        prev_env_state=state.prev_env_state.astype(jnp.float32),
+        replay_buffer=state.replay_buffer.replace(
+            states=state.replay_buffer.states.astype(jnp.float32),
+            next_states=state.replay_buffer.next_states.astype(jnp.float32),
+        ),
+    )
 
 
 def agent_step(agent, state, key, obs, action, reward, terminal, active):
@@ -68,6 +78,31 @@ def agent_step(agent, state, key, obs, action, reward, terminal, active):
         jnp.logical_or(~active, terminal), power_off, power_on,
         state, update_key, sample_key, obs, action, reward, terminal
     )
+
+
+def ddqn_step(agent, state, key, obs, action, reward, terminal, active):
+    # agent_step without the cond, which under vmap becomes a select copying every replay buffer on every
+    # step. Inactive stations re-append the transition at the buffer pointer, so their buffer is unchanged.
+    
+    update_key, sample_key = jax.random.split(key)
+    off = jnp.logical_or(~active, terminal)
+    buffer = state.replay_buffer
+    keep = lambda new, old: jnp.where(off, old, new)
+    row = lambda x: x[buffer.ptr]
+
+    new_state = agent.update(
+        state.replace(prev_env_state=keep(state.prev_env_state, row(buffer.states))), update_key,
+        keep(obs, row(buffer.next_states)), keep(action, row(buffer.actions)[0]),
+        keep(reward, row(buffer.rewards)[0]), keep(False, row(buffer.terminals)[0]),
+    )
+    new_action = agent.sample(new_state, sample_key, obs)
+
+    new_buffer = new_state.replay_buffer.replace(
+        size=keep(new_state.replay_buffer.size, buffer.size),
+        ptr=keep(new_state.replay_buffer.ptr, buffer.ptr),
+    )
+    state = jax.tree.map(keep, new_state.replace(replay_buffer=None), state.replace(replay_buffer=None))
+    return state.replace(replay_buffer=new_buffer), keep(new_action, Actions.IDLE.value)
 
 
 def init_traffic(traffic, key, n):
@@ -606,21 +641,14 @@ if __name__ == '__main__':
         tau=0.01
     )
     key, init_key = jax.random.split(key)
-    drl_states, drl_step = init_agents(drl, init_key, n_drl)
-    drl_states = drl_states.replace(
-        prev_env_state=drl_states.prev_env_state.astype(jnp.float32),
-        replay_buffer=drl_states.replay_buffer.replace(
-            states=drl_states.replay_buffer.states.astype(jnp.float32),
-            next_states=drl_states.replay_buffer.next_states.astype(jnp.float32),
-        ),
-    )
+    drl_states, drl_step = init_agents(drl, init_key, n_drl, ddqn_step, float32_buffers)
 
     if args.legacy_type == 'dcf':
         legacy = DCF()
     else:
         raise ValueError(f'Unknown legacy type: {args.legacy_type}')
     key, init_key = jax.random.split(key)
-    legacy_states, legacy_step = init_agents(legacy, init_key, n - n_drl)
+    legacy_states, legacy_step = init_agents(legacy, init_key, n - n_drl, agent_step)
 
     key, init_key = jax.random.split(key)
 
@@ -693,10 +721,11 @@ if __name__ == '__main__':
     )
 
     all_outputs = []
+    run_epoch = jax.jit(partial(jax.lax.scan, rl_step_fn), donate_argnums=0)
 
     for epoch in trange(args.n_epochs):
         global_steps = jnp.arange(epoch * args.n_steps, (epoch + 1) * args.n_steps, dtype=jnp.int32)
-        carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
+        carry, output = run_epoch(carry, global_steps)
         
         if not args.full_history:
             output = replace(
