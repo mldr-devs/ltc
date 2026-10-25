@@ -28,6 +28,8 @@ def _macro_state(n, **kwargs):
         header_collision_other=jnp.zeros(n, dtype=bool),
         initial_ret_c=jnp.zeros(n, dtype=jnp.int32),
         tx_start_occupancy=jnp.zeros(n, dtype=jnp.int32),
+        tx_run=jnp.zeros(n, dtype=jnp.float32),
+        idle_run=jnp.zeros(n, dtype=jnp.int32),
     )
     base.update(kwargs)
     return MacroActionState(**base)
@@ -132,6 +134,7 @@ class RetryExhaustionTestCase(unittest.TestCase):
             tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(True),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False), tx_slots=TX_SLOTS,
+            own_rate=jnp.array(0.0), k_tx_run=jnp.array(1.0),
         )
         self.assertAlmostEqual(float(r), TX_MAX_RETRANSMISSION_PENALTY, places=6)
 
@@ -179,6 +182,7 @@ class EmptyBufferTxTestCase(unittest.TestCase):
             tx_started_empty=jnp.array(True), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False), tx_slots=TX_SLOTS,
+            own_rate=jnp.array(0.0), k_tx_run=jnp.array(5.0),
         )
         self.assertAlmostEqual(float(r), TX_EMPTY_BUFFER_PENALTY * 5.0, places=6)  # -2.5, no size penalty
 
@@ -189,6 +193,7 @@ class EmptyBufferTxTestCase(unittest.TestCase):
             tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False), tx_slots=TX_SLOTS,
+            own_rate=jnp.array(0.0), k_tx_run=jnp.array(5.0),
         )
         self.assertAlmostEqual(float(r), TX_SIZE_PENALTY, places=6)
 

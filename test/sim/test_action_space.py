@@ -40,10 +40,10 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
             tx_started_empty=jnp.array(False), retry_exhausted=jnp.array(False),
             header_collision=jnp.array(False), ack_collision=jnp.array(False),
             header_collision_other=jnp.array(False), ack_collision_other=jnp.array(False),
-            tx_slots=TX_SLOTS,
+            tx_slots=TX_SLOTS, own_rate=jnp.array(0.0),
         )
         defaults.update(kwargs)
-        return tx_macro_reward(**defaults)
+        return tx_macro_reward(k_tx_run=defaults['k_tx_planned'], **defaults)
 
     def test_tx_macro_reward_branches(self):
         # success: 1 sub-window, no collision
