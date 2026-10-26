@@ -3,7 +3,7 @@ import unittest
 import jax.numpy as jnp
 
 from ltc.run import decode_drl_actions, decode_legacy_actions
-from ltc.sim.constants import Actions, TX_REWARD, TX_SLOTS, TX_LTC_COLLISION_PENALTY, TX_COEX_COLLISION_PENALTY, TX_MAX_RETRANSMISSION_PENALTY, TX_EMPTY_BUFFER_PENALTY, MAX_RETRANSMISSION, TX_SIZE_THRESHOLD, TX_SIZE_PENALTY, TX_SIZE_PENALTY_WINDOW
+from ltc.sim.constants import Actions, EMPTY_PACKET_ID, TX_REWARD, TX_SLOTS, TX_LTC_COLLISION_PENALTY, TX_COEX_COLLISION_PENALTY, TX_MAX_RETRANSMISSION_PENALTY, TX_EMPTY_BUFFER_PENALTY, MAX_RETRANSMISSION, TX_SIZE_THRESHOLD, TX_SIZE_PENALTY, TX_SIZE_PENALTY_WINDOW
 from ltc.sim.process_output import tx_macro_reward
 
 
@@ -28,10 +28,12 @@ class ActionSpaceDecodeTestCase(unittest.TestCase):
         self.assertTrue(jnp.array_equal(staged_next, jnp.array([1, 0, 0])))
 
     def test_legacy_decode(self):
-        raw = jnp.array([Actions.TX.value, Actions.CS.value, Actions.IDLE.value], dtype=jnp.int32)
-        action_type, duration = decode_legacy_actions(raw, legacy_tx_duration=5)
+        raw = jnp.array([Actions.TX.value, Actions.TX.value, Actions.TX.value, Actions.CS.value, Actions.IDLE.value], dtype=jnp.int32)
+        occupancy = jnp.array([8, 3, 0, 8, 8])
+        buffer_states = jnp.where(jnp.arange(16) < occupancy[:, None], 0, EMPTY_PACKET_ID)
+        action_type, duration = decode_legacy_actions(raw, 5, buffer_states)
         self.assertTrue(jnp.array_equal(action_type, raw))
-        self.assertTrue(jnp.array_equal(duration, jnp.array([5, 1, 1], dtype=jnp.int32)))
+        self.assertTrue(jnp.array_equal(duration, jnp.array([5, 3, 1, 1, 1], dtype=jnp.int32)))
 
     def _macro_reward(self, **kwargs):
         defaults = dict(

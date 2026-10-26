@@ -174,16 +174,17 @@ def decode_drl_actions(raw_actions, staged_tx, action_space_variant, max_duratio
     raise ValueError(f'Unknown action-space variant: {action_space_variant}')
 
 
-def decode_legacy_actions(raw_actions, legacy_tx_duration):
+def decode_legacy_actions(raw_actions, legacy_tx_duration, buffer_states):
     raw_actions = raw_actions.astype(jnp.int32)
     action_type = jnp.where(
         raw_actions == Actions.TX.value,
         Actions.TX.value,
         jnp.where(raw_actions == Actions.CS.value, Actions.CS.value, Actions.IDLE.value),
     ).astype(jnp.int32)
+    occupancy = jnp.sum(buffer_states != EMPTY_PACKET_ID, axis=1)
     duration = jnp.where(
         raw_actions == Actions.TX.value,
-        legacy_tx_duration,
+        jnp.clip(occupancy, 1, legacy_tx_duration),
         1,
     ).astype(jnp.int32)
     return action_type, duration
@@ -376,7 +377,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, co
             raw_actions[:n_drl], c.obs_tracker.staged_tx[:n_drl], config.action_space_variant, config.max_duration
         )
         legacy_action_types, legacy_durations = decode_legacy_actions(
-            raw_actions[n_drl:], config.legacy_tx_duration
+            raw_actions[n_drl:], config.legacy_tx_duration, c.buffer_states[n_drl:]
         )
 
         decoded_actions = ActionDecodingResults(
