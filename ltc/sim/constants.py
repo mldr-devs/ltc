@@ -51,3 +51,5 @@ Tx slot duration (s)
 https://ieeexplore.ieee.org/document/8930559
 """
 TAU = 5.484 * 1e-3
+
+TRAFFIC_LEVELS = {'low': 0.1, 'mid': 0.3}

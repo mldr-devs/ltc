@@ -31,11 +31,11 @@ from ltc.baselines import (
     dlma_reward, stateless_q_reward
 )
 from ltc.sim import (
-    InitialStateConf, apply_empty_buffer_constraint, apply_lbt_constraint, cox_traffic,
+    InitialStateConf, aggregate_loc, apply_empty_buffer_constraint, apply_lbt_constraint, cox_traffic,
     get_successful_station_id, hidden_station_observation, normalize_obs, process_output, simulate,
     transmission_outcome
 )
-from ltc.sim.constants import INITIAL_CAPACITY, Actions, Features
+from ltc.sim.constants import INITIAL_CAPACITY, TRAFFIC_LEVELS, Actions, Features
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.scan_states import Carry, Output
 from ltc.utils.plots import plot_all, plot_first
@@ -305,7 +305,7 @@ def setup_args():
     parser.add_argument('--station_change_delta', type=int, default=0, help='Stations to add/remove per interval tick. Negative values remove stations.')
     parser.add_argument('--station_change_start_step', type=int, help='Global step when periodic station changes start. Defaults to interval.')
     parser.add_argument('--station_change_stop_step', type=int, help='Global step when periodic station changes stop.')
-    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom'],help="Traffic model to use: 'constant', 'saturated', 'bursty', or 'custom'.")
+    parser.add_argument('--traffic_type', type=str, default='saturated', choices=['constant', 'saturated', 'bursty', 'custom', *TRAFFIC_LEVELS],help="Traffic model to use: 'constant', 'saturated', 'bursty', 'custom', or a level ('low', 'mid') whose aggregate offered load, the summed per-slot probability of a new frame, is 0.1 or 0.3 for the run's number of stations.")
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf', 'q-aloha', 'eb-aloha', 'fw-aloha', 'tdma', 'idle-sense', 'dos'], help="Agent run by the stations not covered by --n_drl.")
     parser.add_argument('--agent_type', type=str, default='ddqn', choices=['ddqn', 'expected-sarsa', 'sr-jax', 'forester', 'aloha-qtf', 'dlma', 'stateless-q'], help='Agent run by the stations covered by --n_drl.')
     parser.add_argument('--n_slots', type=int, default=5, help='Frame length in slots (used by --agent_type stateless-q).')
@@ -545,6 +545,9 @@ if __name__ == '__main__':
         traffic = cox_traffic(f3dB=0.1, loc=-5.0, scale=5.0, initial_state=InitialStateConf.ZERO)
     elif traffic_type == 'custom':
         traffic = cox_traffic(f3dB=f3dB, loc=loc, scale=scale, initial_state=InitialStateConf.ZERO)
+    elif traffic_type in TRAFFIC_LEVELS:
+        args.loc = aggregate_loc(TRAFFIC_LEVELS[traffic_type], n)
+        traffic = cox_traffic(f3dB=1.0, loc=args.loc, scale=0.0, initial_state=InitialStateConf.ZERO)
     else:
         raise ValueError(f'Unknown traffic type: {traffic_type}')
 

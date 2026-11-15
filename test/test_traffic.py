@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as signal
 
-from ltc.sim.constants import TAU
-from ltc.sim.traffic import _ss_step, cox_traffic
+from ltc.sim.constants import TAU, TRAFFIC_LEVELS
+from ltc.sim.traffic import _ss_step, aggregate_loc, cox_traffic
 
 
 class TrafficTestCase(unittest.TestCase):
@@ -65,6 +65,16 @@ class TrafficTestCase(unittest.TestCase):
         self.assertAlmostEqual(yjax.var(), stats.variance, places=1)
         self.assertAlmostEqual(estimated_acf, stats.acf_lag1, places=2)
         ...
+
+    def test_aggregate_loc(self):
+        for rho in TRAFFIC_LEVELS.values():
+            for n in (5, 40):
+                model = cox_traffic(f3dB=1.0, loc=aggregate_loc(rho, n), scale=0.0)
+                states = jax.vmap(model.init)(jax.random.split(jax.random.key(0), n))
+                sample = lambda s, k: jax.vmap(model.sample)(s, jax.random.split(k, n))
+                _, frames = jax.lax.scan(sample, states, jax.random.split(jax.random.key(1), 200_000))
+                load = n * jnp.mean(frames[1000:] > 0)
+                self.assertAlmostEqual(float(load), rho, delta=0.02 * rho)
 
 
 

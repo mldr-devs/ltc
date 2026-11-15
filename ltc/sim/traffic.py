@@ -49,6 +49,10 @@ class InitialStateConf(Enum):
     NORMAL = 1
 
 
+def aggregate_loc(rho: float, n_stations: int) -> float:
+    return float(np.log(-np.log1p(-rho / n_stations)))
+
+
 def cox_traffic(
     f3dB: float,
     order: int = 1,
