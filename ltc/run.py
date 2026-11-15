@@ -69,8 +69,39 @@ def _sr_eq(args):
 def init_agents(agent, key, n, node_ids=None, force_idle_on_empty_buffer=False):
     keys = jax.random.split(key, n)
     states = jax.vmap(agent.init)(keys) if node_ids is None else jax.vmap(agent.init)(keys, node_ids[:n])
-    step_fn = jax.vmap(partial(agent_step, agent, force_idle_on_empty_buffer=force_idle_on_empty_buffer))
+    step = replay_agent_step if hasattr(states, 'replay_buffer') else agent_step
+    step_fn = jax.vmap(partial(step, agent, force_idle_on_empty_buffer=force_idle_on_empty_buffer))
     return states, step_fn
+
+
+def is_idle(active, terminal, buffer_state, force_idle_on_empty_buffer):
+    idle = jnp.logical_or(~active, terminal)
+    if force_idle_on_empty_buffer:
+        idle = jnp.logical_or(idle, buffer_state == 0)
+    return idle
+
+
+def replay_agent_step(agent, state, key, obs, action, reward, terminal, active, 
+                      aux, buffer_state, force_idle_on_empty_buffer=False):
+    update_key, sample_key = jax.random.split(key)
+    idle = is_idle(active, terminal, buffer_state, force_idle_on_empty_buffer)
+    keep = lambda new, old: jnp.where(idle, old, new)
+    buffer = state.replay_buffer
+    row = lambda x: x[buffer.ptr]
+
+    new_state = agent.update(
+        state.replace(prev_env_state=keep(state.prev_env_state, row(buffer.states))), update_key,
+        keep(obs, row(buffer.next_states)), keep(action, row(buffer.actions)[0]),
+        keep(reward, row(buffer.rewards)[0]), keep(terminal, row(buffer.terminals)[0]),
+    )
+    new_action = jnp.squeeze(agent.sample(new_state, sample_key, obs))
+
+    new_buffer = new_state.replay_buffer.replace(
+        size=keep(new_state.replay_buffer.size, buffer.size),
+        ptr=keep(new_state.replay_buffer.ptr, buffer.ptr),
+    )
+    state = jax.tree.map(keep, new_state.replace(replay_buffer=None), state.replace(replay_buffer=None))
+    return state.replace(replay_buffer=new_buffer), keep(new_action, Actions.IDLE.value)
 
 
 def agent_step(agent, state, key, obs, action, reward, terminal, active, aux, buffer_state,
@@ -87,14 +118,8 @@ def agent_step(agent, state, key, obs, action, reward, terminal, active, aux, bu
     def power_off(state, update_key, sample_key, obs, action, reward, terminal, aux):
         return state, Actions.IDLE.value
 
-    idle = jnp.logical_or(~active, terminal)
-    if force_idle_on_empty_buffer:
-        # ReferenceDeep held a station silent, and froze its agent, whenever it had nothing to
-        # send. Only observable when the buffer can actually run dry, i.e. off saturated traffic.
-        idle = jnp.logical_or(idle, buffer_state == 0)
-
     return jax.lax.cond(
-        idle, power_off, power_on,
+        is_idle(active, terminal, buffer_state, force_idle_on_empty_buffer), power_off, power_on,
         state, update_key, sample_key, obs, action, reward, terminal, aux
     )
 
@@ -549,7 +574,7 @@ if __name__ == '__main__':
         visibility_matrix=visibility_matrix,
         reward_fn=reward_fn,
     )
-    rl_step_fn = jax.jit(rl_step_fn)
+    run_epoch = jax.jit(partial(jax.lax.scan, rl_step_fn), donate_argnums=0)
     carry = Carry(
         drl_states, legacy_states, traffic_states, buffer_states, power_states,
         channel_state, key, obs, actions, rewards, terminals, active
@@ -558,14 +583,19 @@ if __name__ == '__main__':
 
     for epoch in trange(n_epochs):
         global_steps = jnp.arange(epoch * n_steps, (epoch + 1) * n_steps, dtype=jnp.int32)
-        carry, output = jax.lax.scan(rl_step_fn, carry, xs=global_steps)
-        all_outputs.append(output)
+        carry, output = run_epoch(carry, global_steps)
+        all_outputs.append(jax.device_put(output, jax.devices('cpu')[0]))
 
     all_outputs = jax.tree.map(lambda *x: jnp.stack(x), *all_outputs)
     filename = build_history_filename(n_init, n_final, seed, commit_hash)
 
+    if hasattr(drl_states, 'replay_buffer'):
+        drl_states = carry.drl_states.replace(replay_buffer=None)
+    else:
+        drl_states = carry.drl_states
+
     with lz4.frame.open(filename, 'wb') as f:
-        cloudpickle.dump((carry.drl_states, all_outputs, vars(args)), f)
+        cloudpickle.dump((drl_states, all_outputs, vars(args)), f)
 
     if args.save_plots:
         plot_all(filename)
