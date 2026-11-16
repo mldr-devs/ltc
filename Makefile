@@ -18,7 +18,8 @@ OUT       ?= out
 DATA_DIR  := $(OUT)/data
 RUN_DIR   := $(OUT)/runs
 
-CONFIGS   := $(wildcard cfg/*.txt)
+CFG_DIR   ?= cfg
+CONFIGS   := $(wildcard $(CFG_DIR)/*.txt)
 EXPS      := $(notdir $(basename $(CONFIGS)))
 
 HISTORIES     := $(addprefix $(DATA_DIR)/, $(addsuffix .pkl.lz4, $(EXPS)))
@@ -31,6 +32,7 @@ FOREST_RUNS   := $(addprefix $(OUT)/, $(addsuffix .forestrun.pkl.lz4, $(EXPS)))
 SR_RUNS       := $(addprefix $(OUT)/, $(addsuffix .srrun.pkl.lz4, $(EXPS)))
 # Trained teacher vs both distillates, overlaid on shared axes.
 COMPARES      := $(addprefix $(OUT)/compare_, $(addsuffix /summary.csv, $(EXPS)))
+SR_COMPARES   := $(addprefix $(OUT)/compare_sr_, $(addsuffix /summary.csv, $(EXPS)))
 
 # One A4 summary page per ltc.run rollout: the training run and both replays.
 PAGES         := $(addprefix $(OUT)/, $(foreach s,train forestrun srrun, $(addsuffix .$(s).page.pdf, $(EXPS))))
@@ -93,6 +95,10 @@ FOREST_BALANCED  ?=
 # with the decision boundary. See ltc.symbolic.sr.fit_sr.
 SR_BALANCED      ?=
 
+# PySR's Julia needs a newer libstdc++ than the system one numpy/jax load first.
+JULIA_LIBSTDCXX := $(wildcard $(shell python -c 'import sys; print(sys.prefix)')/julia_env/pyjuliapkg/install/lib/julia/libstdc++.so.6)
+$(OUT)/%.split_sr.pkl $(OUT)/%.split_sr.eq.json $(OUT)/%.srrun.pkl.lz4: export LD_PRELOAD := $(JULIA_LIBSTDCXX)
+
 # ltc.run names its history itself (history_<n>_<n_final>_<seed>_<commit>.pkl.lz4) and
 # writes it, plus any --save_plots figures, into the current directory. Every stage
 # therefore gets its own scratch directory -- $(RUN_DIR)/<exp>.<stage>, where the plots
@@ -102,7 +108,7 @@ define run_ltc
 	rm -rf $(RUN_DIR)/$(1).$(2)
 	mkdir -p $(RUN_DIR)/$(1).$(2)
 	cd $(RUN_DIR)/$(1).$(2) && PYTHONPATH=$(CURDIR) python -m ltc.run \
-		@$(CURDIR)/cfg/$(1).txt $(3) $(RUN_FLAGS)
+		@$(abspath $(CFG_DIR))/$(1).txt $(3) $(RUN_FLAGS)
 	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
 endef
 
@@ -118,7 +124,7 @@ define render_page
 		--smooth $(PAGE_SMOOTH) $(if $(PAGE_WINDOW),--window $(PAGE_WINDOW),) $(PAGE_FLAGS)
 endef
 
-.PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare importance report-split clean cleanforestrun cleansrrun
+.PHONY: all train csv split forest sr sr-select distill forest-run sr-run pages compare compare-sr importance report-split clean cleanforestrun cleansrrun
 .PRECIOUS: $(HISTORIES) $(CSV_FILES) $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS) $(SR_PICKS)
 
 all: forest-run sr-run pages compare
@@ -145,6 +151,8 @@ pages: $(PAGES)
 
 compare: $(COMPARES)
 
+compare-sr: $(SR_COMPARES)
+
 importance: $(OUT)/forest_importance.pdf $(OUT)/forest_importance.tex
 
 report-split: $(OUT)/report_split.html
@@ -153,7 +161,7 @@ $(OUT) $(DATA_DIR) $(RUN_DIR):
 	mkdir -p $@
 
 # 1. Training run: one history per config file.
-$(DATA_DIR)/%.pkl.lz4: cfg/%.txt | $(DATA_DIR) $(RUN_DIR)
+$(DATA_DIR)/%.pkl.lz4: $(CFG_DIR)/%.txt | $(DATA_DIR) $(RUN_DIR)
 	$(call run_ltc,$*,train,)
 
 # 2. Flatten the history into the distillation dataset. The labels are the actions
@@ -197,11 +205,11 @@ $(OUT)/%.forestrun.pkl.lz4: $(OUT)/%.split_forest.pkl | $(RUN_DIR)
 # front by fit, which says nothing about whether the decoded expression is a
 # working policy: see the table in ltc.symbolic.sr_select. Skipped when SR_EQ pins
 # an index, since then there is nothing to choose.
-$(OUT)/%.split_sr.eq.json: $(OUT)/%.split_sr.pkl cfg/%.txt ltc/symbolic/sr_select.py
+$(OUT)/%.split_sr.eq.json: $(OUT)/%.split_sr.pkl $(CFG_DIR)/%.txt ltc/symbolic/sr_select.py
 ifeq ($(strip $(SR_EQ)),)
-	python -m ltc.symbolic.sr_select --sr_pkl "$(OUT)/$*.split_sr.pkl" --cfg "cfg/$*.txt" \
+	python -m ltc.symbolic.sr_select --sr_pkl "$(OUT)/$*.split_sr.pkl" --cfg "$(CFG_DIR)/$*.txt" \
 		--output "$@" --n_epochs $(SELECT_EPOCHS) --n_steps $(SELECT_STEPS) \
-		--replay_flags "$(REPLAY_FLAGS)" --work_dir "$(RUN_DIR)/sr_select.$*"
+		--replay_flags="$(REPLAY_FLAGS) $(RUN_FLAGS)" --work_dir "$(RUN_DIR)/sr_select.$*"
 else
 	@echo "SR_EQ=$(SR_EQ) pins the equation; skipping the front replay."
 	@printf '{"index": %s, "pinned": true}\n' "$(SR_EQ)" > "$@"
@@ -246,6 +254,10 @@ $(OUT)/compare_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.forestrun.pkl.lz4 $
 		--trained "$(DATA_DIR)/$*.pkl.lz4" \
 		--forester "$(OUT)/$*.forestrun.pkl.lz4" --sr "$(OUT)/$*.srrun.pkl.lz4" \
 		--output_dir "$(OUT)/compare_$*"
+
+$(OUT)/compare_sr_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.srrun.pkl.lz4 plots_compare_distilled.py | $(OUT)
+	python plots_compare_distilled.py --trained "$(DATA_DIR)/$*.pkl.lz4" --sr "$(OUT)/$*.srrun.pkl.lz4" \
+		--output_dir "$(OUT)/compare_sr_$*"
 
 $(OUT)/report_split.html: $(SPLIT_FILES) $(FOREST_MODELS) $(SR_MODELS)
 	marimo export html ltc/symbolic/report_split.py -o "$@" -f

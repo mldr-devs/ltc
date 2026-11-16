@@ -8,6 +8,7 @@ HISTORY_SUFFIX = ".pkl.lz4"
 def _run_git_command(*args: str) -> str:
     result = subprocess.run(
         ["git", *args],
+        cwd=Path(__file__).parent,
         check=True,
         capture_output=True,
         text=True,
