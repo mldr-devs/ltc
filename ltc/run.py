@@ -4,6 +4,8 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_gemm=false'
 os.environ['JAX_ENABLE_X64'] = 'true'
 
 import argparse
+import json
+import pickle
 from dataclasses import dataclass, replace
 from functools import partial
 
@@ -15,11 +17,23 @@ import lz4.frame
 import optax
 from tqdm import trange
 
-from ltc.agents import AsymmetricExplorationDDQN, DCF, QNetwork, time_uniform_prior
+from ltc.agents import AsymmetricExplorationDDQN, DCF, Forester, QNetwork, SRJaxAgent, time_uniform_prior
 from ltc.sim import InitialStateConf, aggregate_loc, cox_traffic, normalize_obs, process_output, simulate, channel_state_selector, hidden_station_observation
 from ltc.sim.constants import *
 from ltc.utils.history import build_history_filename, ensure_clean_git_worktree, get_short_commit_hash
 from ltc.utils.structs import *
+
+
+def _sr_eq(args):
+    if args.sr_eq is not None:
+        return args.sr_eq
+    sidecar = f"{args.sr_pkl.removesuffix('.pkl')}.eq.json"
+    if not os.path.exists(sidecar):
+        return None
+    with open(sidecar) as f:
+        cap = int(json.load(f)['index'])
+    print(f'SR complexity cap {cap} selected by ltc.symbolic.sr_select ({sidecar})')
+    return cap
 
 
 @dataclass(frozen=True)
@@ -496,7 +510,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, co
         macro_remaining = jnp.where(slot_executing, macro_remaining - 1, macro_remaining)
         terminals = jnp.logical_or(c.terminals, powers < 0)
 
-        if n_drl > 0:
+        if n_drl > 0 and hasattr(c.drl_states, 'params'):
             params = c.drl_states.params['model'] if 'model' in c.drl_states.params else c.drl_states.params
             flat_params, _ = jax.tree.flatten(params)
             flat_params = jax.tree.map(lambda x: x.reshape(n_drl, -1), flat_params)
@@ -537,7 +551,7 @@ def rl_step(drl_step, legacy_step, traffic_step, n, n_drl, visibility_matrix, co
         )
         o = Output(
             legacy_states, obs, raw_actions, rewards, terminals, buffer_states, powers,
-            new_frames, channel_state, active, hist, bin_edges, successful_packets
+            new_frames, channel_state, active, hist, bin_edges, successful_packets, agent_ready_now
         )
         return c, o
 
@@ -571,9 +585,22 @@ if __name__ == '__main__':
     parser.add_argument('--legacy_type', type=str, default='dcf', choices=['dcf'], help='Agent run by the stations not covered by --n_drl.')
     parser.add_argument('--stations_density', type=float, default=1.0, help='Probability that two stations hear each other (hidden stations below 1).')
     parser.add_argument('--phy_error_prob', type=float, default=0.0, help='Probability that a transmitted subframe is lost to a channel error.')
+    parser.add_argument('--agent_type', type=str, default='ddqn', choices=['ddqn', 'sr-jax', 'forester'], help='Agent run by the stations covered by --n_drl.')
+    parser.add_argument('--forest_pkl', type=str, help='Path to the fitted random forest (required by --agent_type forester).')
+    parser.add_argument('--sr_pkl', type=str, help='Path to the fitted symbolic regression model (required by --agent_type sr-jax).')
+    parser.add_argument('--sr_eq', type=int, help='Complexity cap of the SR equations: each output uses its best front equation of at most this complexity. Defaults to the cap ltc.symbolic.sr_select recorded in <sr_pkl without .pkl>.eq.json, else PySR\'s own pick.')
+    parser.add_argument('--stochastic_policy', action=argparse.BooleanOptionalAction, default=True, help='Sample the action from the distilled policy instead of taking its argmax.')
+    parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy.')
     parser.add_argument('--full_history', action='store_true', default=False, help='Store buffer contents, observations, weight histograms and replay buffers in the history.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
+    
+    if args.policy_temperature <= 0:
+        parser.error('--policy_temperature must be positive.')
+    if args.agent_type == 'sr-jax' and args.sr_pkl is None:
+        parser.error('--sr_pkl is required when --agent_type is sr-jax.')
+    if args.agent_type == 'forester' and args.forest_pkl is None:
+        parser.error('--forest_pkl is required when --agent_type is forester.')
 
     if not args.skip_git_check:
         ensure_clean_git_worktree()
@@ -637,7 +664,22 @@ if __name__ == '__main__':
         epsilon_min=0.001,
         tau=0.01
     )
-    drl_step = jax.vmap(partial(ddqn_step, drl))
+    drl_step, post_init = jax.vmap(partial(ddqn_step, drl)), float32_buffers
+
+    if args.agent_type == 'sr-jax':
+        with open(args.sr_pkl, 'rb') as f:
+            sr_model = pickle.load(f)
+        args.sr_eq = _sr_eq(args)
+        drl = SRJaxAgent(
+            sr_model, complexity_cap=args.sr_eq, n_actions=num_actions, n_features=args.window_size * OBS_SIZE,
+            stochastic=args.stochastic_policy, temperature=args.policy_temperature,
+        )
+        drl_step, post_init = jax.vmap(partial(agent_step, drl)), lambda state: state
+    elif args.agent_type == 'forester':
+        import joblib
+        drl = Forester(joblib.load(args.forest_pkl), n_actions=num_actions,
+                       stochastic=args.stochastic_policy, temperature=args.policy_temperature)
+        drl_step, post_init = jax.vmap(partial(agent_step, drl)), lambda state: state
 
     if args.legacy_type == 'dcf':
         legacy = DCF()
@@ -678,7 +720,7 @@ if __name__ == '__main__':
     def init_carry(seed):
         key, drl_key, legacy_key, traffic_key = jax.random.split(jax.random.key(seed), 4)
         return Carry(
-            drl_states=init_agents(drl, drl_key, n_drl, float32_buffers),
+            drl_states=init_agents(drl, drl_key, n_drl, post_init),
             legacy_states=init_agents(legacy, legacy_key, n - n_drl),
             traffic_states=init_traffic(traffic, traffic_key, n),
             packet_seqs=jnp.zeros(n, dtype=jnp.int64),
@@ -730,6 +772,7 @@ if __name__ == '__main__':
         carry, output = run_epoch(carry, visibility_matrix, global_steps)
         
         if not args.full_history:
+            final_observations = output.observations
             output = replace(
                 output, observations=None, weights_histogram=None, weights_bin_edges=None,
                 buffer_states=jnp.sum(output.buffer_states != EMPTY_PACKET_ID, axis=-1, dtype=jnp.int32),
@@ -738,11 +781,12 @@ if __name__ == '__main__':
         all_outputs.append(jax.device_get(output))
 
     all_outputs = jax.tree.map(lambda *x: np.stack(x), *all_outputs)
+    if not args.full_history:
+        all_outputs = replace(all_outputs, observations=np.asarray(final_observations)[None])
 
-    if args.full_history:
-        drl_states = carry.drl_states
-    else:
-        drl_states = carry.drl_states.replace(replay_buffer=None)
+    drl_states = carry.drl_states
+    if not args.full_history and hasattr(drl_states, 'replay_buffer'):
+        drl_states = drl_states.replace(replay_buffer=None)
 
     for i, seed in enumerate(seeds.tolist()):
         filename = build_history_filename(n_init, n_final, seed, commit_hash, n_drl=n_drl)

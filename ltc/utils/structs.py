@@ -100,3 +100,4 @@ class Output:
     weights_histogram: jax.Array
     weights_bin_edges: jax.Array
     successful_packets: jax.Array
+    decisions: jax.Array
