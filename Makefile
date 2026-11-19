@@ -108,8 +108,8 @@ $(OUT)/%.srrun.pkl.lz4: $(OUT)/%.split_sr.pkl $(OUT)/%.split_sr.eq.json | $(RUN_
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) $(REPLAY_FLAGS))
 	$(call check_replay)
 
-$(OUT)/compare_sr_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.srrun.pkl.lz4 plots_compare_distilled.py | $(OUT)
-	python plots_compare_distilled.py --trained "$(DATA_DIR)/$*.pkl.lz4" --sr "$(OUT)/$*.srrun.pkl.lz4" \
+$(OUT)/compare_sr_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.srrun.pkl.lz4 ltc/symbolic/plots_compare_distilled.py | $(OUT)
+	python -m ltc.symbolic.plots_compare_distilled --trained "$(DATA_DIR)/$*.pkl.lz4" --sr "$(OUT)/$*.srrun.pkl.lz4" \
 		--output_dir "$(OUT)/compare_sr_$*"
 
 FOREST_ESTIMATORS ?= 50
@@ -126,8 +126,8 @@ $(OUT)/%.forestrun.pkl.lz4: $(OUT)/%.split_forest.pkl | $(RUN_DIR)
 		--n_epochs $(REPLAY_EPOCHS) --n_steps $(REPLAY_STEPS) $(REPLAY_FLAGS))
 	$(call check_replay)
 
-$(OUT)/compare_forest_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.forestrun.pkl.lz4 plots_compare_distilled.py | $(OUT)
-	python plots_compare_distilled.py --trained "$(DATA_DIR)/$*.pkl.lz4" --forester "$(OUT)/$*.forestrun.pkl.lz4" \
+$(OUT)/compare_forest_%/summary.csv: $(DATA_DIR)/%.pkl.lz4 $(OUT)/%.forestrun.pkl.lz4 ltc/symbolic/plots_compare_distilled.py | $(OUT)
+	python -m ltc.symbolic.plots_compare_distilled --trained "$(DATA_DIR)/$*.pkl.lz4" --forester "$(OUT)/$*.forestrun.pkl.lz4" \
 		$(if $(wildcard $(OUT)/$*.srrun.pkl.lz4),--sr "$(OUT)/$*.srrun.pkl.lz4",) --output_dir "$(OUT)/compare_forest_$*"
 
 clean:
