@@ -7,7 +7,7 @@ import numpy as np
 from chex import dataclass, PRNGKey, Array
 from reinforced_lib.agents import BaseAgent, AgentState
 
-from ltc.symbolic.util import SimplexCode
+from ltc.symbolic.util import SimplexCode, chain_probs
 
 
 def fronts(sr_model) -> list:
@@ -58,6 +58,7 @@ class SRJaxAgent(BaseAgent):
         self.update = jax.jit(self.update)
         self.sample = jax.jit(partial(
             self.sample, callables=callables, simplex=simplex, stochastic=stochastic, temperature=temperature,
+            logit=getattr(sr_model, 'ltc_logit', False),
         ))
 
     @staticmethod
@@ -71,11 +72,12 @@ class SRJaxAgent(BaseAgent):
     @staticmethod
     def sample(
         state: SRJaxState, key: PRNGKey, env_state: Array, callables, simplex: SimplexCode,
-        stochastic: bool, temperature: float,
+        stochastic: bool, temperature: float, logit: bool,
     ) -> Array:
         x = env_state.reshape(1, -1).astype(jnp.float32)
         codes = jnp.stack([f(x, p).reshape(()) for f, p in zip(callables, state.parameters)])[None]
+        probs = chain_probs(codes[0]) if logit else simplex.probs(codes)[0]
         if stochastic:
-            logits = jnp.log(jnp.clip(simplex.probs(codes)[0], 1e-12)) / temperature
+            logits = jnp.log(jnp.clip(probs, 1e-12)) / temperature
             return jax.random.categorical(key, logits)
-        return simplex.decode(codes)[0]
+        return jnp.argmax(probs) if logit else simplex.decode(codes)[0]

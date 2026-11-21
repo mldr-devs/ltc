@@ -592,6 +592,7 @@ if __name__ == '__main__':
     parser.add_argument('--stochastic_policy', action=argparse.BooleanOptionalAction, default=True, help='Sample the action from the distilled policy instead of taking its argmax.')
     parser.add_argument('--policy_temperature', type=float, default=1.0, help='Temperature of --stochastic_policy.')
     parser.add_argument('--full_history', action='store_true', default=False, help='Store buffer contents, observations, weight histograms and replay buffers in the history.')
+    parser.add_argument('--keep_obs_epochs', type=int, default=1, help='Without --full_history, keep the observations of the last K epochs.')
     parser.add_argument('--skip_git_check', action='store_true', default=False, help='Skip clean git worktree check.')
     args = parser.parse_args()
     
@@ -765,14 +766,15 @@ if __name__ == '__main__':
     carry, visibility_matrix = jax.vmap(init_carry)(seeds), jax.vmap(init_visibility)(seeds)
     run_epoch = jax.jit(jax.vmap(run_epoch, in_axes=(0, 0, None)), donate_argnums=0)
 
-    all_outputs = []
+    all_outputs, kept_observations = [], []
 
     for epoch in trange(args.n_epochs):
         global_steps = jnp.arange(epoch * args.n_steps, (epoch + 1) * args.n_steps, dtype=jnp.int32)
         carry, output = run_epoch(carry, visibility_matrix, global_steps)
         
         if not args.full_history:
-            final_observations = output.observations
+            if epoch >= args.n_epochs - args.keep_obs_epochs:
+                kept_observations.append(jax.device_get(output.observations))
             output = replace(
                 output, observations=None, weights_histogram=None, weights_bin_edges=None,
                 buffer_states=jnp.sum(output.buffer_states != EMPTY_PACKET_ID, axis=-1, dtype=jnp.int32),
@@ -782,7 +784,7 @@ if __name__ == '__main__':
 
     all_outputs = jax.tree.map(lambda *x: np.stack(x), *all_outputs)
     if not args.full_history:
-        all_outputs = replace(all_outputs, observations=np.asarray(final_observations)[None])
+        all_outputs = replace(all_outputs, observations=np.stack(kept_observations))
 
     drl_states = carry.drl_states
     if not args.full_history and hasattr(drl_states, 'replay_buffer'):

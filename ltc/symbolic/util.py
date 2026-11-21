@@ -97,6 +97,13 @@ def history_reshape(observations: jax.Array) -> jax.Array:
     return observations.transpose(1, 0, 2, 3).reshape(n_agents * n_steps, -1)
 
 
+def chain_probs(logits: jax.Array) -> jax.Array:
+    """Class probabilities from the logits of p(class j | not an earlier class)."""
+    p = jax.nn.sigmoid(logits)
+    remaining = jnp.cumprod(1 - p)
+    return jnp.concatenate([p * jnp.concatenate([jnp.ones(1), remaining[:-1]]), remaining[-1:]])
+
+
 if __name__ == "__main__":
     T = 5
     sc = SimplexCode(T=T)
