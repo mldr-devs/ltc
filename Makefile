@@ -33,10 +33,10 @@ SELECT_STEPS  ?= $(REPLAY_STEPS)
 SR_EQ         ?=
 REPLAY_FLAGS  ?= --stochastic_policy
 
-CSV_EPOCHS ?= 1
+CSV_EPOCHS ?= 10
 
-SR_ITERATIONS    ?= 100
-SR_POPULATIONS   ?= 10
+SR_ITERATIONS    ?= 400
+SR_POPULATIONS   ?= 30
 SR_BALANCED      ?=
 
 export XLA_PYTHON_CLIENT_PREALLOCATE ?= false
@@ -49,7 +49,7 @@ define run_ltc
 	rm -rf $(RUN_DIR)/$(1).$(2)
 	mkdir -p $(RUN_DIR)/$(1).$(2)
 	cd $(RUN_DIR)/$(1).$(2) && $(if $(and $(TRAIN_LOCK),$(filter train,$(2))),flock $(TRAIN_LOCK),) env PYTHONPATH=$(CURDIR) python -m ltc.run \
-		@$(abspath $(CFG_DIR))/$(1).txt $(3) $(RUN_FLAGS)
+		$$(cat $(abspath $(CFG_DIR))/$(1).txt) $(3) $(RUN_FLAGS)
 	mv $(RUN_DIR)/$(1).$(2)/history_*.pkl.lz4 "$@"
 endef
 
@@ -80,7 +80,7 @@ $(OUT) $(DATA_DIR) $(RUN_DIR):
 	mkdir -p $@
 
 $(DATA_DIR)/%.pkl.lz4: $(CFG_DIR)/%.txt | $(DATA_DIR) $(RUN_DIR)
-	$(call run_ltc,$*,train,)
+	$(call run_ltc,$*,train,--keep_obs_epochs $(CSV_EPOCHS))
 
 $(OUT)/%.csv: $(DATA_DIR)/%.pkl.lz4 ltc/symbolic/history2csv.py | $(OUT)
 	python -m ltc.symbolic.history2csv --file "$<" --output "$@" --epochs $(CSV_EPOCHS)
@@ -91,7 +91,7 @@ $(OUT)/%.split.json: $(OUT)/%.csv ltc/symbolic/split.py | $(OUT)
 $(OUT)/%.split_sr.pkl: $(OUT)/%.csv $(OUT)/%.split.json ltc/symbolic/sr_split.py ltc/symbolic/sr.py
 	for i in 1 2 3; do python -m ltc.symbolic.sr_split --file "$(OUT)/$*.csv" --split "$(OUT)/$*.split.json" \
 		--output "$(OUT)/$*" --pysr_output_dir $(OUT)/output_split \
-		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) $(SR_BALANCED) && break; [ $$i = 3 ] && exit 1; done
+		--n_iterations $(SR_ITERATIONS) --n_populations $(SR_POPULATIONS) --logit $(SR_BALANCED) && break; [ $$i = 3 ] && exit 1; done
 
 $(OUT)/%.split_sr.eq.json: $(OUT)/%.split_sr.pkl $(CFG_DIR)/%.txt ltc/symbolic/sr_select.py
 ifeq ($(strip $(SR_EQ)),)

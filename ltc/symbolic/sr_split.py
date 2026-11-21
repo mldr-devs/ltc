@@ -49,6 +49,12 @@ if __name__ == "__main__":
         help="Class-balance the sample weights. Off by default; see ltc.symbolic.sr.fit_sr "
         "for why the unweighted fit is what the simplex decoder needs.",
     )
+    parser.add_argument(
+        "--logit",
+        action="store_true",
+        default=False,
+        help="Fit the signs of the simplex code with the logistic loss; decoded by ltc.symbolic.util.chain_probs.",
+    )
     args = parser.parse_args()
 
     df = pd.read_csv(args.file)
@@ -63,7 +69,9 @@ if __name__ == "__main__":
         n_populations=args.n_populations,
         output_directory=args.pysr_output_dir,
         balanced=args.balanced,
+        logit=args.logit,
     )
+    sr_model.ltc_logit = args.logit
 
     sr_path = f"{out_prefix}.split_sr.pkl"
     with open(sr_path, "wb") as f:

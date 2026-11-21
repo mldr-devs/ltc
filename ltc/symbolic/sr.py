@@ -15,6 +15,7 @@ def fit_sr(
     n_populations: int = 10,
     output_directory: str | None = None,
     balanced: bool = False,
+    logit: bool = False,
 ) -> PySRRegressor:
     """Fit one symbolic expression against the simplex-coded action.
 
@@ -39,6 +40,9 @@ def fit_sr(
     simplex_code = label_codes or SimplexCode(T=2) # Assuming binary actions; adjust T if more actions
     y = simplex_code.encode(yi)
 
+    if logit:
+        y = np.sign(np.asarray(y)).astype(np.float32)
+
     if balanced:
         classes, counts = np.unique(yi, return_counts=True)
         class_weight = {c: len(yi) / (len(classes) * n) for c, n in zip(classes, counts)}
@@ -52,7 +56,7 @@ def fit_sr(
         binary_operators=["+", "*", "/", "-"],
         unary_operators=["exp"],
         constraints={"exp": 3},
-        # elementwise_loss="LogitMarginLoss()",
+        **({"elementwise_loss": "LogitMarginLoss()"} if logit else {}),
         temp_equation_file=output_directory is None,
         turbo=False,
         output_directory=output_directory,

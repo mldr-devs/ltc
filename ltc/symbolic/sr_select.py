@@ -142,8 +142,8 @@ if __name__ == "__main__":
     with open(args.sr_pkl, "rb") as f:
         sr_model = pickle.load(f)
 
-    # ltc.run expands @file itself, so the cfg needs no parsing here.
-    cfg_flags = [f"@{os.path.abspath(args.cfg)}"]
+    with open(args.cfg) as f:
+        cfg_flags = f.read().split()
     replay_flags = [
         *args.replay_flags.split(),
         "--n_epochs", str(args.n_epochs),
